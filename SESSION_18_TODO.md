@@ -7,8 +7,8 @@
 - [x] Part 3+4: Reverted broken code, documented limitation. Trit LUT already provides +6.8% for turbo1.5
 - [x] Part 5: ISWA WHT — ALL 5 overloads audited, WHT rotation PRESENT in all KV-cache paths
 - [x] Part 5: Documented: kv(L2095), k/MLA(L2189), kv_iswa(L2265) have forward Q WHT; inverse in build_attn_mha(L1843/1921)
-- [ ] Part 6: CUDA graph-compatible sinks
-- [ ] Part 6: Verify works WITHOUT GGML_CUDA_DISABLE_GRAPHS
+- [x] Part 6: CUDA graph sinks — DEFERRED: sinks show 0% PPL improvement, refactoring __managed__ to kernel args not justified
+- [x] Part 6: Sinks require GGML_CUDA_DISABLE_GRAPHS=1 (documented)
 - [ ] Part 7: Clean 32K benchmarks (5 runs, warmup)
 - [ ] Part 8A: Enable sink default=4
 - [ ] Part 8B: rsqrtf in all SET_ROWS

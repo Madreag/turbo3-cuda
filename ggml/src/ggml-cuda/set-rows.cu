@@ -309,8 +309,8 @@ static __global__ void k_set_rows_turbo3(
         s_norm_sq = total;
     }
     __syncthreads();
-    const float grp_norm  = sqrtf(s_norm_sq);
-    const float inv_norm  = (grp_norm > 1e-10f) ? 1.0f / grp_norm : 0.0f;
+    const float inv_norm  = (s_norm_sq > 1e-20f) ? rsqrtf(s_norm_sq) : 0.0f;
+    const float grp_norm  = s_norm_sq * inv_norm;
 
     // ---- Step 3: Normalize ----
     x[j] *= inv_norm;
@@ -390,8 +390,7 @@ static __global__ void k_set_rows_turbo3(
         s_recon_sq = total;
     }
     __syncthreads();
-    const float recon_norm     = sqrtf(s_recon_sq);
-    const float corrected_norm = (recon_norm > 1e-10f) ? grp_norm / recon_norm : grp_norm;
+    const float corrected_norm = (s_recon_sq > 1e-20f) ? grp_norm * rsqrtf(s_recon_sq) : grp_norm;
 
     // ---- Step 8: Write corrected norm (one thread per turbo3 sub-block) ----
     if (lane == 0) blk->norm = __float2half(corrected_norm);
@@ -474,8 +473,8 @@ static __global__ void k_set_rows_turbo3_tail(
         s_norm_sq = total;
     }
     __syncthreads();
-    const float grp_norm = sqrtf(s_norm_sq);
-    const float inv_norm = (grp_norm > 1e-10f) ? 1.0f / grp_norm : 0.0f;
+    const float inv_norm = (s_norm_sq > 1e-20f) ? rsqrtf(s_norm_sq) : 0.0f;
+    const float grp_norm = s_norm_sq * inv_norm;
 
     // ---- Normalize (no WHT!) ----
     const float rv = val * inv_norm;
@@ -515,8 +514,7 @@ static __global__ void k_set_rows_turbo3_tail(
         s_recon_sq = total;
     }
     __syncthreads();
-    const float recon_norm     = sqrtf(s_recon_sq);
-    const float corrected_norm = (recon_norm > 1e-10f) ? grp_norm / recon_norm : grp_norm;
+    const float corrected_norm = (s_recon_sq > 1e-20f) ? grp_norm * rsqrtf(s_recon_sq) : grp_norm;
 
     if (lane == 0) blk->norm = __float2half(corrected_norm);
 
@@ -681,8 +679,8 @@ static __global__ void k_set_rows_turbo2(
         s_norm_sq = total;
     }
     __syncthreads();
-    const float grp_norm  = sqrtf(s_norm_sq);
-    const float inv_norm  = (grp_norm > 1e-10f) ? 1.0f / grp_norm : 0.0f;
+    const float inv_norm  = (s_norm_sq > 1e-20f) ? rsqrtf(s_norm_sq) : 0.0f;
+    const float grp_norm  = s_norm_sq * inv_norm;
 
     // ---- Step 3: Normalize ----
     x[j] *= inv_norm;
@@ -754,8 +752,7 @@ static __global__ void k_set_rows_turbo2(
         s_recon_sq = total;
     }
     __syncthreads();
-    const float recon_norm     = sqrtf(s_recon_sq);
-    const float corrected_norm = (recon_norm > 1e-10f) ? grp_norm / recon_norm : grp_norm;
+    const float corrected_norm = (s_recon_sq > 1e-20f) ? grp_norm * rsqrtf(s_recon_sq) : grp_norm;
 
     // ---- Step 8: Write corrected norm ----
     if (lane == 0) blk->norm = __float2half(corrected_norm);
@@ -829,8 +826,8 @@ static __global__ void k_set_rows_turbo2_tail(
         s_norm_sq = total;
     }
     __syncthreads();
-    const float grp_norm = sqrtf(s_norm_sq);
-    const float inv_norm = (grp_norm > 1e-10f) ? 1.0f / grp_norm : 0.0f;
+    const float inv_norm = (s_norm_sq > 1e-20f) ? rsqrtf(s_norm_sq) : 0.0f;
+    const float grp_norm = s_norm_sq * inv_norm;
 
     // ---- Normalize (no WHT!) ----
     const float rv = val * inv_norm;
@@ -865,8 +862,7 @@ static __global__ void k_set_rows_turbo2_tail(
         s_recon_sq = total;
     }
     __syncthreads();
-    const float recon_norm     = sqrtf(s_recon_sq);
-    const float corrected_norm = (recon_norm > 1e-10f) ? grp_norm / recon_norm : grp_norm;
+    const float corrected_norm = (s_recon_sq > 1e-20f) ? grp_norm * rsqrtf(s_recon_sq) : grp_norm;
 
     if (lane == 0) blk->norm = __float2half(corrected_norm);
 
@@ -1003,8 +999,8 @@ static __global__ void k_set_rows_turbo4(
         s_norm_sq = total;
     }
     __syncthreads();
-    const float grp_norm = sqrtf(s_norm_sq);
-    const float inv_norm = (grp_norm > 1e-10f) ? 1.0f / grp_norm : 0.0f;
+    const float inv_norm = (s_norm_sq > 1e-20f) ? rsqrtf(s_norm_sq) : 0.0f;
+    const float grp_norm = s_norm_sq * inv_norm;
 
     // ---- Step 3: Normalize ----
     x[j] *= inv_norm;
@@ -1052,8 +1048,7 @@ static __global__ void k_set_rows_turbo4(
         s_recon_sq = total;
     }
     __syncthreads();
-    const float recon_norm     = sqrtf(s_recon_sq);
-    const float corrected_norm = (recon_norm > 1e-10f) ? grp_norm / recon_norm : grp_norm;
+    const float corrected_norm = (s_recon_sq > 1e-20f) ? grp_norm * rsqrtf(s_recon_sq) : grp_norm;
 
     // ---- Step 8: Write norm (thread 0 only) ----
     if (j == 0) {
@@ -1191,8 +1186,8 @@ static __global__ void k_set_rows_turbo1_5(
         s_norm_sq = total;
     }
     __syncthreads();
-    const float grp_norm  = sqrtf(s_norm_sq);
-    const float inv_norm  = (grp_norm > 1e-10f) ? 1.0f / grp_norm : 0.0f;
+    const float inv_norm  = (s_norm_sq > 1e-20f) ? rsqrtf(s_norm_sq) : 0.0f;
+    const float grp_norm  = s_norm_sq * inv_norm;
 
     // ---- Step 3: Normalize ----
     x[j] *= inv_norm;
@@ -1277,8 +1272,7 @@ static __global__ void k_set_rows_turbo1_5(
         s_recon_sq = total;
     }
     __syncthreads();
-    const float recon_norm     = sqrtf(s_recon_sq);
-    const float corrected_norm = (recon_norm > 1e-10f) ? grp_norm / recon_norm : grp_norm;
+    const float corrected_norm = (s_recon_sq > 1e-20f) ? grp_norm * rsqrtf(s_recon_sq) : grp_norm;
 
     // ---- Step 8: Write corrected norm (one thread per turbo1.5 sub-block) ----
     if (lane == 0) blk->norm = __float2half(corrected_norm);
@@ -1352,8 +1346,8 @@ static __global__ void k_set_rows_turbo1_5_tail(
         s_norm_sq = total;
     }
     __syncthreads();
-    const float grp_norm = sqrtf(s_norm_sq);
-    const float inv_norm = (grp_norm > 1e-10f) ? 1.0f / grp_norm : 0.0f;
+    const float inv_norm = (s_norm_sq > 1e-20f) ? rsqrtf(s_norm_sq) : 0.0f;
+    const float grp_norm = s_norm_sq * inv_norm;
 
     // ---- Normalize (no WHT!) ----
     const float rv = val * inv_norm;
@@ -1397,8 +1391,7 @@ static __global__ void k_set_rows_turbo1_5_tail(
         s_recon_sq = total;
     }
     __syncthreads();
-    const float recon_norm     = sqrtf(s_recon_sq);
-    const float corrected_norm = (recon_norm > 1e-10f) ? grp_norm / recon_norm : grp_norm;
+    const float corrected_norm = (s_recon_sq > 1e-20f) ? grp_norm * rsqrtf(s_recon_sq) : grp_norm;
 
     if (lane == 0) blk->norm = __float2half(corrected_norm);
 

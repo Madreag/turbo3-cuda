@@ -139,8 +139,8 @@ static __global__ void k_turbo_sink_capture(
         s_norm_sq = total;
     }
     __syncthreads();
-    const float grp_norm = sqrtf(s_norm_sq);
-    const float inv_norm = (grp_norm > 1e-10f) ? 1.0f / grp_norm : 0.0f;
+    const float inv_norm = (s_norm_sq > 1e-20f) ? rsqrtf(s_norm_sq) : 0.0f;
+    const float grp_norm = s_norm_sq * inv_norm;
 
     x[j] *= inv_norm;
     __syncthreads();
