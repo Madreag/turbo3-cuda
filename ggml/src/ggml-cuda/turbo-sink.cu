@@ -61,6 +61,18 @@ half * turbo_sink_get_V_buf(void * tensor_data, int64_t ne0) {
     return sink_get_or_alloc(g_sink_V_bufs, tensor_data, ne0, ss);
 }
 
+half * turbo_sink_lookup_buf(void * tensor_data, int64_t * out_ne0) {
+    const int ss = turbo_sink_size();
+    if (ss <= 0) return nullptr;
+    std::lock_guard<std::mutex> lock(g_sink_mutex);
+    auto it = g_sink_K_bufs.find(tensor_data);
+    if (it != g_sink_K_bufs.end() && it->second.buf) {
+        if (out_ne0) *out_ne0 = it->second.ne0;
+        return it->second.buf;
+    }
+    return nullptr;
+}
+
 // ─── Capture kernel: WHT-rotate + store fp16 for sink positions ───────────────
 
 template <typename idx_t, int GROUP_SIZE>

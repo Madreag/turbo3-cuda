@@ -3,8 +3,10 @@
 
 // Per-TU sink state — in fattn-vec.cuh so kernel and host code share the same TU copy.
 static __managed__ const half * d_fattn_sink_K_buf = nullptr;
+static __managed__ const half * d_fattn_sink_V_buf = nullptr;
 static __managed__ int          d_fattn_sink_n     = 0;
 static __managed__ int64_t      d_fattn_sink_ne0   = 0;
+static __managed__ int64_t      d_fattn_sink_V_ne0 = 0;
 
 static int ggml_cuda_fattn_vec_get_nthreads_host(const int cc) {
     return 128;
@@ -306,7 +308,8 @@ static __global__ void flash_attn_ext_vec(
                     // turbo3 with LUT: check sink first, then use LUT
                     const int kv_pos = k_VKQ_0 + i_KQ;
                     if (d_fattn_sink_n > 0 && kv_pos < d_fattn_sink_n && d_fattn_sink_K_buf != nullptr) {
-                        const char * sink_K = (const char *)(d_fattn_sink_K_buf + kv_pos * d_fattn_sink_ne0);
+                        const int kv_head = head / gqa_ratio;
+                        const char * sink_K = (const char *)(d_fattn_sink_K_buf + kv_pos * d_fattn_sink_ne0 + kv_head * D);
                         sum = vec_dot_fattn_vec_KQ_f16<D, nthreads_KQ>(sink_K, Q_reg[j], Q_i32[j], Q_ds[j]);
                     } else {
                         // LUT attention: precomputed Q×centroid table eliminates one multiply
@@ -336,7 +339,8 @@ static __global__ void flash_attn_ext_vec(
                     // turbo2 with sink check
                     const int kv_pos = k_VKQ_0 + i_KQ;
                     if (d_fattn_sink_n > 0 && kv_pos < d_fattn_sink_n && d_fattn_sink_K_buf != nullptr) {
-                        const char * sink_K = (const char *)(d_fattn_sink_K_buf + kv_pos * d_fattn_sink_ne0);
+                        const int kv_head = head / gqa_ratio;
+                        const char * sink_K = (const char *)(d_fattn_sink_K_buf + kv_pos * d_fattn_sink_ne0 + kv_head * D);
                         sum = vec_dot_fattn_vec_KQ_f16<D, nthreads_KQ>(sink_K, Q_reg[j], Q_i32[j], Q_ds[j]);
                     } else {
                         sum = vec_dot_KQ(K + i_KQ*nb11, Q_reg[j], Q_i32[j], Q_ds[j]);
@@ -398,6 +402,10 @@ static __global__ void flash_attn_ext_vec(
         for (int k0 = 0; k0 < WARP_SIZE; k0 += V_cols_per_iter) {
             const int k = threadIdx.y*WARP_SIZE + k0 + (nthreads_V == WARP_SIZE ? 0 : threadIdx.x / nthreads_V);
 
+            // V sink: for sink positions, use fp16 from sink buffer instead of turbo dequant
+            constexpr bool V_has_sink = (type_V == GGML_TYPE_TURBO3_0 || type_V == GGML_TYPE_TURBO2_0);
+            const bool use_v_sink = V_has_sink && d_fattn_sink_n > 0 && (k_VKQ_0 + k) < d_fattn_sink_n && d_fattn_sink_V_buf != nullptr;
+
 #ifdef V_DOT2_F32_F16_AVAILABLE
             half2 KQ_k[ncols];
 #pragma unroll
@@ -418,17 +426,21 @@ static __global__ void flash_attn_ext_vec(
 #pragma unroll
             for (int i_VKQ_0 = 0; i_VKQ_0 < D/2; i_VKQ_0 += nthreads_V*V_rows_per_thread/2) {
                 half2 tmp[V_rows_per_thread/2];
+                const int64_t v_offset = 2*i_VKQ_0 + (nthreads_V == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads_V)*V_rows_per_thread;
                 if constexpr (type_V == GGML_TYPE_BF16) {
                     float2 tmp_f[V_rows_per_thread/2];
-                    dequantize_V(V + k*nb21, tmp_f,
-                        2*i_VKQ_0 + (nthreads_V == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads_V)*V_rows_per_thread);
+                    dequantize_V(V + k*nb21, tmp_f, v_offset);
 #pragma unroll
                     for (int i_VKQ_1 = 0; i_VKQ_1 < V_rows_per_thread/2; ++i_VKQ_1) {
                         tmp[i_VKQ_1] = __float22half2_rn(tmp_f[i_VKQ_1]);
                     }
+                } else if (use_v_sink) {
+                    const int kv_head = head / gqa_ratio;
+                    dequantize_V_f16<half, V_rows_per_thread>(
+                        (const void*)(d_fattn_sink_V_buf + (k_VKQ_0 + k) * d_fattn_sink_V_ne0 + kv_head * D),
+                        tmp, v_offset);
                 } else {
-                    dequantize_V(V + k*nb21, tmp,
-                        2*i_VKQ_0 + (nthreads_V == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads_V)*V_rows_per_thread);
+                    dequantize_V(V + k*nb21, tmp, v_offset);
                 }
 #pragma unroll
                 for (int i_VKQ_1 = 0; i_VKQ_1 < V_rows_per_thread/2; ++i_VKQ_1) {
@@ -458,8 +470,15 @@ static __global__ void flash_attn_ext_vec(
 #pragma unroll
             for (int i_VKQ_0 = 0; i_VKQ_0 < D/2; i_VKQ_0 += nthreads_V*V_rows_per_thread/2) {
                 float2 tmp[V_rows_per_thread/2];
-                dequantize_V(V + k*nb21, tmp,
-                    2*i_VKQ_0 + (nthreads_V == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads_V)*V_rows_per_thread);
+                const int64_t v_offset = 2*i_VKQ_0 + (nthreads_V == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads_V)*V_rows_per_thread;
+                if (use_v_sink) {
+                    const int kv_head = head / gqa_ratio;
+                    dequantize_V_f16<float, V_rows_per_thread>(
+                        (const void*)(d_fattn_sink_V_buf + (k_VKQ_0 + k) * d_fattn_sink_V_ne0 + kv_head * D),
+                        tmp, v_offset);
+                } else {
+                    dequantize_V(V + k*nb21, tmp, v_offset);
+                }
 #pragma unroll
                 for (int i_VKQ_1 = 0; i_VKQ_1 < V_rows_per_thread/2; ++i_VKQ_1) {
 #pragma unroll
@@ -630,15 +649,26 @@ void ggml_cuda_flash_attn_ext_vec_case_impl(ggml_backend_cuda_context & ctx, ggm
     // Turbo attention sinks: set managed memory state before VEC kernel launch.
     // Uses __managed__ variables (unified memory) so host writes are visible to device.
     // Requires GGML_CUDA_DISABLE_GRAPHS=1 (managed memory writes break graph capture).
-    if constexpr (type_K == GGML_TYPE_TURBO3_0 || type_K == GGML_TYPE_TURBO2_0) {
+    constexpr bool K_is_turbo_sink = (type_K == GGML_TYPE_TURBO3_0 || type_K == GGML_TYPE_TURBO2_0);
+    constexpr bool V_is_turbo_sink = (type_V == GGML_TYPE_TURBO3_0 || type_V == GGML_TYPE_TURBO2_0);
+    if constexpr (K_is_turbo_sink || V_is_turbo_sink) {
         const int ss = turbo_sink_size();
         if (ss > 0) {
-            const ggml_tensor * K = dst->src[1];
             // Sync to ensure any previous kernel using managed memory is done
             CUDA_CHECK(cudaStreamSynchronize(ctx.stream()));
-            d_fattn_sink_K_buf = turbo_sink_get_buf((void *)K->data, K->ne[0]);
+            if constexpr (K_is_turbo_sink) {
+                const ggml_tensor * K = dst->src[1];
+                int64_t k_ne0_full = 0;
+                d_fattn_sink_K_buf = turbo_sink_lookup_buf((void *)K->data, &k_ne0_full);
+                d_fattn_sink_ne0 = k_ne0_full;
+            }
+            if constexpr (V_is_turbo_sink) {
+                const ggml_tensor * V = dst->src[2];
+                int64_t v_ne0_full = 0;
+                d_fattn_sink_V_buf = turbo_sink_lookup_buf((void *)V->data, &v_ne0_full);
+                d_fattn_sink_V_ne0 = v_ne0_full;
+            }
             d_fattn_sink_n = ss;
-            d_fattn_sink_ne0 = K->ne[0];
         }
     }
 

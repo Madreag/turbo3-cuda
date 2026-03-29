@@ -1,0 +1,22 @@
+# Session 18 TODO
+- [ ] Part 1: V attention sinks (K+V pair)
+- [ ] Part 1: Verify PPL improvement (-1.9% target)
+- [ ] Part 2: Trit LUT (5×256 constant memory)
+- [ ] Part 2: Verify turbo1.5 speedup at 32K
+- [ ] Part 3: LUT for turbo4 (16 centroids)
+- [ ] Part 3: Verify turbo4 speedup
+- [ ] Part 4: LUT for turbo1.5 (3 centroids)
+- [ ] Part 4: Verify turbo1.5 speedup
+- [ ] Part 5: ISWA WHT — FULL investigation (every overload)
+- [ ] Part 5: Document findings for each build_attn overload
+- [ ] Part 6: CUDA graph-compatible sinks
+- [ ] Part 6: Verify works WITHOUT GGML_CUDA_DISABLE_GRAPHS
+- [ ] Part 7: Clean 32K benchmarks (5 runs, warmup)
+- [ ] Part 8A: Enable sink default=4
+- [ ] Part 8B: rsqrtf in all SET_ROWS
+- [ ] Part 8C: MoE model test
+- [ ] Part 9: Final benchmark suite (ALL types, ALL depths)
+- [ ] Part 9: Push to GitHub
+- [ ] BONUS: Look for more optimizations
+- [ ] BONUS: Profile again, find new bottlenecks
+- [ ] BONUS: Additional testing / edge cases

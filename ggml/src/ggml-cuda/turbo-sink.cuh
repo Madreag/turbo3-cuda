@@ -7,6 +7,7 @@ int turbo_sink_size();
 
 half * turbo_sink_get_buf(void * tensor_data, int64_t ne0);
 half * turbo_sink_get_V_buf(void * tensor_data, int64_t ne0);
+half * turbo_sink_lookup_buf(void * tensor_data, int64_t * out_ne0);
 
 template<typename idx_t>
 void turbo_sink_capture_turbo3_impl(
