@@ -20,3 +20,4 @@
 - [x] BONUS: Extended context test: 204K (pending), 128K (turbo3=14.55, turbo1.5=15.62)
 - [x] BONUS: LA mode 3 PPL: 6.8196 (vs uniform 6.8522 — slight improvement)
 - [x] BONUS: 8K benchmark: q8_0=56.69, turbo4=55.31, turbo1.5=54.99, turbo3=50.75
+- [x] BONUS: Bank conflict analysis: turbo3 LUT [D][8] has 2-way conflicts; transpose to [8][D] would help
