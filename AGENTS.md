@@ -5,6 +5,9 @@ alwaysApply: true
 
 # CLAUDE.md — TurboQuant CUDA (Madreag/turbo3-cuda)
 
+## ⛔ BENCHMARKS: FOREGROUND BASH CALL — IT WAKES YOU UP WHEN DONE ⛔
+**Run llama-bench/llama-perplexity as a normal foreground Bash tool call (no `run_in_background`, no `timeout` parameter). The Bash tool BLOCKS and returns output when the command finishes — that automatically wakes you up. You do NOT need to poll or check. Just call Bash, wait, get results. ONE process at a time. NEVER background. Session 20 used `run_in_background` → 8 orphan processes × 22GB = 176GB → system crash → hard reboot. See Rule 11.**
+
 ## Who You Are Working For
 
 Erol Germain (@erolgermain, GitHub: Madreag). Manufacturing Engineer. Direct communicator. Does NOT tolerate:
@@ -155,6 +158,22 @@ Missing template = SEGFAULT or CPU fallback. Check `ggml/src/ggml-cuda/template-
 
 ### 10. NEVER ask "want me to continue?" The answer is always yes.
 
+### 11. Benchmark execution rules (HARD RULES — violation = system crash).
+Session 20 spawned 8 background benchmark processes (8×22GB = 176GB) against 48GB RAM → swap death → hard reboot. NEVER AGAIN.
+- **FOREGROUND BASH CALL** — the Bash tool blocks and returns output when done. That WAKES YOU UP automatically. You do NOT need to poll, sleep, or check.
+- **NO `run_in_background`** — EVER. For any llama-bench or llama-perplexity command.
+- **NO `timeout` parameter** — EVER. Not on the Bash tool, not with shell timeout.
+- **ONE AT A TIME** — never parallel llama-bench or llama-perplexity
+- **LET IT FINISH** — do NOT kill benchmarks. They return results when done.
+- **ONE BASH CALL PER MESSAGE** — NEVER send multiple Bash calls in the same message. Not for benchmarks, not for builds, not for anything in this repo. One call, get result, then next call. Multiple Bash calls = parallel execution = stacked processes = system crash.
+- **Same rules for cmake builds** — foreground, one at a time, no background.
+- **BEFORE AND AFTER EVERY TEST**, verify process is dead and memory is free:
+  ```bash
+  pgrep -f "llama" && echo "PROCESS STILL RUNNING — KILL IT" || echo "Clean"
+  nvidia-smi --query-gpu=memory.used --format=csv,noheader
+  ```
+  If pgrep finds anything: STOP. Kill it. Verify again. Do NOT proceed until clean.
+
 ## Build & Test Commands
 
 ```bash
@@ -277,3 +296,4 @@ If you discover a bug, create an issue file in `07 Issues/`. If you make an arch
 - **MEASURE SHORT + 32K + PPL** after every change. Session 18 caught -14% at 32K that short missed.
 - **READ THE CODE** before writing code. Every Session 18 bug came from not reading first.
 - **DO NOT STOP. DO NOT DEFER. DO NOT SKIP. FINISH THE WORK.**
+- **⛔ BENCHMARKS: Foreground Bash call ONLY — it blocks and WAKES YOU UP when done. NO run_in_background. NO timeouts. ONE at a time. See Rule 11. ⛔**
