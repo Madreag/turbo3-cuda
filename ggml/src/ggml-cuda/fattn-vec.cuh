@@ -259,21 +259,26 @@ static __global__ void flash_attn_ext_vec(
 #endif // V_DOT2_F32_F16_AVAILABLE
     }
 
-    // LUT attention: precompute Q×centroid table in shared memory for turbo3/turbo4.
+    // LUT attention: precompute Q×centroid table in shared memory.
     // Eliminates one multiply per element in the KQ inner loop.
-    // LUT attention: turbo2 benefits (+1.4%) but turbo3 regresses (-1.9%) on SM120.
-    // turbo3 LUT has 2-way bank conflicts (8 centroids × D/8 stride); the extra shared
-    // memory reads cost more than the multiply they save. turbo2 LUT (4 centroids) is
-    // small enough to avoid bank conflict penalties.
-    constexpr int n_centroids_lut = (type_K == GGML_TYPE_TURBO2_0) ? 4 : 0;
-    // Shared memory LUT: LUT[element_pair_index][centroid] = Q.x*c or Q.y*c
-    // Layout: lut_q[2*k][c] for x, lut_q[2*k+1][c] for y of pair k
-    __shared__ float turbo_lut[n_centroids_lut > 0 ? D : 1][n_centroids_lut > 0 ? n_centroids_lut : 1];
+    // Session 20: restored for all turbo types with [D][n+1] padding to fix bank conflicts.
+    // The +1 padding makes the row stride coprime to 32 banks, eliminating systematic aliasing.
+    constexpr int n_centroids_lut = (type_K == GGML_TYPE_TURBO3_0) ? 8 :
+                                    (type_K == GGML_TYPE_TURBO4_0) ? 16 :
+                                    (type_K == GGML_TYPE_TURBO2_0) ? 4 : 0;
+    // Padded LUT: +1 column per row to avoid shared memory bank conflicts.
+    // Without padding: stride n_centroids → systematic 2-way conflicts for n=8 (-1.8% in Session 18).
+    // With padding: stride n_centroids+1, coprime to 32 banks → no conflicts.
+    constexpr int lut_stride = n_centroids_lut > 0 ? n_centroids_lut + 1 : 1;
+    __shared__ float turbo_lut[n_centroids_lut > 0 ? D : 1][lut_stride];
 
     if constexpr (n_centroids_lut > 0 && ncols == 1) {
         // Build LUT: Q[d] * centroid[c] for each dimension and centroid.
-        // Load Q directly from global memory (one-time cost, small vs KV scan).
-        const float * centroids_ptr = TURBO_CENTROIDS_2BIT;
+        // Q is read from global memory (still float even when kernel uses q8_1 Q).
+        // One-time cost: D×n_centroids FMAs. Negligible vs scanning thousands of KV positions.
+        const float * centroids_ptr = (type_K == GGML_TYPE_TURBO3_0) ? TURBO_CENTROIDS_3BIT :
+                                      (type_K == GGML_TYPE_TURBO4_0) ? TURBO_CENTROIDS_4BIT :
+                                      TURBO_CENTROIDS_2BIT;
         const float * Q_f = (const float *)(Q + 0*nb01);
         for (int d = tid; d < D; d += nthreads) {
             const float q_val = Q_f[d] * scale;
@@ -308,7 +313,7 @@ static __global__ void flash_attn_ext_vec(
 #pragma unroll
             for (int j = 0; j < ncols; ++j) {
                 float sum;
-                // Turbo attention: sinks (fp16) check for all turbo types
+                // Turbo attention: sinks (fp16) check, then LUT or standard vec_dot
                 if constexpr (type_K == GGML_TYPE_TURBO3_0 || type_K == GGML_TYPE_TURBO4_0 ||
                               type_K == GGML_TYPE_TURBO2_0 || type_K == GGML_TYPE_TURBO1_5) {
                     const int kv_pos = k_VKQ_0 + i_KQ;
@@ -316,6 +321,63 @@ static __global__ void flash_attn_ext_vec(
                         const int kv_head = head / gqa_ratio;
                         const char * sink_K = (const char *)(d_fattn_sink_K_buf + kv_pos * d_fattn_sink_ne0 + kv_head * D);
                         sum = vec_dot_fattn_vec_KQ_f16<D, nthreads_KQ>(sink_K, Q_reg[j], Q_i32[j], Q_ds[j]);
+                    } else if constexpr (n_centroids_lut > 0 && type_K == GGML_TYPE_TURBO3_0) {
+                        // LUT scoring for turbo3: process 4 elements at a time (shared qs_byte + sgn_byte)
+                        const block_turbo3_0 * K_turbo = (const block_turbo3_0 *)(K + i_KQ*nb11);
+                        sum = 0.0f;
+#pragma unroll
+                        for (int d0 = 0; d0 < D; d0 += 4 * nthreads_KQ) {
+                            const int d_base = d0 + (threadIdx.x % nthreads_KQ) * 4;
+                            const int ib = d_base / QK_TURBO3;
+                            const int jj = d_base % QK_TURBO3;
+                            const float norm = __half2float(K_turbo[ib].norm);
+                            const uint8_t qs_byte = K_turbo[ib].qs[jj / 4];
+                            const uint8_t sgn_byte = K_turbo[ib].signs[jj / 8];
+                            const int ss = jj % 8;
+                            const uint8_t idx0 = ((qs_byte >> 0) & 0x3) | (((sgn_byte >> (ss+0)) & 0x1) << 2);
+                            const uint8_t idx1 = ((qs_byte >> 2) & 0x3) | (((sgn_byte >> (ss+1)) & 0x1) << 2);
+                            const uint8_t idx2 = ((qs_byte >> 4) & 0x3) | (((sgn_byte >> (ss+2)) & 0x1) << 2);
+                            const uint8_t idx3 = ((qs_byte >> 6) & 0x3) | (((sgn_byte >> (ss+3)) & 0x1) << 2);
+                            sum += (turbo_lut[d_base  ][idx0] + turbo_lut[d_base+1][idx1] +
+                                    turbo_lut[d_base+2][idx2] + turbo_lut[d_base+3][idx3]) * norm;
+                        }
+                    } else if constexpr (n_centroids_lut > 0 && type_K == GGML_TYPE_TURBO4_0) {
+                        // LUT scoring for turbo4: process 4 elements at a time (2 qs bytes)
+                        const block_turbo4_0 * K_turbo = (const block_turbo4_0 *)(K + i_KQ*nb11);
+                        sum = 0.0f;
+#pragma unroll
+                        for (int d0 = 0; d0 < D; d0 += 4 * nthreads_KQ) {
+                            const int d_base = d0 + (threadIdx.x % nthreads_KQ) * 4;
+                            const int ib = d_base / QK_TURBO4;
+                            const int jj = d_base % QK_TURBO4;
+                            const float norm = __half2float(K_turbo[ib].norm);
+                            const uint8_t qs0 = K_turbo[ib].qs[jj / 2];
+                            const uint8_t qs1 = K_turbo[ib].qs[jj / 2 + 1];
+                            const uint8_t idx0 = (qs0 >> 0) & 0xF;
+                            const uint8_t idx1 = (qs0 >> 4) & 0xF;
+                            const uint8_t idx2 = (qs1 >> 0) & 0xF;
+                            const uint8_t idx3 = (qs1 >> 4) & 0xF;
+                            sum += (turbo_lut[d_base  ][idx0] + turbo_lut[d_base+1][idx1] +
+                                    turbo_lut[d_base+2][idx2] + turbo_lut[d_base+3][idx3]) * norm;
+                        }
+                    } else if constexpr (n_centroids_lut > 0 && type_K == GGML_TYPE_TURBO2_0) {
+                        // LUT scoring for turbo2: process 4 elements at a time (1 qs byte)
+                        const block_turbo2_0 * K_turbo = (const block_turbo2_0 *)(K + i_KQ*nb11);
+                        sum = 0.0f;
+#pragma unroll
+                        for (int d0 = 0; d0 < D; d0 += 4 * nthreads_KQ) {
+                            const int d_base = d0 + (threadIdx.x % nthreads_KQ) * 4;
+                            const int ib = d_base / QK_TURBO2;
+                            const int jj = d_base % QK_TURBO2;
+                            const float norm = __half2float(K_turbo[ib].norm);
+                            const uint8_t qs_byte = K_turbo[ib].qs[jj / 4];
+                            const uint8_t idx0 = (qs_byte >> 0) & 0x3;
+                            const uint8_t idx1 = (qs_byte >> 2) & 0x3;
+                            const uint8_t idx2 = (qs_byte >> 4) & 0x3;
+                            const uint8_t idx3 = (qs_byte >> 6) & 0x3;
+                            sum += (turbo_lut[d_base  ][idx0] + turbo_lut[d_base+1][idx1] +
+                                    turbo_lut[d_base+2][idx2] + turbo_lut[d_base+3][idx3]) * norm;
+                        }
                     } else {
                         sum = vec_dot_KQ(K + i_KQ*nb11, Q_reg[j], Q_i32[j], Q_ds[j]);
                     }
