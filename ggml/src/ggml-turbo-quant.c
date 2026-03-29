@@ -620,3 +620,81 @@ size_t quantize_turbo4_0(const float * GGML_RESTRICT src, void * GGML_RESTRICT d
     }
     return nrows * row_size;
 }
+
+/* ---------- TURBO1_5: ternary {-C, 0, +C} ---------- */
+
+#define TURBO1_5_C 0.107632f
+#define TURBO1_5_BOUNDARY 0.053837f
+
+static uint8_t pack_5_trits(int t0, int t1, int t2, int t3, int t4) {
+    return (uint8_t)((t0+1) + 3*(t1+1) + 9*(t2+1) + 27*(t3+1) + 81*(t4+1));
+}
+
+static int unpack_trit(uint8_t packed, int i) {
+    static const int divisors[5] = {1, 3, 9, 27, 81};
+    return ((packed / divisors[i]) % 3) - 1;
+}
+
+void quantize_row_turbo1_5_ref(const float * GGML_RESTRICT x, block_turbo1_5 * GGML_RESTRICT y, int64_t k) {
+    assert(k % QK_TURBO1_5 == 0);
+    const int nb = k / QK_TURBO1_5;
+    for (int i = 0; i < nb; i++) {
+        const float * xb = x + i * QK_TURBO1_5;
+        float norm_sq = 0.0f;
+        for (int j = 0; j < QK_TURBO1_5; j++) norm_sq += xb[j] * xb[j];
+        float grp_norm = sqrtf(norm_sq);
+        float inv_norm = (grp_norm > 1e-10f) ? (1.0f / grp_norm) : 0.0f;
+
+        int trits[QK_TURBO1_5];
+        float recon_norm_sq = 0.0f;
+        for (int j = 0; j < QK_TURBO1_5; j++) {
+            float val = xb[j] * inv_norm;
+            if (val < -TURBO1_5_BOUNDARY) {
+                trits[j] = -1;
+                recon_norm_sq += TURBO1_5_C * TURBO1_5_C;
+            } else if (val > TURBO1_5_BOUNDARY) {
+                trits[j] = 1;
+                recon_norm_sq += TURBO1_5_C * TURBO1_5_C;
+            } else {
+                trits[j] = 0;
+            }
+        }
+        float recon_norm = sqrtf(recon_norm_sq);
+        float corrected_norm = (recon_norm > 1e-10f) ? (grp_norm / recon_norm) : grp_norm;
+        y[i].norm = GGML_FP32_TO_FP16(corrected_norm);
+
+        memset(y[i].trits, 0, 7);
+        memset(y[i]._pad, 0, 7);
+        for (int b = 0; b < 7; b++) {
+            int t[5] = {0, 0, 0, 0, 0};
+            for (int ti = 0; ti < 5 && (b * 5 + ti) < QK_TURBO1_5; ti++) {
+                t[ti] = trits[b * 5 + ti];
+            }
+            y[i].trits[b] = pack_5_trits(t[0], t[1], t[2], t[3], t[4]);
+        }
+    }
+}
+
+void dequantize_row_turbo1_5(const block_turbo1_5 * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k) {
+    assert(k % QK_TURBO1_5 == 0);
+    const int nb = k / QK_TURBO1_5;
+    for (int block = 0; block < nb; block++) {
+        float norm = GGML_FP16_TO_FP32(x[block].norm);
+        for (int j = 0; j < QK_TURBO1_5; j++) {
+            int trit = unpack_trit(x[block].trits[j / 5], j % 5);
+            y[block * QK_TURBO1_5 + j] = (float)trit * TURBO1_5_C * norm;
+        }
+    }
+}
+
+size_t quantize_turbo1_5(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst,
+                         int64_t nrows, int64_t n_per_row, const float * imatrix) {
+    GGML_UNUSED(imatrix);
+    assert(n_per_row % QK_TURBO1_5 == 0);
+    size_t row_size = (n_per_row / QK_TURBO1_5) * sizeof(block_turbo1_5);
+    for (int64_t row = 0; row < nrows; row++) {
+        quantize_row_turbo1_5_ref(src + row * n_per_row,
+            (block_turbo1_5 *)((char *)dst + row * row_size), n_per_row);
+    }
+    return nrows * row_size;
+}

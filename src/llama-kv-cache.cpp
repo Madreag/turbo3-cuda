@@ -155,8 +155,8 @@ llama_kv_cache::llama_kv_cache(
         // TurboQuant requires head_dim divisible by 128 for quality.
         // 64-group WHT (head_dim=192/576) passes NIAH but has catastrophic PPL on some
         // models (DeepSeek 192-dim: 344K vs 9.9 baseline). Fall back to q8_0.
-        const bool is_turbo_type = (type_k == GGML_TYPE_TURBO3_0 || type_k == GGML_TYPE_TURBO4_0 || type_k == GGML_TYPE_TURBO2_0 ||
-                                    type_v == GGML_TYPE_TURBO3_0 || type_v == GGML_TYPE_TURBO4_0 || type_v == GGML_TYPE_TURBO2_0);
+        const bool is_turbo_type = (type_k == GGML_TYPE_TURBO3_0 || type_k == GGML_TYPE_TURBO4_0 || type_k == GGML_TYPE_TURBO2_0 || type_k == GGML_TYPE_TURBO1_5 ||
+                                    type_v == GGML_TYPE_TURBO3_0 || type_v == GGML_TYPE_TURBO4_0 || type_v == GGML_TYPE_TURBO2_0 || type_v == GGML_TYPE_TURBO1_5);
         const uint32_t n_embd_head_k = hparams.n_embd_head_k(il);
         if (is_turbo_type && n_embd_head_k % 128 != 0) {
             if (il == 0) {
@@ -190,9 +190,9 @@ llama_kv_cache::llama_kv_cache(
                 return mode;
             }();
             const bool is_turbo = (type_k == GGML_TYPE_TURBO3_0 || type_k == GGML_TYPE_TURBO4_0 ||
-                                   type_k == GGML_TYPE_TURBO2_0 ||
+                                   type_k == GGML_TYPE_TURBO2_0 || type_k == GGML_TYPE_TURBO1_5 ||
                                    type_v == GGML_TYPE_TURBO3_0 || type_v == GGML_TYPE_TURBO4_0 ||
-                                   type_v == GGML_TYPE_TURBO2_0);
+                                   type_v == GGML_TYPE_TURBO2_0 || type_v == GGML_TYPE_TURBO1_5);
             const uint32_t n_layer = hparams.n_layer;
             bool promote_k = false;
             bool promote_v = false;
@@ -234,7 +234,7 @@ llama_kv_cache::llama_kv_cache(
 
         // TurboQuant: create rotation matrix tensors (once, shared across layers)
         if (turbo_rotation == nullptr &&
-            (type_k == GGML_TYPE_TURBO3_0 || type_k == GGML_TYPE_TURBO4_0 || type_k == GGML_TYPE_TURBO2_0)) {
+            (type_k == GGML_TYPE_TURBO3_0 || type_k == GGML_TYPE_TURBO4_0 || type_k == GGML_TYPE_TURBO2_0 || type_k == GGML_TYPE_TURBO1_5)) {
             turbo_rotation = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 128, 128);
             ggml_format_name(turbo_rotation, "turbo_rotation");  // R^T
             turbo_rotation_inv = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 128, 128);
@@ -1236,7 +1236,7 @@ ggml_tensor * llama_kv_cache::cpy_k(ggml_context * ctx, ggml_tensor * k_cur, ggm
 
     // For turbo3: store WHT group size in op_params so the CUDA kernel knows
     // whether to use 128-element or 64-element WHT groups.
-    if (k->type == GGML_TYPE_TURBO3_0 || k->type == GGML_TYPE_TURBO4_0 || k->type == GGML_TYPE_TURBO2_0) {
+    if (k->type == GGML_TYPE_TURBO3_0 || k->type == GGML_TYPE_TURBO4_0 || k->type == GGML_TYPE_TURBO2_0 || k->type == GGML_TYPE_TURBO1_5) {
         int32_t wht_group = (n_embd_head % 128 == 0) ? 128 : 64;
         memcpy(result->op_params, &wht_group, sizeof(int32_t));
     }
@@ -1277,7 +1277,7 @@ ggml_tensor * llama_kv_cache::cpy_v(ggml_context * ctx, ggml_tensor * v_cur, ggm
         }
 
         ggml_tensor * result = ggml_set_rows(ctx, v, v_cur, v_idxs);
-        if (v->type == GGML_TYPE_TURBO3_0 || v->type == GGML_TYPE_TURBO4_0 || v->type == GGML_TYPE_TURBO2_0) {
+        if (v->type == GGML_TYPE_TURBO3_0 || v->type == GGML_TYPE_TURBO4_0 || v->type == GGML_TYPE_TURBO2_0 || v->type == GGML_TYPE_TURBO1_5) {
             int32_t wht_group = (n_embd_head % 128 == 0) ? 128 : 64;
             memcpy(result->op_params, &wht_group, sizeof(int32_t));
         }

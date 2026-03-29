@@ -4831,6 +4831,7 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
                     case GGML_TYPE_TURBO3_0:
                     case GGML_TYPE_TURBO2_0:
                     case GGML_TYPE_TURBO4_0:
+                    case GGML_TYPE_TURBO1_5:
                         return true;
                     default:
                         return false;
@@ -4842,8 +4843,9 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
             } break;
         case GGML_OP_SET_ROWS:
             {
-                // turbo3/turbo2 require head_dim divisible by 64 (supports 64 and 128 WHT groups)
-                if ((op->type == GGML_TYPE_TURBO3_0 || op->type == GGML_TYPE_TURBO2_0) && op->src[0]->ne[0] % 64 != 0) {
+                // turbo3/turbo2/turbo1.5 require head_dim divisible by 64 (supports 64 and 128 WHT groups)
+                if ((op->type == GGML_TYPE_TURBO3_0 || op->type == GGML_TYPE_TURBO2_0 ||
+                     op->type == GGML_TYPE_TURBO1_5) && op->src[0]->ne[0] % 64 != 0) {
                     return false;
                 }
                 // turbo4 requires head_dim divisible by 128 (block size = 128)
@@ -4854,7 +4856,7 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
                        op->type == GGML_TYPE_Q4_0 || op->type == GGML_TYPE_Q4_1 || op->type == GGML_TYPE_Q5_0 ||
                        op->type == GGML_TYPE_Q5_1 || op->type == GGML_TYPE_Q8_0 || op->type == GGML_TYPE_IQ4_NL ||
                        op->type == GGML_TYPE_TURBO3_0 || op->type == GGML_TYPE_TURBO2_0 ||
-                       op->type == GGML_TYPE_TURBO4_0) &&
+                       op->type == GGML_TYPE_TURBO4_0 || op->type == GGML_TYPE_TURBO1_5) &&
                        op->src[0]->type == GGML_TYPE_F32 &&
                        (op->src[1]->type == GGML_TYPE_I64 || op->src[1]->type == GGML_TYPE_I32);
             } break;

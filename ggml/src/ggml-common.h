@@ -327,6 +327,17 @@ typedef struct {
 } block_turbo2_0;                       // 10 bytes total
 static_assert(sizeof(block_turbo2_0) == sizeof(ggml_half) + QK_TURBO2/4, "wrong turbo2_0 block size/padding");
 
+// TurboQuant 1.5-bit: ternary quantization {-C, 0, +C} where C = 0.107632
+// Per block: norm(fp16) + 5 trits/byte (3^5=243 <= 255) = 16 bytes per 32 values
+// = 4.0 bits/value raw, but 1.585 bits/trit → ~2.0 bpv effective → 8× compression vs fp16
+#define QK_TURBO1_5 32
+typedef struct {
+    ggml_half  norm;            // 2 bytes: corrected group norm
+    uint8_t    trits[7];        // 7 bytes: 5 trits per byte (3^5=243 <= 255)
+    uint8_t    _pad[7];         // 7 bytes: alignment padding
+} block_turbo1_5;               // 16 bytes total
+static_assert(sizeof(block_turbo1_5) == 16, "turbo1.5 block must be 16 bytes");
+
 //
 // Super-block quantization structures
 //

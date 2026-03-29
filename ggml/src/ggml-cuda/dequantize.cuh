@@ -102,4 +102,15 @@ static __device__ __forceinline__ void dequantize_turbo4_0(const void * vx, cons
     v.y = turbo4_dequant_element(&x[ib], iqs + 1, norm);
 }
 
+// Turbo1.5: ternary quantization {-C, 0, +C}, block size 32
+// iqs is the element index within the block (even), produces elements iqs and iqs+1
+static __device__ __forceinline__ void dequantize_turbo1_5(const void * vx, const int64_t ib, const int iqs, float2 & v){
+    const block_turbo1_5 * x = (const block_turbo1_5 *) vx;
+    const float norm = __half2float(x[ib].norm);
+    v.x = turbo1_5_dequant_element(&x[ib], iqs + 0, norm);
+    v.y = turbo1_5_dequant_element(&x[ib], iqs + 1, norm);
+}
+
+#define QR_TURBO1_5 1  // consecutive elements, same as turbo3
+
 #define QR_TURBO4 1  // consecutive elements, same as turbo3

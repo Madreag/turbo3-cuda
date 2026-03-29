@@ -422,3 +422,27 @@ static __device__ __forceinline__ float turbo4_dequant_element(
     uint8_t idx = (x->qs[j / 2] >> ((j % 2) * 4)) & 0xF;
     return TURBO_CENTROIDS_4BIT[idx] * norm;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TurboQuant1.5 (ternary {-C, 0, +C}, QK_TURBO1_5 = 32)
+// ═══════════════════════════════════════════════════════════════════════════
+
+#define TURBO1_5_C_VAL    0.107632f
+#define TURBO1_5_BOUNDARY 0.053837f
+
+// Unpack one trit from a packed byte.
+// 5 trits per byte: packed = Σ (trit_i+1) × 3^i, where trit ∈ {-1,0,+1}.
+// Returns trit value in {-1, 0, +1}.
+static __device__ __forceinline__ int turbo1_5_unpack_trit(uint8_t packed, int pos) {
+    // Precomputed powers of 3
+    static const int pow3[5] = {1, 3, 9, 27, 81};
+    return ((packed / pow3[pos]) % 3) - 1;
+}
+
+// ---- Inline dequant helper: extract one float from turbo1.5 block ----
+
+static __device__ __forceinline__ float turbo1_5_dequant_element(
+        const block_turbo1_5 * __restrict__ x, int j, float norm) {
+    int trit = turbo1_5_unpack_trit(x->trits[j / 5], j % 5);
+    return (float)trit * TURBO1_5_C_VAL * norm;
+}
