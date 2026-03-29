@@ -4,8 +4,11 @@
 #include "convert.cuh"
 #include "vecdotq.cuh"
 #include "turbo-quant.cuh"
+#include "turbo-sink.cuh"
 
 #include <cstdint>
+
+// Sink state is defined in fattn-vec.cuh (same TU as VEC kernel)
 
 #define FATTN_KQ_STRIDE       256
 #define HALF_MAX_HALF         __float2half(65504.0f/2) // Use neg. of this instead of -INFINITY to initialize KQ max vals to avoid NaN upon subtraction.

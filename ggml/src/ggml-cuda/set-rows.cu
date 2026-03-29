@@ -1,6 +1,7 @@
 #include "set-rows.cuh"
 #include "cpy-utils.cuh"
 #include "turbo-quant.cuh"
+#include "turbo-sink.cuh"
 
 typedef void (*set_rows_kernel_t)(const char * src, char * dst);
 
@@ -587,6 +588,13 @@ static void set_rows_cuda_turbo3(
             s01, s02, s03, s10, s11, s12,
             nb1, nb2, nb3, tail_size);
     }
+
+    // Attention sinks: capture WHT-rotated fp16 for positions < TURBO_SINK_SIZE
+    turbo_sink_capture_turbo3_impl<idx_t>(
+        src0_d, src1_d, dst->data,
+        ne00, ne01, ne11, s01, s02, s03,
+        ne12, ne13, s10, s11, s12,
+        nb1, nb2, nb3, group_size, stream);
 }
 
 // ---- TurboQuant2 set_rows: GROUP_SIZE-element groups with WHT rotation + norm correction ----

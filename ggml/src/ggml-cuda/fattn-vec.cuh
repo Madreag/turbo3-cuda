@@ -1,6 +1,11 @@
 #include "common.cuh"
 #include "fattn-common.cuh"
 
+// Per-TU sink state — in fattn-vec.cuh so kernel and host code share the same TU copy.
+static __managed__ const half * d_fattn_sink_K_buf = nullptr;
+static __managed__ int          d_fattn_sink_n     = 0;
+static __managed__ int64_t      d_fattn_sink_ne0   = 0;
+
 static int ggml_cuda_fattn_vec_get_nthreads_host(const int cc) {
     return 128;
     GGML_UNUSED(cc);
@@ -270,7 +275,19 @@ static __global__ void flash_attn_ext_vec(
 
 #pragma unroll
             for (int j = 0; j < ncols; ++j) {
-                float sum = vec_dot_KQ(K + i_KQ*nb11, Q_reg[j], Q_i32[j], Q_ds[j]);
+                float sum;
+                // Turbo attention sinks: use fp16 precision for first N KV positions
+                if constexpr (type_K == GGML_TYPE_TURBO3_0 || type_K == GGML_TYPE_TURBO2_0) {
+                    const int kv_pos = k_VKQ_0 + i_KQ;
+                    if (d_fattn_sink_n > 0 && kv_pos < d_fattn_sink_n && d_fattn_sink_K_buf != nullptr) {
+                        const char * sink_K = (const char *)(d_fattn_sink_K_buf + kv_pos * d_fattn_sink_ne0);
+                        sum = vec_dot_fattn_vec_KQ_f16<D, nthreads_KQ>(sink_K, Q_reg[j], Q_i32[j], Q_ds[j]);
+                    } else {
+                        sum = vec_dot_KQ(K + i_KQ*nb11, Q_reg[j], Q_i32[j], Q_ds[j]);
+                    }
+                } else {
+                    sum = vec_dot_KQ(K + i_KQ*nb11, Q_reg[j], Q_i32[j], Q_ds[j]);
+                }
                 sum = warp_reduce_sum<nthreads_KQ>(sum);
 
                 if (use_logit_softcap) {
@@ -554,6 +571,21 @@ static __global__ void flash_attn_ext_vec(
 
 template <int D, int cols_per_block, ggml_type type_K, ggml_type type_V, bool use_logit_softcap>
 void ggml_cuda_flash_attn_ext_vec_case_impl(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+    // Turbo attention sinks: set managed memory state before VEC kernel launch.
+    // Uses __managed__ variables (unified memory) so host writes are visible to device.
+    // Requires GGML_CUDA_DISABLE_GRAPHS=1 (managed memory writes break graph capture).
+    if constexpr (type_K == GGML_TYPE_TURBO3_0 || type_K == GGML_TYPE_TURBO2_0) {
+        const int ss = turbo_sink_size();
+        if (ss > 0) {
+            const ggml_tensor * K = dst->src[1];
+            // Sync to ensure any previous kernel using managed memory is done
+            CUDA_CHECK(cudaStreamSynchronize(ctx.stream()));
+            d_fattn_sink_K_buf = turbo_sink_get_buf((void *)K->data, K->ne[0]);
+            d_fattn_sink_n = ss;
+            d_fattn_sink_ne0 = K->ne[0];
+        }
+    }
+
     const int cc = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;
 
     const int nthreads = ggml_cuda_fattn_vec_get_nthreads_host(cc);
