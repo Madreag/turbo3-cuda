@@ -9,12 +9,12 @@
 - [x] Part 5: Documented: kv(L2095), k/MLA(L2189), kv_iswa(L2265) have forward Q WHT; inverse in build_attn_mha(L1843/1921)
 - [x] Part 6: CUDA graph sinks — DEFERRED: sinks show 0% PPL improvement, refactoring __managed__ to kernel args not justified
 - [x] Part 6: Sinks require GGML_CUDA_DISABLE_GRAPHS=1 (documented)
-- [ ] Part 7: Clean 32K benchmarks (5 runs, warmup)
-- [ ] Part 8A: Enable sink default=4
-- [ ] Part 8B: rsqrtf in all SET_ROWS
-- [ ] Part 8C: MoE model test
-- [ ] Part 9: Final benchmark suite (ALL types, ALL depths)
-- [ ] Part 9: Push to GitHub
+- [x] Part 7: Clean 32K benchmarks — 5 runs post-warmup, all types measured
+- [x] Part 8A: Sink default NOT changed — sinks show 0% PPL improvement, not worth defaulting on
+- [x] Part 8B: rsqrtf in all SET_ROWS — applied to all 4 turbo kernels + sink capture
+- [x] Part 8C: MoE model test — turbo3=93.86, turbo1.5=113.35(!), turbo4=98.38 tok/s
+- [x] Part 9: Final benchmark suite — ALL types, d=0/32K/64K/128K, PPL, MoE, prefill, asymmetric
+- [x] Part 9: Push to GitHub
 - [ ] BONUS: Look for more optimizations
 - [ ] BONUS: Profile again, find new bottlenecks
 - [ ] BONUS: Additional testing / edge cases
