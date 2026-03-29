@@ -256,8 +256,9 @@ static __global__ void flash_attn_ext_vec(
 
     // LUT attention: precompute Q×centroid table in shared memory for turbo3/turbo4.
     // Eliminates one multiply per element in the KQ inner loop.
+    // LUT attention only for types with float Q path (K_is_unquantized = true).
+    // turbo4/turbo1.5 use q8_1 Q, incompatible with float LUT construction.
     constexpr int n_centroids_lut = (type_K == GGML_TYPE_TURBO3_0) ? 8 :
-                                    (type_K == GGML_TYPE_TURBO4_0) ? 16 :
                                     (type_K == GGML_TYPE_TURBO2_0) ? 4 : 0;
     // Shared memory LUT: LUT[element_pair_index][centroid] = Q.x*c or Q.y*c
     // Layout: lut_q[2*k][c] for x, lut_q[2*k+1][c] for y of pair k
@@ -267,7 +268,6 @@ static __global__ void flash_attn_ext_vec(
         // Build LUT: Q[d] * centroid[c] for each dimension and centroid.
         // Load Q directly from global memory (one-time cost, small vs KV scan).
         const float * centroids_ptr = (type_K == GGML_TYPE_TURBO3_0) ? TURBO_CENTROIDS_3BIT :
-                                      (type_K == GGML_TYPE_TURBO4_0) ? TURBO_CENTROIDS_4BIT :
                                       TURBO_CENTROIDS_2BIT;
         const float * Q_f = (const float *)(Q + 0*nb01);
         for (int d = tid; d < D; d += nthreads) {
@@ -333,31 +333,6 @@ static __global__ void flash_attn_ext_vec(
                                 const uint8_t idx1 = ((qs_byte >> (shift+2)) & 0x3) | (((sgn_byte >> (j0 % 8 + 1)) & 0x1) << 2);
                                 sum += (turbo_lut[elem0][idx0] + turbo_lut[elem0+1][idx1]) * norm;
                             }
-                        }
-                    }
-                } else if constexpr (type_K == GGML_TYPE_TURBO4_0 && n_centroids_lut > 0) {
-                    // turbo4 with LUT: 16-centroid nibble-packed indices
-                    const block_turbo4_0 * K_turbo = (const block_turbo4_0 *)(K + i_KQ*nb11);
-                    sum = 0.0f;
-                    // QK_TURBO4=128, so 1 block covers 128 elements.
-                    // D elements = D/128 blocks. Each block has 64 qs bytes (128 nibbles).
-                    constexpr int cpy_nb = ggml_cuda_get_max_cpy_bytes();
-                    constexpr int cpy_ne = cpy_nb / 4;
-#pragma unroll
-                    for (int k_KQ_0 = 0; k_KQ_0 < D/2; k_KQ_0 += nthreads_KQ*cpy_ne) {
-#pragma unroll
-                        for (int k_KQ_1 = 0; k_KQ_1 < cpy_ne; ++k_KQ_1) {
-                            const int k_KQ = k_KQ_0 + (threadIdx.x % nthreads_KQ)*cpy_ne + k_KQ_1;
-                            const int elem0 = k_KQ * 2;
-                            const int ib = elem0 / QK_TURBO4;
-                            const int j0 = elem0 % QK_TURBO4;
-                            const float norm = __half2float(K_turbo[ib].norm);
-                            // Nibble extraction: 2 elements per byte
-                            const uint8_t qs_byte = K_turbo[ib].qs[j0 / 2];
-                            const uint8_t idx0 = (j0 & 1) ? ((qs_byte >> 4) & 0xf) : (qs_byte & 0xf);
-                            const uint8_t qs_byte1 = K_turbo[ib].qs[(j0 + 1) / 2];
-                            const uint8_t idx1 = ((j0 + 1) & 1) ? ((qs_byte1 >> 4) & 0xf) : (qs_byte1 & 0xf);
-                            sum += (turbo_lut[elem0][idx0] + turbo_lut[elem0+1][idx1]) * norm;
                         }
                     }
                 } else if constexpr (type_K == GGML_TYPE_TURBO2_0) {

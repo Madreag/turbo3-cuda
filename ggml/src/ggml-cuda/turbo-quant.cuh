@@ -27,6 +27,11 @@ static __constant__ float TURBO_MID_2BIT[3] = {
     -0.086728f, 0.0f, 0.086728f
 };
 
+// ---- Ternary centroids for turbo1.5: {-C, 0, +C} mapped to indices {0, 1, 2} ----
+static __device__ const float TURBO_CENTROIDS_TERNARY[3] = {
+    -0.107632f, 0.0f, 0.107632f
+};
+
 // ---- 3-bit centroids (Lloyd-Max for N(0, 1/128)) ----
 
 static __constant__ float TURBO_CENTROIDS_3BIT[8] = {
