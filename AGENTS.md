@@ -233,6 +233,18 @@ turbo3 at 32K = 40.90 vs turbo4 = 46.51 (-12%). Root cause: `K_is_unquantized=tr
 4. **turbo1.5 branchless ternary** — `float(trit) * C * norm` instead of centroid lookup
 5. **FP4 tensor core for turbo1.5** — SM120 moonshot: map ternary to FP4 E2M1 `mma.sync`
 
+## Obsidian Vault Maintenance
+
+The project knowledge base lives at `/mnt/c/vaults/forge/`. **Read `10 Knowledge/README.md` for CUDA/hardware reference docs before starting kernel work.**
+
+**After EVERY session**, update these vault files with your results:
+1. `00 Dashboard/Project Status.md` — Check off completed items, add new open work
+2. `03 Benchmarks/Benchmark Hub.md` — Add your final benchmark numbers
+3. `08 Plans/Roadmap.md` — Update session status (DONE/PLANNED), add next session items
+4. `01 Sessions/Session N.md` — Create or update your session's tracking note
+
+If you discover a bug, create an issue file in `07 Issues/`. If you make an architecture decision, document it in `02 Architecture/`.
+
 ## Remember
 
 - **turbo4 = 100.1% of f16** at short context (59.06 vs 59.00)
