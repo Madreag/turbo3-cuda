@@ -69,16 +69,16 @@ Prefill (Q->ne[1]>1):
   MMA/TILE kernel runs on fp16
 ```
 
-## Current Performance (Session 19 Final, RTX 5090)
+## Current Performance (Session 20 Final, RTX 5090)
 
-| Type | bpv | Short | 32K | PPL ctx=512 | Notes |
-|------|----:|------:|----:|:-----------:|-------|
-| f16 | 16 | 60.72 | — | — | Ceiling |
-| q8_0 | 8.5 | ~59.5 | 48.64 | 6.759 | Baseline |
-| turbo4 | 4.25 | 58.19 | 41.45 | 6.825 (+0.97%) | LUT scoring path missing (dead code) |
-| turbo3 | 3.25 | 59.36 | 42.04 | 6.852 (+1.38%) | LUT disabled (bank conflicts), float Q = 4x BW |
-| turbo2 | 2.5 | 59.65 | — | 7.080 (+4.75%) | LUT dead code, float Q |
-| turbo1.5 | 2.0 | 57.83 | 40.46 | 7.312 (+8.18%) | **8x compression, 113 MoE, 15.26 @204K** |
+| Type | bpv | Short | 32K | PPL ctx=512 | PPL ctx=2048 | Notes |
+|------|----:|------:|----:|:-----------:|:------------:|-------|
+| f16 | 16 | ~60 | ~51 | — | — | Ceiling |
+| q8_0 | 8.5 | 60.7 | 49.6 | 6.759 | 5.674 | Baseline |
+| turbo4 | 4.25 | **59.4** | 42.2 | 6.825 (+0.97%) | 5.694 | LUT restored (16 centroids) |
+| turbo3 | 3.25 | **60.2** | **45.9** | 6.852 (+1.38%) | **5.674 (=q8_0)** | q8_1 vec_dot + LUT with [D][9] padding |
+| turbo2 | 2.5 | **60.4** | **47.9** | 7.080 (+4.75%) | 5.892 | q8_1 vec_dot + LUT, long-ctx champion |
+| turbo1.5 | 2.0 | 59.0 | 38.2 | 7.312 (+8.18%) | 6.103 | **8x compression, 113 MoE, 15.26 @204K** |
 
 **MoE (Qwen 3.5 35B-A3B)**: turbo1.5 = 113 tok/s, turbo4 = 98, turbo3 = 94.
 
