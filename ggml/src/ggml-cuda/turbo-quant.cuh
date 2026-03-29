@@ -359,3 +359,66 @@ static __device__ __forceinline__ float turbo2_dequant_element(
     uint8_t idx = (x->qs[j / 4] >> ((j % 4) * 2)) & 0x3;
     return TURBO_CENTROIDS_2BIT[idx] * norm;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TurboQuant4 (4-bit PolarQuant, 16 centroids, QK_TURBO4 = 128)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// 16 Lloyd-Max optimal centroids for N(0, 1/sqrt(128))
+// Must match CPU reference in ggml-turbo-quant.c
+static __device__ const float TURBO_CENTROIDS_4BIT[16] = {
+    -0.173926f, -0.117195f, -0.089527f, -0.068756f,
+    -0.051262f, -0.035597f, -0.020989f, -0.006938f,
+     0.006938f,  0.020989f,  0.035597f,  0.051262f,
+     0.068756f,  0.089527f,  0.117195f,  0.173926f,
+};
+
+// 15 midpoints for binary search quantization
+// Must match CPU reference nearest_centroid_4bit() in ggml-turbo-quant.c
+static __device__ const float TURBO_MID_4BIT[15] = {
+    -0.145560f, -0.103361f, -0.079142f, -0.060009f, -0.043430f,
+    -0.028293f, -0.013963f,  0.000000f,  0.013963f,  0.028293f,
+     0.043430f,  0.060009f,  0.079142f,  0.103361f,  0.145560f,
+};
+
+// ---- Nearest 4-bit centroid index (binary search tree, 4 comparisons) ----
+
+static __device__ __forceinline__ uint8_t turbo_nearest_centroid_4bit(float val) {
+    if (val < TURBO_MID_4BIT[7]) {  // < 0
+        if (val < TURBO_MID_4BIT[3]) {
+            if (val < TURBO_MID_4BIT[1]) {
+                return val < TURBO_MID_4BIT[0] ? 0 : 1;
+            } else {
+                return val < TURBO_MID_4BIT[2] ? 2 : 3;
+            }
+        } else {
+            if (val < TURBO_MID_4BIT[5]) {
+                return val < TURBO_MID_4BIT[4] ? 4 : 5;
+            } else {
+                return val < TURBO_MID_4BIT[6] ? 6 : 7;
+            }
+        }
+    } else {  // >= 0
+        if (val < TURBO_MID_4BIT[11]) {
+            if (val < TURBO_MID_4BIT[9]) {
+                return val < TURBO_MID_4BIT[8] ? 8 : 9;
+            } else {
+                return val < TURBO_MID_4BIT[10] ? 10 : 11;
+            }
+        } else {
+            if (val < TURBO_MID_4BIT[13]) {
+                return val < TURBO_MID_4BIT[12] ? 12 : 13;
+            } else {
+                return val < TURBO_MID_4BIT[14] ? 14 : 15;
+            }
+        }
+    }
+}
+
+// ---- Inline dequant helper: extract one float from turbo4 block ----
+
+static __device__ __forceinline__ float turbo4_dequant_element(
+        const block_turbo4_0 * __restrict__ x, int j, float norm) {
+    uint8_t idx = (x->qs[j / 2] >> ((j % 2) * 4)) & 0xF;
+    return TURBO_CENTROIDS_4BIT[idx] * norm;
+}

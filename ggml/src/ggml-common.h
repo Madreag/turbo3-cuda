@@ -285,11 +285,7 @@ static_assert(sizeof(block_turbo3_0) == sizeof(ggml_half) + QK_TURBO3/4 + QK_TUR
 // TURBO4_USE_4BIT: switch between 4-bit PolarQuant (new) and 3-bit+QJL (legacy)
 // Default: 4-bit on Metal (validated), legacy on CUDA (until ported)
 #ifndef TURBO4_USE_4BIT
-#  if defined(GGML_METAL)
-#    define TURBO4_USE_4BIT 1
-#  else
-#    define TURBO4_USE_4BIT 0
-#  endif
+#  define TURBO4_USE_4BIT 1  // Always use 4-bit PolarQuant (16 centroids, no QJL)
 #endif
 
 #define QK_TURBO4 128

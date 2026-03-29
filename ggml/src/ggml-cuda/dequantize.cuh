@@ -93,3 +93,13 @@ static __device__ __forceinline__ void dequantize_turbo2_0(const void * vx, cons
     v.x = turbo2_dequant_element(&x[ib], iqs + 0, norm);
     v.y = turbo2_dequant_element(&x[ib], iqs + 1, norm);
 }
+
+// Turbo4: 4-bit PolarQuant (16 centroids, nibble packed), block size 128
+static __device__ __forceinline__ void dequantize_turbo4_0(const void * vx, const int64_t ib, const int iqs, float2 & v){
+    const block_turbo4_0 * x = (const block_turbo4_0 *) vx;
+    const float norm = __half2float(x[ib].norm);
+    v.x = turbo4_dequant_element(&x[ib], iqs + 0, norm);
+    v.y = turbo4_dequant_element(&x[ib], iqs + 1, norm);
+}
+
+#define QR_TURBO4 1  // consecutive elements, same as turbo3
