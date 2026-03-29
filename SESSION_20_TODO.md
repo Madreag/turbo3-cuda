@@ -77,3 +77,37 @@
 - **turbo3 short: 60.2** — beats q8_0 (60.7 is within noise)
 - **Sinks: definitively 0% PPL** on 2 models, 5 context lengths, 3 sink sizes
 - **V sinks: dead end** — register pressure, not __managed__, causes the regression
+
+## Completed in Retest (post-reboot)
+
+### Extended 131K Decode
+| Type | 131K tok/s | vs S18 |
+|------|----------:|--------|
+| turbo3 | 24.43 | was 14.55 (+68%) |
+| turbo4 | 20.55 | — |
+| turbo1.5 | 19.62 | was 15.62 (+26%) |
+
+### MoE (Qwen 3.5 35B-A3B, tg32)
+| Type | tok/s | vs S18 |
+|------|------:|--------|
+| q8_0 | 190.59 | — |
+| turbo3 | 184.06 | was 93.86 (+96%) |
+| turbo1.5 | 174.45 | was 113.35 (+54%) |
+| turbo4 | 171.70 | was 98.38 (+75%) |
+
+### Prefill (pp4096)
+| Type | tok/s |
+|------|------:|
+| turbo4 | 3248.68 |
+| turbo3 | 3228.24 |
+| turbo1.5 | 3228.76 |
+
+### Asymmetric Speed Matrix (tg4, d=0)
+All 12 turbo×turbo+q8_0 combos pass, 39-47 tok/s range.
+
+### V-specific 64×64 Rotation
+Investigated. Requires separate K/V group_size in llama-kv-cache.cpp + llama-graph.cpp.
+SET_ROWS already supports group_size=64 via op_params. Non-trivial architectural change — deferred.
+
+### Vault Dashboard
+Updated: Project Status, Benchmark Hub, Roadmap — all current with S20 final numbers.
