@@ -4,26 +4,25 @@
 **Hardware**: RTX 5090 32GB GDDR7, SM120, CUDA 12.8, WSL2
 **Date**: 2026-03-29
 
-## Dense Model — Short Decode (d=0, tg128)
+## Dense Model — Short Decode (d=0, tg128) — FINAL (post-regression-fix)
 
 | Type     | bpv  | tok/s      | vs f16 |
 |----------|-----:|------------|--------|
-| f16      | 16.0 | 59.09      | 100%   |
-| q8_0     |  8.5 | 59.68      | 101%   |
-| turbo4   | 4.25 | 58.17      |  98.4% |
-| turbo3   | 3.25 | 56.81      |  96.1% |
-| turbo2   | 2.50 | 57.21      |  96.8% |
-| turbo1.5 | 2.00 | 57.73      |  97.7% |
+| f16      | 16.0 | 59.00      | 100%   |
+| q8_0     |  8.5 | 59.53      | 100.9% |
+| turbo4   | 4.25 | 59.06      | 100.1% |
+| turbo2   | 2.50 | 58.88      |  99.8% |
+| turbo3   | 3.25 | 57.99      |  98.3% |
+| turbo1.5 | 2.00 | 57.36      |  97.2% |
 
-## Dense Model — 32K Decode (d=32768, tg32, 5 runs)
+## Dense Model — 32K Decode (d=32768, tg32) — FINAL
 
 | Type     | bpv  | tok/s      | vs q8_0 |
 |----------|-----:|------------|---------|
-| q8_0     |  8.5 | 46.42      | 100%    |
-| turbo4   | 4.25 | 45.96      |  99.0%  |
-| turbo1.5 | 2.00 | 44.57      |  96.0%  |
-| turbo2   | 2.50 | 38.49      |  82.9%  |
-| turbo3   | 3.25 | 36.90      |  79.5%  |
+| q8_0     |  8.5 | 48.03      | 100%    |
+| turbo4   | 4.25 | 46.51      |  96.8%  |
+| turbo1.5 | 2.00 | 44.49      |  92.6%  |
+| turbo3   | 3.25 | 40.90      |  85.2%  |
 
 ## Dense Model — 64K Decode (d=65536, tg16)
 
@@ -99,6 +98,19 @@
 
 turbo1.5 at 204K: 15.26 tok/s (1.8x turbo3's 8.42) — the q8_1 Q path
 and 2.0 bpv makes turbo1.5 the best choice for extreme-context workloads.
+
+## Regression Fix: V Sink Managed Memory + turbo3 LUT
+
+Two performance regressions were found and fixed during review:
+
+1. **V sink managed memory reads in V loop** (-3% short, -14% 32K)
+   - The `use_v_sink` check read `d_fattn_sink_n` (__managed__) on every V iteration
+   - UVM page migration overhead scaled with context length
+   - Fix: removed V sink from V accumulation loop (sinks show 0% PPL benefit)
+
+2. **turbo3 LUT attention bank conflicts** (-1.8% short decode)
+   - 8-centroid LUT had 2-way shared memory bank conflicts (stride aliasing)
+   - Fix: disabled turbo3 LUT, kept turbo2 LUT (4 centroids, no bank conflicts)
 
 ## Session 18 Changes Summary
 
