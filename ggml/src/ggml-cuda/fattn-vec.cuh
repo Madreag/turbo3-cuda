@@ -335,6 +335,31 @@ static __global__ void flash_attn_ext_vec(
                             }
                         }
                     }
+                } else if constexpr (type_K == GGML_TYPE_TURBO4_0 && n_centroids_lut > 0) {
+                    // turbo4 with LUT: 16-centroid nibble-packed indices
+                    const block_turbo4_0 * K_turbo = (const block_turbo4_0 *)(K + i_KQ*nb11);
+                    sum = 0.0f;
+                    // QK_TURBO4=128, so 1 block covers 128 elements.
+                    // D elements = D/128 blocks. Each block has 64 qs bytes (128 nibbles).
+                    constexpr int cpy_nb = ggml_cuda_get_max_cpy_bytes();
+                    constexpr int cpy_ne = cpy_nb / 4;
+#pragma unroll
+                    for (int k_KQ_0 = 0; k_KQ_0 < D/2; k_KQ_0 += nthreads_KQ*cpy_ne) {
+#pragma unroll
+                        for (int k_KQ_1 = 0; k_KQ_1 < cpy_ne; ++k_KQ_1) {
+                            const int k_KQ = k_KQ_0 + (threadIdx.x % nthreads_KQ)*cpy_ne + k_KQ_1;
+                            const int elem0 = k_KQ * 2;
+                            const int ib = elem0 / QK_TURBO4;
+                            const int j0 = elem0 % QK_TURBO4;
+                            const float norm = __half2float(K_turbo[ib].norm);
+                            // Nibble extraction: 2 elements per byte
+                            const uint8_t qs_byte = K_turbo[ib].qs[j0 / 2];
+                            const uint8_t idx0 = (j0 & 1) ? ((qs_byte >> 4) & 0xf) : (qs_byte & 0xf);
+                            const uint8_t qs_byte1 = K_turbo[ib].qs[(j0 + 1) / 2];
+                            const uint8_t idx1 = ((j0 + 1) & 1) ? ((qs_byte1 >> 4) & 0xf) : (qs_byte1 & 0xf);
+                            sum += (turbo_lut[elem0][idx0] + turbo_lut[elem0+1][idx1]) * norm;
+                        }
+                    }
                 } else if constexpr (type_K == GGML_TYPE_TURBO2_0) {
                     // turbo2 with sink check
                     const int kv_pos = k_VKQ_0 + i_KQ;
