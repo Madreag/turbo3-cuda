@@ -497,7 +497,9 @@ void quantize_row_turbo4_0_ref(const float * GGML_RESTRICT x, block_turbo4_0 * G
 #endif
 
         /* Pack */
+#if !TURBO4_USE_4BIT
         y[block].norm  = GGML_FP32_TO_FP16(norm);
+#endif
 
 #if TURBO4_USE_4BIT
         /* 4-bit PolarQuant: nibble pack into qs[64] */
