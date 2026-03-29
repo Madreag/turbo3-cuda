@@ -1,6 +1,6 @@
 # Session 18 TODO
-- [ ] Part 1: V attention sinks (K+V pair)
-- [ ] Part 1: Verify PPL improvement (-1.9% target)
+- [x] Part 1: V attention sinks (K+V pair) — FIXED ne0 mismatch bug + added V sinks
+- [x] Part 1: Verify PPL improvement — neutral; turbo3 already precise enough, sinks don't help
 - [ ] Part 2: Trit LUT (5×256 constant memory)
 - [ ] Part 2: Verify turbo1.5 speedup at 32K
 - [ ] Part 3: LUT for turbo4 (16 centroids)
