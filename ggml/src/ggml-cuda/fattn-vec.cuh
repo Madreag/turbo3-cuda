@@ -263,8 +263,9 @@ static __global__ void flash_attn_ext_vec(
     // Eliminates one multiply per element in the KQ inner loop.
     // Session 20: restored for all turbo types with [D][n+1] padding to fix bank conflicts.
     // The +1 padding makes the row stride coprime to 32 banks, eliminating systematic aliasing.
+    // turbo4 LUT (16 centroids, 8.7KB shmem) disabled — net negative on SM120.
+    // turbo4 short: 57.36 with LUT vs 59.06 without (S18). Investigation in S21 Part 2.
     constexpr int n_centroids_lut = (type_K == GGML_TYPE_TURBO3_0) ? 8 :
-                                    (type_K == GGML_TYPE_TURBO4_0) ? 16 :
                                     (type_K == GGML_TYPE_TURBO2_0) ? 4 : 0;
     // Padded LUT: +1 column per row to avoid shared memory bank conflicts.
     // Without padding: stride n_centroids → systematic 2-way conflicts for n=8 (-1.8% in Session 18).
