@@ -20,13 +20,49 @@
 - [x] All 36 K×V combinations verified OK on SM120
 - [x] K=turbo3/V=turbo4: 59.20 tok/s (was 6 tok/s CPU fallback)
 
-### PART 3: Quick LUT bank conflict test — DEFERRED TO SESSION 20
-- turbo3 LUT scoring path was deleted in Session 18
-- Re-adding requires writing new vec_dot code (>10 min)
+### PART 3: LUT Bank Conflict — DEFERRED TO SESSION 20 (documented)
+
+**Current state**: LUT infrastructure exists but NO scoring path reads it.
+
+- `fattn-vec.cuh:265`: `n_centroids_lut = (type_K == TURBO2_0) ? 4 : 0` — turbo3 disabled
+- `fattn-vec.cuh:268-281`: Shared memory LUT built: `turbo_lut[D][n_centroids_lut]`
+- `fattn-common.cuh:358-402`: `vec_dot_fattn_vec_KQ_turbo2_0` reads from `TURBO_CENTROIDS_2BIT` directly, NOT from LUT — **turbo2 LUT is also dead code**
+
+**What Session 20 needs to implement:**
+1. New `vec_dot_fattn_vec_KQ_turbo3_0_lut()` in `fattn-common.cuh` (~line 300) that reads from shared memory LUT instead of centroid lookup
+2. Pass `turbo_lut` to the scoring loop in `fattn-vec.cuh` (lines 306-321) via constexpr dispatch
+3. Bank conflict fix: `turbo_lut[D][8+1]` padding (add 1 float per row to stagger bank addresses)
+4. Wire turbo2 LUT scoring too (currently dead code despite n_centroids_lut=4)
+5. Measure: turbo3 LUT should recover +7% (56.68→60.77 in Session 17)
 
 ### PART 4: Verify trit LUT in all turbo1.5 paths ✓
-- All dequant paths use `turbo1_5_unpack_trit()` → `TURBO1_5_TRIT_LUT`
-- `pow3[]` in set-rows.cu is encoding only (correct)
+
+**All dequant paths verified — LUT used everywhere:**
+| Path | File:Line | Chain |
+|------|-----------|-------|
+| dequantize.cuh | 107-111 | `dequantize_turbo1_5` → `turbo1_5_dequant_element` → `turbo1_5_unpack_trit` → `TURBO1_5_TRIT_LUT` |
+| fattn-common.cuh | 542-543, 572-575, 592-599 | Direct `turbo1_5_dequant_element` calls |
+| convert.cu | 767, 828, 859, 909 | Via `dequantize_turbo1_5` |
+| getrows.cu | 215 | Via `dequantize_turbo1_5` |
+| set-rows.cu | 1253, 1379 | `pow3[]` — ENCODING only (trit packing), correct |
+
+No integer division dequant path (`packed / pow3[pos] % 3`) remains in any hot path.
+
+### MMA/TILE Pre-Dequant Verification ✓
+
+Both MMA (`fattn-mma-f16.cuh:1775`) and TILE (`fattn-tile.cuh:1108`) pass `need_f16_K=true, need_f16_V=true` to `launch_fattn`, which calls `ggml_get_to_fp16_cuda()`.
+
+All turbo types verified in convert.cu:
+- `ggml_get_to_fp16_cuda`: TURBO4_0 (764), TURBO1_5 (766), TURBO3_0 (761), TURBO2_0 (762)
+- `ggml_get_to_fp16_nc_cuda`: TURBO4_0 (856), TURBO1_5 (858)
+- `ggml_get_to_fp32_cuda`: TURBO4_0 (825), TURBO1_5 (827)
+
+Prefill tested (pp512) for all cross-type combos — all OK at 2700-3300 tok/s.
+
+### GET_ROWS and Convert Dispatch Verification ✓
+- `QR_TURBO4` defined (dequantize.cuh:116), `QR_TURBO1_5` (dequantize.cuh:114)
+- `getrows.cu` TURBO4_0 (210), TURBO1_5 (214)
+- `convert.cu`: to_fp16, to_fp16_nc, to_fp32 all handle all 4 turbo types
 
 ### PART 5: Final benchmarks ✓
 
@@ -60,6 +96,20 @@
 | 512 | 6.1335 | 6.1335 | 0% |
 | 2048 | 7.3726 | 7.3726 | 0% |
 | 4096 | 6.2622 | 6.2622 | 0% |
+
+#### Cross-Type Prefill (pp512, MMA/TILE path)
+| K | V | tok/s |
+|---|---|------:|
+| turbo4 | turbo3 | 3184 |
+| turbo4 | f16 | 3012 |
+| turbo4 | q8_0 | 3109 |
+| turbo1.5 | turbo3 | 3140 |
+| turbo1.5 | f16 | 3130 |
+| turbo1.5 | q8_0 | 3324 |
+| f16 | turbo4 | 3258 |
+| f16 | turbo1.5 | 3234 |
+| q8_0 | turbo4 | 3200 |
+| q8_0 | turbo1.5 | 3238 |
 
 **Conclusion**: Sinks provide 0% PPL improvement for turbo3 across all context lengths.
 Sinks speed overhead: <0.2% (59.31 vs 59.42 tok/s). Feature kept for future investigation with other models.
