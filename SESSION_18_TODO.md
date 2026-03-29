@@ -15,6 +15,8 @@
 - [x] Part 8C: MoE model test — turbo3=93.86, turbo1.5=113.35(!), turbo4=98.38 tok/s
 - [x] Part 9: Final benchmark suite — ALL types, d=0/32K/64K/128K, PPL, MoE, prefill, asymmetric
 - [x] Part 9: Push to GitHub
-- [ ] BONUS: Look for more optimizations
-- [ ] BONUS: Profile again, find new bottlenecks
-- [ ] BONUS: Additional testing / edge cases
+- [x] BONUS: Profiled turbo3 32K bottleneck — LUT shared memory (32KB) limits occupancy at long ctx
+- [x] BONUS: turbo3 LUT+float Q path: great at short ctx (+7.2%), costly at long ctx (-19.5% vs turbo4)
+- [x] BONUS: Extended context test: 204K (pending), 128K (turbo3=14.55, turbo1.5=15.62)
+- [x] BONUS: LA mode 3 PPL: 6.8196 (vs uniform 6.8522 — slight improvement)
+- [x] BONUS: 8K benchmark: q8_0=56.69, turbo4=55.31, turbo1.5=54.99, turbo3=50.75

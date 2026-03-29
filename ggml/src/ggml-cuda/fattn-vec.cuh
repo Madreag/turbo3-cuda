@@ -258,6 +258,7 @@ static __global__ void flash_attn_ext_vec(
     // Eliminates one multiply per element in the KQ inner loop.
     // LUT attention only for types with float Q path (K_is_unquantized = true).
     // turbo4/turbo1.5 use q8_1 Q, incompatible with float LUT construction.
+    // TODO: investigate adaptive LUT (short ctx only) to avoid occupancy penalty at long ctx
     constexpr int n_centroids_lut = (type_K == GGML_TYPE_TURBO3_0) ? 8 :
                                     (type_K == GGML_TYPE_TURBO2_0) ? 4 : 0;
     // Shared memory LUT: LUT[element_pair_index][centroid] = Q.x*c or Q.y*c
