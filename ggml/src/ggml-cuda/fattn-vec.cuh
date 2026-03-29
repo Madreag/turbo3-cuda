@@ -84,16 +84,19 @@ static __global__ void flash_attn_ext_vec(
 #endif // GGML_USE_HIP
 
     constexpr int nthreads    = ggml_cuda_fattn_vec_get_nthreads_device();
-    // Turbo3 uses the float Q path (like f16/bf16), not q8_1 integer path
-    constexpr bool K_is_unquantized = (type_K == GGML_TYPE_F16 || type_K == GGML_TYPE_BF16 || type_K == GGML_TYPE_TURBO3_0 || type_K == GGML_TYPE_TURBO2_0);
-    constexpr bool V_is_unquantized = (type_V == GGML_TYPE_F16 || type_V == GGML_TYPE_BF16 || type_V == GGML_TYPE_TURBO3_0 || type_V == GGML_TYPE_TURBO2_0);
-    constexpr int nthreads_KQ = K_is_unquantized ? 128 / cpy_nb : nthreads_KQ_q;
-    constexpr int nthreads_V  = V_is_unquantized ? ((type_V == GGML_TYPE_TURBO3_0 || type_V == GGML_TYPE_TURBO2_0) ? nthreads_V_q : 128 / cpy_nb) : nthreads_V_q;
+    // turbo3/turbo2 now use q8_1 Q path (Session 20) — eliminates 4x Q bandwidth penalty at long context
+    // But keep nthreads_KQ=8 (like unquantized path) for better warp-level ILP at long context.
+    // nthreads_KQ_q=32 gives 1 KQ dot per warp; 8 gives 4 interleaved dots → better latency hiding.
+    constexpr bool K_is_unquantized = (type_K == GGML_TYPE_F16 || type_K == GGML_TYPE_BF16);
+    constexpr bool V_is_unquantized = (type_V == GGML_TYPE_F16 || type_V == GGML_TYPE_BF16);
+    constexpr bool K_is_turbo_q8_1  = (type_K == GGML_TYPE_TURBO3_0 || type_K == GGML_TYPE_TURBO2_0);
+    constexpr int nthreads_KQ = K_is_unquantized ? 128 / cpy_nb : (K_is_turbo_q8_1 ? 128 / cpy_nb : nthreads_KQ_q);
+    constexpr int nthreads_V  = V_is_unquantized ? 128 / cpy_nb : nthreads_V_q;
 
     static_assert(WARP_SIZE % nthreads_KQ == 0, "bad nthreads_K");
     static_assert(WARP_SIZE % nthreads_V  == 0, "bad nthreads_V");
 
-    constexpr int V_rows_per_thread = V_is_unquantized ? ((type_V == GGML_TYPE_TURBO3_0 || type_V == GGML_TYPE_TURBO2_0) ? 4 : 2*cpy_ne) : 4;
+    constexpr int V_rows_per_thread = V_is_unquantized ? 2*cpy_ne : 4;
     constexpr int V_cols_per_iter   = WARP_SIZE / nthreads_V;
 
     constexpr vec_dot_KQ_t vec_dot_KQ = get_vec_dot_KQ<type_K, D, nthreads_KQ>();
