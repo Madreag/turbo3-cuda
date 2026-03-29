@@ -167,7 +167,7 @@ WIKI=$(find /home/erol/ai/turboquant -name "wiki.test.raw" 2>/dev/null | head -1
 ggml/src/ggml-cuda/set-rows.cu       — Parallel SET_ROWS: turbo3/turbo4/turbo2/turbo1.5 (128 threads, warp intrinsics)
 ggml/src/ggml-cuda/turbo-quant.cuh   — Centroid constants, helper functions, sign arrays, trit LUT
 ggml/src/ggml-cuda/turbo-wht.cu      — GGML_OP_TURBO_WHT CUDA kernel
-ggml/src/ggml-cuda/turbo-sink.cu     — Attention sinks (TO BE DELETED in Session 19 — 0% PPL benefit, crashes SM86)
+ggml/src/ggml-cuda/turbo-sink.cu     — Attention sinks (Session 19: fix __managed__ → graph-compatible, crashes SM86)
 ggml/src/ggml-cuda/turbo-innerq.cu   — InnerQ per-channel equalization
 ggml/src/ggml-cuda/fattn-common.cuh  — FA vec_dot for turbo3/4/2/1.5, V dequant, sparse V, LUT (turbo2 only)
 ggml/src/ggml-cuda/fattn-vec.cuh     — VEC FA kernel, sink dispatch, LUT dispatch
@@ -199,7 +199,7 @@ turbo4 and turbo1.5 use q8_1 Q format (`K_is_unquantized = false`). turbo3 and t
 |----------|--------|--------|
 | `TURBO_LAYER_ADAPTIVE=N` | Per-layer KV type (modes 0-11) | Working |
 | `TURBO_INNERQ=N` | InnerQ calibration | Working |
-| `TURBO_SINK_SIZE=N` | Attention sinks (first N positions at fp16) | BUGGY — crashes on SM86, 0% PPL benefit on SM120 |
+| `TURBO_SINK_SIZE=N` | Attention sinks (first N positions at fp16) | BUGGY on SM86 (`__managed__` crash). Session 19 will fix. PPL benefit needs proper evaluation. |
 
 ## Commit Message Format
 
@@ -227,7 +227,7 @@ turbo3 at 32K = 40.90 vs turbo4 = 46.51 (-12%). Root cause: `K_is_unquantized=tr
 
 ## What To Build Next (Priority Order)
 
-1. **Session 19**: Delete sinks (SM86 crash fix), add missing template instances (asymmetric K/V crash fix)
+1. **Session 19**: Fix sinks crash (`__managed__` → graph-compatible), add missing template instances (asymmetric K/V crash fix)
 2. **q8_1 turbo3 vec_dot** — eliminate 4x Q bandwidth penalty at long context
 3. **turbo3 LUT bank conflict fix** — `LUT[D][8+1]` padding to recover +7% at short
 4. **turbo1.5 branchless ternary** — `float(trit) * C * norm` instead of centroid lookup
