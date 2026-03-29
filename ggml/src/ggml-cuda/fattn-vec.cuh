@@ -2,11 +2,12 @@
 #include "fattn-common.cuh"
 
 // Per-TU sink state — in fattn-vec.cuh so kernel and host code share the same TU copy.
+// Only K sinks are used in the VEC kernel. V sinks were removed from the V accumulation
+// loop because managed memory reads in the hot loop caused -3% short / -12% 32K regression,
+// and sinks provide 0% PPL improvement.
 static __managed__ const half * d_fattn_sink_K_buf = nullptr;
-static __managed__ const half * d_fattn_sink_V_buf = nullptr;
 static __managed__ int          d_fattn_sink_n     = 0;
 static __managed__ int64_t      d_fattn_sink_ne0   = 0;
-static __managed__ int64_t      d_fattn_sink_V_ne0 = 0;
 
 static int ggml_cuda_fattn_vec_get_nthreads_host(const int cc) {
     return 128;
@@ -403,10 +404,6 @@ static __global__ void flash_attn_ext_vec(
         for (int k0 = 0; k0 < WARP_SIZE; k0 += V_cols_per_iter) {
             const int k = threadIdx.y*WARP_SIZE + k0 + (nthreads_V == WARP_SIZE ? 0 : threadIdx.x / nthreads_V);
 
-            // V sink: for sink positions, use fp16 from sink buffer instead of turbo dequant
-            constexpr bool V_has_sink = (type_V == GGML_TYPE_TURBO3_0 || type_V == GGML_TYPE_TURBO2_0);
-            const bool use_v_sink = V_has_sink && d_fattn_sink_n > 0 && (k_VKQ_0 + k) < d_fattn_sink_n && d_fattn_sink_V_buf != nullptr;
-
 #ifdef V_DOT2_F32_F16_AVAILABLE
             half2 KQ_k[ncols];
 #pragma unroll
@@ -427,21 +424,17 @@ static __global__ void flash_attn_ext_vec(
 #pragma unroll
             for (int i_VKQ_0 = 0; i_VKQ_0 < D/2; i_VKQ_0 += nthreads_V*V_rows_per_thread/2) {
                 half2 tmp[V_rows_per_thread/2];
-                const int64_t v_offset = 2*i_VKQ_0 + (nthreads_V == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads_V)*V_rows_per_thread;
                 if constexpr (type_V == GGML_TYPE_BF16) {
                     float2 tmp_f[V_rows_per_thread/2];
-                    dequantize_V(V + k*nb21, tmp_f, v_offset);
+                    dequantize_V(V + k*nb21, tmp_f,
+                        2*i_VKQ_0 + (nthreads_V == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads_V)*V_rows_per_thread);
 #pragma unroll
                     for (int i_VKQ_1 = 0; i_VKQ_1 < V_rows_per_thread/2; ++i_VKQ_1) {
                         tmp[i_VKQ_1] = __float22half2_rn(tmp_f[i_VKQ_1]);
                     }
-                } else if (use_v_sink) {
-                    const int kv_head = head / gqa_ratio;
-                    dequantize_V_f16<half, V_rows_per_thread>(
-                        (const void*)(d_fattn_sink_V_buf + (k_VKQ_0 + k) * d_fattn_sink_V_ne0 + kv_head * D),
-                        tmp, v_offset);
                 } else {
-                    dequantize_V(V + k*nb21, tmp, v_offset);
+                    dequantize_V(V + k*nb21, tmp,
+                        2*i_VKQ_0 + (nthreads_V == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads_V)*V_rows_per_thread);
                 }
 #pragma unroll
                 for (int i_VKQ_1 = 0; i_VKQ_1 < V_rows_per_thread/2; ++i_VKQ_1) {
@@ -471,15 +464,8 @@ static __global__ void flash_attn_ext_vec(
 #pragma unroll
             for (int i_VKQ_0 = 0; i_VKQ_0 < D/2; i_VKQ_0 += nthreads_V*V_rows_per_thread/2) {
                 float2 tmp[V_rows_per_thread/2];
-                const int64_t v_offset = 2*i_VKQ_0 + (nthreads_V == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads_V)*V_rows_per_thread;
-                if (use_v_sink) {
-                    const int kv_head = head / gqa_ratio;
-                    dequantize_V_f16<float, V_rows_per_thread>(
-                        (const void*)(d_fattn_sink_V_buf + (k_VKQ_0 + k) * d_fattn_sink_V_ne0 + kv_head * D),
-                        tmp, v_offset);
-                } else {
-                    dequantize_V(V + k*nb21, tmp, v_offset);
-                }
+                dequantize_V(V + k*nb21, tmp,
+                    2*i_VKQ_0 + (nthreads_V == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads_V)*V_rows_per_thread);
 #pragma unroll
                 for (int i_VKQ_1 = 0; i_VKQ_1 < V_rows_per_thread/2; ++i_VKQ_1) {
 #pragma unroll
@@ -647,28 +633,21 @@ static __global__ void flash_attn_ext_vec(
 
 template <int D, int cols_per_block, ggml_type type_K, ggml_type type_V, bool use_logit_softcap>
 void ggml_cuda_flash_attn_ext_vec_case_impl(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
-    // Turbo attention sinks: set managed memory state before VEC kernel launch.
+    // Turbo attention sinks: set managed memory state for K scoring in VEC kernel.
     // Uses __managed__ variables (unified memory) so host writes are visible to device.
     // Requires GGML_CUDA_DISABLE_GRAPHS=1 (managed memory writes break graph capture).
-    constexpr bool K_is_turbo_sink = (type_K == GGML_TYPE_TURBO3_0 || type_K == GGML_TYPE_TURBO2_0);
-    constexpr bool V_is_turbo_sink = (type_V == GGML_TYPE_TURBO3_0 || type_V == GGML_TYPE_TURBO2_0);
-    if constexpr (K_is_turbo_sink || V_is_turbo_sink) {
+    // Note: V sinks were removed from the V accumulation loop because:
+    // 1. Sinks provide 0% PPL improvement (turbo3 precision already sufficient)
+    // 2. The managed memory read in the V loop caused -3% short / -12% 32K regression
+    if constexpr (type_K == GGML_TYPE_TURBO3_0 || type_K == GGML_TYPE_TURBO2_0) {
         const int ss = turbo_sink_size();
         if (ss > 0) {
+            const ggml_tensor * K = dst->src[1];
             // Sync to ensure any previous kernel using managed memory is done
             CUDA_CHECK(cudaStreamSynchronize(ctx.stream()));
-            if constexpr (K_is_turbo_sink) {
-                const ggml_tensor * K = dst->src[1];
-                int64_t k_ne0_full = 0;
-                d_fattn_sink_K_buf = turbo_sink_lookup_buf((void *)K->data, &k_ne0_full);
-                d_fattn_sink_ne0 = k_ne0_full;
-            }
-            if constexpr (V_is_turbo_sink) {
-                const ggml_tensor * V = dst->src[2];
-                int64_t v_ne0_full = 0;
-                d_fattn_sink_V_buf = turbo_sink_lookup_buf((void *)V->data, &v_ne0_full);
-                d_fattn_sink_V_ne0 = v_ne0_full;
-            }
+            int64_t k_ne0_full = 0;
+            d_fattn_sink_K_buf = turbo_sink_lookup_buf((void *)K->data, &k_ne0_full);
+            d_fattn_sink_ne0 = k_ne0_full;
             d_fattn_sink_n = ss;
         }
     }
