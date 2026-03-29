@@ -40,6 +40,22 @@
 | turbo1.5 | 15.62 |
 | turbo3   | 14.55 |
 
+## Dense Model — 204K Decode (d=204800, tg4)
+
+| Type     | tok/s |
+|----------|-------|
+| turbo1.5 | 15.26 |
+| turbo3   |  8.42 |
+
+## Dense Model — 8K Decode (d=8192, tg128)
+
+| Type     | tok/s |
+|----------|-------|
+| q8_0     | 56.69 |
+| turbo4   | 55.31 |
+| turbo1.5 | 54.99 |
+| turbo3   | 50.75 |
+
 ## Perplexity (Qwen 3.5 27B, wikitext-2)
 
 | Type     | bpv  | PPL ctx=512 | PPL ctx=2048 |
@@ -70,6 +86,16 @@
 |--------------|-------|
 | turbo3/q8_0  | 57.49 |
 | turbo4/q8_0  | 57.70 |
+
+## Key Insight: Q Format Dominates Long-Context Performance
+
+| Q Format   | Types          | Short d=0 | Long d=32K | Bottleneck |
+|------------|----------------|-----------|------------|------------|
+| float Q    | turbo3, turbo2 | Best (LUT) | Worst | 4x Q bandwidth + 32KB shared mem |
+| q8_1 Q     | turbo4, turbo1.5 | Good | Best | Minimal overhead |
+
+turbo1.5 at 204K: 15.26 tok/s (1.8x turbo3's 8.42) — the q8_1 Q path
+and 2.0 bpv makes turbo1.5 the best choice for extreme-context workloads.
 
 ## Session 18 Changes Summary
 
