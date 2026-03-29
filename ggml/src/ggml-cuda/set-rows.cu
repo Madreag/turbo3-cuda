@@ -930,6 +930,13 @@ static void set_rows_cuda_turbo2(
             s01, s02, s03, s10, s11, s12,
             nb1, nb2, nb3, tail_size);
     }
+
+    // Attention sinks: capture WHT-rotated fp16 for positions < TURBO_SINK_SIZE
+    turbo_sink_capture_turbo3_impl<idx_t>(
+        src0_d, src1_d, dst->data,
+        ne00, ne01, ne11, s01, s02, s03,
+        ne12, ne13, s10, s11, s12,
+        nb1, nb2, nb3, group_size, stream);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1091,6 +1098,14 @@ static void set_rows_cuda_turbo4(
         ne00, ne01, ne10, ne11, ne12, ne13,
         s01, s02, s03, s10, s11, s12,
         nb1, nb2, nb3);
+
+    // Attention sinks: capture WHT-rotated fp16 for positions < TURBO_SINK_SIZE
+    // turbo4 always uses group_size=128 (QK_TURBO4=128)
+    turbo_sink_capture_turbo3_impl<idx_t>(
+        src0_d, src1_d, dst->data,
+        ne00, ne01, ne11, s01, s02, s03,
+        ne12, ne13, s10, s11, s12,
+        nb1, nb2, nb3, 128, stream);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1458,6 +1473,13 @@ static void set_rows_cuda_turbo1_5(
             s01, s02, s03, s10, s11, s12,
             nb1, nb2, nb3, tail_size);
     }
+
+    // Attention sinks: capture WHT-rotated fp16 for positions < TURBO_SINK_SIZE
+    turbo_sink_capture_turbo3_impl<idx_t>(
+        src0_d, src1_d, dst->data,
+        ne00, ne01, ne11, s01, s02, s03,
+        ne12, ne13, s10, s11, s12,
+        nb1, nb2, nb3, group_size, stream);
 }
 
 template<typename src_t, typename idx_t>

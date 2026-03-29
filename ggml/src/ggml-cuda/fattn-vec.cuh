@@ -3,11 +3,12 @@
 
 // Per-TU sink state — in fattn-vec.cuh so kernel and host code share the same TU copy.
 // Only K sinks are used in the VEC kernel. V sinks were removed from the V accumulation
-// loop because managed memory reads in the hot loop caused -3% short / -12% 32K regression,
-// and sinks provide 0% PPL improvement.
-static __managed__ const half * d_fattn_sink_K_buf = nullptr;
-static __managed__ int          d_fattn_sink_n     = 0;
-static __managed__ int64_t      d_fattn_sink_ne0   = 0;
+// loop because managed memory reads in the hot loop caused -3% short / -12% 32K regression.
+// Uses __device__ + cudaMemcpyToSymbolAsync (stream-ordered, graph-capturable).
+// Previous __managed__ approach crashed on SM86 (page faults during graph replay).
+static __device__ const half * d_fattn_sink_K_buf = nullptr;
+static __device__ int          d_fattn_sink_n     = 0;
+static __device__ int64_t      d_fattn_sink_ne0   = 0;
 
 static int ggml_cuda_fattn_vec_get_nthreads_host(const int cc) {
     return 128;
@@ -304,9 +305,9 @@ static __global__ void flash_attn_ext_vec(
 #pragma unroll
             for (int j = 0; j < ncols; ++j) {
                 float sum;
-                // Turbo attention: sinks (fp16) check or LUT path for turbo types
-                if constexpr (type_K == GGML_TYPE_TURBO2_0) {
-                    // turbo2 with sink check
+                // Turbo attention: sinks (fp16) check for all turbo types
+                if constexpr (type_K == GGML_TYPE_TURBO3_0 || type_K == GGML_TYPE_TURBO4_0 ||
+                              type_K == GGML_TYPE_TURBO2_0 || type_K == GGML_TYPE_TURBO1_5) {
                     const int kv_pos = k_VKQ_0 + i_KQ;
                     if (d_fattn_sink_n > 0 && kv_pos < d_fattn_sink_n && d_fattn_sink_K_buf != nullptr) {
                         const int kv_head = head / gqa_ratio;
@@ -601,22 +602,32 @@ static __global__ void flash_attn_ext_vec(
 
 template <int D, int cols_per_block, ggml_type type_K, ggml_type type_V, bool use_logit_softcap>
 void ggml_cuda_flash_attn_ext_vec_case_impl(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
-    // Turbo attention sinks: set managed memory state for K scoring in VEC kernel.
-    // Uses __managed__ variables (unified memory) so host writes are visible to device.
-    // Requires GGML_CUDA_DISABLE_GRAPHS=1 (managed memory writes break graph capture).
-    // Note: V sinks were removed from the V accumulation loop because:
-    // 1. Sinks provide 0% PPL improvement (turbo3 precision already sufficient)
-    // 2. The managed memory read in the V loop caused -3% short / -12% 32K regression
-    if constexpr (type_K == GGML_TYPE_TURBO3_0 || type_K == GGML_TYPE_TURBO2_0) {
+    // Turbo attention sinks: set device memory state for K scoring in VEC kernel.
+    // Uses __device__ variables updated via cudaGetSymbolAddress + cudaMemcpyAsync
+    // (graph-capturable). Previous __managed__ approach crashed on SM86.
+    if constexpr (type_K == GGML_TYPE_TURBO3_0 || type_K == GGML_TYPE_TURBO4_0 ||
+                  type_K == GGML_TYPE_TURBO2_0 || type_K == GGML_TYPE_TURBO1_5) {
         const int ss = turbo_sink_size();
         if (ss > 0) {
             const ggml_tensor * K = dst->src[1];
-            // Sync to ensure any previous kernel using managed memory is done
-            CUDA_CHECK(cudaStreamSynchronize(ctx.stream()));
             int64_t k_ne0_full = 0;
-            d_fattn_sink_K_buf = turbo_sink_lookup_buf((void *)K->data, &k_ne0_full);
-            d_fattn_sink_ne0 = k_ne0_full;
-            d_fattn_sink_n = ss;
+            half * k_buf = turbo_sink_lookup_buf((void *)K->data, &k_ne0_full);
+            const half * k_buf_const = k_buf;
+
+            // Get device addresses once (cached per TU via static locals)
+            static void * d_addr_buf = nullptr;
+            static void * d_addr_n   = nullptr;
+            static void * d_addr_ne0 = nullptr;
+            if (!d_addr_buf) {
+                CUDA_CHECK(cudaGetSymbolAddress(&d_addr_buf, d_fattn_sink_K_buf));
+                CUDA_CHECK(cudaGetSymbolAddress(&d_addr_n,   d_fattn_sink_n));
+                CUDA_CHECK(cudaGetSymbolAddress(&d_addr_ne0, d_fattn_sink_ne0));
+            }
+
+            // cudaMemcpyAsync is graph-capturable (unlike cudaMemcpyToSymbolAsync)
+            CUDA_CHECK(cudaMemcpyAsync(d_addr_buf, &k_buf_const, sizeof(const half *), cudaMemcpyHostToDevice, ctx.stream()));
+            CUDA_CHECK(cudaMemcpyAsync(d_addr_ne0, &k_ne0_full,  sizeof(int64_t),      cudaMemcpyHostToDevice, ctx.stream()));
+            CUDA_CHECK(cudaMemcpyAsync(d_addr_n,   &ss,           sizeof(int),          cudaMemcpyHostToDevice, ctx.stream()));
         }
     }
 
