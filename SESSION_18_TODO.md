@@ -3,12 +3,10 @@
 - [x] Part 1: Verify PPL improvement — neutral; turbo3 already precise enough, sinks don't help
 - [x] Part 2: Trit LUT (5×256 constant memory) — 54.91→58.66 tok/s (+6.8%)
 - [x] Part 2: Verify turbo1.5 speedup at 32K — 43.81 tok/s
-- [x] Part 3: LUT for turbo4 (16 centroids) — 58.06→58.94 tok/s (+1.5%)
-- [x] Part 3: Verify turbo4 speedup — PPL 6.8145 unchanged
-- [ ] Part 4: LUT for turbo1.5 (3 centroids)
-- [ ] Part 4: Verify turbo1.5 speedup
-- [ ] Part 5: ISWA WHT — FULL investigation (every overload)
-- [ ] Part 5: Document findings for each build_attn overload
+- [x] Part 3+4: LUT for turbo4/turbo1.5 — BLOCKED: q8_1 Q format incompatible with float LUT
+- [x] Part 3+4: Reverted broken code, documented limitation. Trit LUT already provides +6.8% for turbo1.5
+- [x] Part 5: ISWA WHT — ALL 5 overloads audited, WHT rotation PRESENT in all KV-cache paths
+- [x] Part 5: Documented: kv(L2095), k/MLA(L2189), kv_iswa(L2265) have forward Q WHT; inverse in build_attn_mha(L1843/1921)
 - [ ] Part 6: CUDA graph-compatible sinks
 - [ ] Part 6: Verify works WITHOUT GGML_CUDA_DISABLE_GRAPHS
 - [ ] Part 7: Clean 32K benchmarks (5 runs, warmup)
