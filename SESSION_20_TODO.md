@@ -42,13 +42,58 @@
 - [x] K=turbo4/V=f16 = 6.7775 (best overall quality)
 - [x] turbo3 ctx=2048 PPL = 5.6744 (same as q8_0!)
 
-## PART 5: FP4 Tensor Core Feasibility ✓
-- [x] Feasible in theory: turbo1.5 {-C, 0, +C} maps to FP4 E2M1 {-1.0, 0.0, +1.0}
-- [x] Not feasible for Session 20:
-  - FP4 MMA helps prefill only (not VEC decode)
-  - Fragment layout poorly documented on SM120
-  - Needs new MMA kernel + trit repacking to FP4 pairs
-- [x] Documented for future session
+## PART 5: FP4 Tensor Core Feasibility — DEEP RESEARCH ✓
+
+### What Exists in the Codebase Already
+The infrastructure is **fully built**:
+- `mma.cuh:1048-1062`: `mma_block_scaled()` — the exact PTX `mma.sync.aligned.kind::mxf4` instruction for SM120
+- `ggml-common.h:193-206`: `block_mxfp4` struct — 32 elements per block, E8M0 scale + 16 bytes packed E2M1
+- `mmq.cuh:720-783`: `load_tiles_mxfp4()` — loads MXFP4 blocks into shared memory for MMA
+- `mmq.cuh:1043-1061`: `vec_dot_mxfp4_mxfp4_mma()` — the actual MMA vec_dot using FP4 tensor cores
+- `common.cuh:812-832`: `ggml_cuda_float_to_fp4_e2m1()` — float→FP4 quantization
+- `convert.cu:473-620`: MXFP4/NVFP4 dequant kernels
+- `CMakeLists.txt`: Blackwell 120a architecture support with `BLACKWELL_MMA_AVAILABLE`
+
+### turbo1.5 → MXFP4 Mapping
+turbo1.5 ternary {-C, 0, +C} maps to FP4 E2M1 {-1.0, 0.0, +1.0}:
+- -1.0 in E2M1 = 0b1100 (sign=1, exp=10, mantissa=0)
+- 0.0 in E2M1 = 0b0000
+- +1.0 in E2M1 = 0b0100 (sign=0, exp=10, mantissa=0)
+- Pack 2 per byte for e2m1x2 format
+- Block scale = norm * C (absorb centroid into E8M0 scale)
+
+### What Would Need to Be Built
+1. **Repacking kernel**: Convert turbo1.5 trit-packed format (5 trits/byte) to MXFP4 format (2 E2M1/byte)
+   - Could happen at SET_ROWS time (dual-format storage) or on-the-fly at FA time
+   - 32 trits → 16 bytes MXFP4 qs + 1 byte E8M0 scale
+
+2. **FA MMA kernel using FP4 tensor cores**: New `fattn-mma-fp4.cuh`
+   - Use existing `mma_block_scaled()` from mma.cuh
+   - Load turbo1.5 K/V as MXFP4 tiles (reuse load_tiles_mxfp4 pattern)
+   - Q stays as fp16 (converted to E2M1 pairs? or keep fp16 and use mixed precision?)
+
+3. **Q format issue**: `mma.sync` requires BOTH inputs as e2m1. Q cannot stay as fp16.
+   - Option A: Quantize Q to FP4 at FA dispatch time (D elements, one-time cost)
+   - Option B: Use fp16×fp4 mixed precision MMA if available (need to check PTX ISA)
+   - The instruction signature is `f32.e2m1.e2m1.f32` — BOTH A and B must be e2m1
+
+4. **Tile dimensions**: m16n8k64 processes 64 K-elements per MMA. For D=128: 2 MMAs per head.
+
+### Feasibility Assessment
+- **PREFILL**: Straightforward. MMA prefill already pre-dequants turbo→fp16. Could instead repack turbo1.5→mxfp4 and use mma_block_scaled. Expected 2x throughput vs fp16 MMA.
+- **DECODE (VEC)**: NOT applicable. VEC kernel is scalar, not MMA. FP4 tensor cores don't help.
+- **Q quantization to E2M1**: Significant precision loss. Q values are continuous floats, E2M1 only has 16 representable values (±{0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0}). This WILL hurt attention quality.
+
+### Verdict
+**Feasible for prefill** with existing infrastructure. The codebase has everything needed:
+- mma_block_scaled() ✓
+- MXFP4 block struct ✓
+- E2M1 quantization functions ✓
+- Blackwell SM120a support ✓
+
+**Blocking issue**: Q must also be E2M1, which has only 16 levels. This is severe quantization of the attention query. PPL impact needs testing. Could be acceptable for turbo1.5 where K is already ternary — the K precision is the bottleneck, not Q.
+
+**Estimated effort**: 1-2 sessions for a working prototype. Not a quick win but infrastructure is in place.
 
 ## PART 6: Final Benchmarks ✓
 
@@ -105,9 +150,11 @@
 ### Asymmetric Speed Matrix (tg4, d=0)
 All 12 turbo×turbo+q8_0 combos pass, 39-47 tok/s range.
 
-### V-specific 64×64 Rotation
-Investigated. Requires separate K/V group_size in llama-kv-cache.cpp + llama-graph.cpp.
-SET_ROWS already supports group_size=64 via op_params. Non-trivial architectural change — deferred.
+### V-specific 64×64 Rotation — TESTED, BLOCKED
+Added `TURBO_V_GROUP` env var to override V group_size in llama-kv-cache.cpp.
+**Result**: PPL = 18.26 (catastrophic, baseline = 6.85).
+**Root cause**: Graph-level inverse WHT (`llama-graph.cpp:1839`) hardcodes group_size from `tensor->ne[0]` (always 128 for this model), not from the actual quantization group_size. V is quantized with 64-element groups but the inverse rotation uses 128-element signs → complete mismatch.
+**Fix required**: Pass V's actual group_size through the graph (e.g., via op_params on the WHT op, or a separate V group_size variable). This is a 2-file architectural change (llama-kv-cache.cpp + llama-graph.cpp). Reverted the test code.
 
 ### Vault Dashboard
 Updated: Project Status, Benchmark Hub, Roadmap — all current with S20 final numbers.
