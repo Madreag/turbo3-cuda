@@ -1,3 +1,59 @@
+# llama.cpp + TurboQuant CUDA — Up to 8x KV Compression, Near-Zero Speed Loss
+
+CUDA implementation of [TurboQuant](https://arxiv.org/abs/2504.19874) (ICLR 2026) KV cache compression for llama.cpp, targeting NVIDIA GPUs. **2-8x less KV memory with 97-100% of f16 decode speed.**
+
+Based on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, native vec_dot in FA, and MMA prefill.
+
+## Performance (RTX 5090, Qwen 3.5 27B Q6_K)
+
+| Type | bpv | Compression | Short Decode | 32K Decode | PPL ctx=512 |
+|------|----:|------------:|-------------:|-----------:|:-----------:|
+| f16 | 16.0 | 1x | 59.00 tok/s | — | — |
+| q8_0 | 8.5 | 1.9x | 59.53 | 48.03 | 6.759 |
+| **turbo4** | 4.25 | **3.8x** | **59.06** (100.1% f16) | 46.51 | 6.825 (+0.97%) |
+| **turbo2** | 2.50 | **6.4x** | **58.88** (99.8% f16) | — | 7.080 (+4.75%) |
+| **turbo3** | 3.25 | **4.6x** | 57.99 (98.3% f16) | 40.90 | 6.852 (+1.38%) |
+| **turbo1.5** | 2.00 | **8.0x** | 57.36 (97.2% f16) | 44.49 | 7.312 (+8.18%) |
+
+**MoE (Qwen 3.5 35B-A3B)**: turbo1.5 = **113 tok/s**, turbo4 = 98, turbo3 = 94.
+**204K context**: turbo1.5 = 15.26 tok/s (turbo3 = 8.42).
+
+## Which Mode Should I Use?
+
+| Your priority | Mode | Command |
+|---|---|---|
+| **Near-zero overhead** | turbo4 | `-ctk turbo4 -ctv turbo4` |
+| **Best compression/speed** | turbo3 | `-ctk turbo3 -ctv turbo3` |
+| **Maximum compression** | turbo1.5 | `-ctk turbo1.5 -ctv turbo1.5` |
+| **Long context (128K+)** | turbo1.5 | `-ctk turbo1.5 -ctv turbo1.5` |
+
+## Quick Start
+
+```bash
+cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=120
+cmake --build build -j$(nproc)
+
+# turbo3 (best balance)
+./build/bin/llama-cli -hf your-model-GGUF -ctk turbo3 -ctv turbo3 -ngl 99
+
+# turbo4 (near-zero overhead, 3.8x compression)
+./build/bin/llama-cli -hf your-model-GGUF -ctk turbo4 -ctv turbo4 -ngl 99
+
+# turbo1.5 (8x compression, best for 128K+)
+./build/bin/llama-cli -hf your-model-GGUF -ctk turbo1.5 -ctv turbo1.5 -ngl 99
+
+# Server mode
+./build/bin/llama-server -hf your-model-GGUF -ctk turbo3 -ctv turbo3 -ngl 99 --port 8080
+```
+
+**Note**: Always use `-mmp 0` on WSL2 to disable mmap (avoids GPU stalls from page cache).
+
+---
+
+*Below is the original llama.cpp README.*
+
+---
+
 # llama.cpp
 
 ![llama](https://user-images.githubusercontent.com/1991296/230134379-7181e485-c521-4d23-a0d6-f7b3b61ba524.png)
