@@ -252,6 +252,31 @@ static __global__ void flash_attn_ext_vec(
 #endif // V_DOT2_F32_F16_AVAILABLE
     }
 
+    // LUT attention: precompute Q×centroid table in shared memory for turbo3/turbo4.
+    // Eliminates one multiply per element in the KQ inner loop.
+    constexpr int n_centroids_lut = (type_K == GGML_TYPE_TURBO3_0) ? 8 :
+                                    (type_K == GGML_TYPE_TURBO4_0) ? 16 :
+                                    (type_K == GGML_TYPE_TURBO2_0) ? 4 : 0;
+    // Shared memory LUT: LUT[element_pair_index][centroid] = Q.x*c or Q.y*c
+    // Layout: lut_q[2*k][c] for x, lut_q[2*k+1][c] for y of pair k
+    __shared__ float turbo_lut[n_centroids_lut > 0 ? D : 1][n_centroids_lut > 0 ? n_centroids_lut : 1];
+
+    if constexpr (n_centroids_lut > 0 && ncols == 1) {
+        // Build LUT: Q[d] * centroid[c] for each dimension and centroid.
+        // Load Q directly from global memory (one-time cost, small vs KV scan).
+        const float * centroids_ptr = (type_K == GGML_TYPE_TURBO3_0) ? TURBO_CENTROIDS_3BIT :
+                                      (type_K == GGML_TYPE_TURBO4_0) ? TURBO_CENTROIDS_4BIT :
+                                      TURBO_CENTROIDS_2BIT;
+        const float * Q_f = (const float *)(Q + 0*nb01);
+        for (int d = tid; d < D; d += nthreads) {
+            const float q_val = Q_f[d] * scale;
+            for (int c = 0; c < n_centroids_lut; c++) {
+                turbo_lut[d][c] = q_val * centroids_ptr[c];
+            }
+        }
+        __syncthreads();
+    }
+
     const int k_VKQ_max = KV_max ? KV_max[sequence*gridDim.x + blockIdx.x] : ne11;
     K     += blockIdx.y*nthreads * nb11;
     V     += blockIdx.y*nthreads * nb21;
@@ -276,8 +301,39 @@ static __global__ void flash_attn_ext_vec(
 #pragma unroll
             for (int j = 0; j < ncols; ++j) {
                 float sum;
-                // Turbo attention sinks: use fp16 precision for first N KV positions
-                if constexpr (type_K == GGML_TYPE_TURBO3_0 || type_K == GGML_TYPE_TURBO2_0) {
+                // Turbo attention: sinks (fp16) or LUT path for turbo types
+                if constexpr (type_K == GGML_TYPE_TURBO3_0 && n_centroids_lut > 0) {
+                    // turbo3 with LUT: check sink first, then use LUT
+                    const int kv_pos = k_VKQ_0 + i_KQ;
+                    if (d_fattn_sink_n > 0 && kv_pos < d_fattn_sink_n && d_fattn_sink_K_buf != nullptr) {
+                        const char * sink_K = (const char *)(d_fattn_sink_K_buf + kv_pos * d_fattn_sink_ne0);
+                        sum = vec_dot_fattn_vec_KQ_f16<D, nthreads_KQ>(sink_K, Q_reg[j], Q_i32[j], Q_ds[j]);
+                    } else {
+                        // LUT attention: precomputed Q×centroid table eliminates one multiply
+                        const block_turbo3_0 * K_turbo = (const block_turbo3_0 *)(K + i_KQ*nb11);
+                        sum = 0.0f;
+                        constexpr int cpy_nb = ggml_cuda_get_max_cpy_bytes();
+                        constexpr int cpy_ne = cpy_nb / 4;
+#pragma unroll
+                        for (int k_KQ_0 = 0; k_KQ_0 < D/2; k_KQ_0 += nthreads_KQ*cpy_ne) {
+#pragma unroll
+                            for (int k_KQ_1 = 0; k_KQ_1 < cpy_ne; ++k_KQ_1) {
+                                const int k_KQ = k_KQ_0 + (threadIdx.x % nthreads_KQ)*cpy_ne + k_KQ_1;
+                                const int elem0 = k_KQ * 2;
+                                const int ib = elem0 / QK_TURBO3;
+                                const int j0 = elem0 % QK_TURBO3;
+                                const float norm = __half2float(K_turbo[ib].norm);
+                                const uint8_t qs_byte = K_turbo[ib].qs[j0 / 4];
+                                const uint8_t sgn_byte = K_turbo[ib].signs[j0 / 8];
+                                const int shift = (j0 % 4) * 2;
+                                const uint8_t idx0 = ((qs_byte >> shift) & 0x3) | (((sgn_byte >> (j0 % 8)) & 0x1) << 2);
+                                const uint8_t idx1 = ((qs_byte >> (shift+2)) & 0x3) | (((sgn_byte >> (j0 % 8 + 1)) & 0x1) << 2);
+                                sum += (turbo_lut[elem0][idx0] + turbo_lut[elem0+1][idx1]) * norm;
+                            }
+                        }
+                    }
+                } else if constexpr (type_K == GGML_TYPE_TURBO2_0) {
+                    // turbo2 with sink check
                     const int kv_pos = k_VKQ_0 + i_KQ;
                     if (d_fattn_sink_n > 0 && kv_pos < d_fattn_sink_n && d_fattn_sink_K_buf != nullptr) {
                         const char * sink_K = (const char *)(d_fattn_sink_K_buf + kv_pos * d_fattn_sink_ne0);
