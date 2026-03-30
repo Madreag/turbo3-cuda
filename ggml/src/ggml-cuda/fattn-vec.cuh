@@ -368,25 +368,7 @@ static __global__ void flash_attn_ext_vec(
                                     __half2float(turbo_lut[d_base+4][idx4]) + __half2float(turbo_lut[d_base+5][idx5]) +
                                     __half2float(turbo_lut[d_base+6][idx6]) + __half2float(turbo_lut[d_base+7][idx7])) * norm;
                         }
-                    } else if constexpr (n_centroids_lut > 0 && type_K == GGML_TYPE_TURBO4_0) {
-                        // LUT scoring for turbo4: process 4 elements at a time (2 qs bytes)
-                        const block_turbo4_0 * K_turbo = (const block_turbo4_0 *)(K + i_KQ*nb11);
-                        sum = 0.0f;
-#pragma unroll
-                        for (int d0 = 0; d0 < D; d0 += 4 * nthreads_KQ) {
-                            const int d_base = d0 + (threadIdx.x % nthreads_KQ) * 4;
-                            const int ib = d_base / QK_TURBO4;
-                            const int jj = d_base % QK_TURBO4;
-                            const float norm = __half2float(K_turbo[ib].norm);
-                            const uint8_t qs0 = K_turbo[ib].qs[jj / 2];
-                            const uint8_t qs1 = K_turbo[ib].qs[jj / 2 + 1];
-                            const uint8_t idx0 = (qs0 >> 0) & 0xF;
-                            const uint8_t idx1 = (qs0 >> 4) & 0xF;
-                            const uint8_t idx2 = (qs1 >> 0) & 0xF;
-                            const uint8_t idx3 = (qs1 >> 4) & 0xF;
-                            sum += (__half2float(turbo_lut[d_base  ][idx0]) + __half2float(turbo_lut[d_base+1][idx1]) +
-                                    __half2float(turbo_lut[d_base+2][idx2]) + __half2float(turbo_lut[d_base+3][idx3])) * norm;
-                        }
+                    // turbo4 LUT removed (Dead End #17: 8.7KB shmem net negative, S21)
                     } else if constexpr (n_centroids_lut > 0 && type_K == GGML_TYPE_TURBO2_0) {
                         // LUT scoring for turbo2: process 8 elements at a time (2 qs bytes, no signs)
                         const block_turbo2_0 * K_turbo = (const block_turbo2_0 *)(K + i_KQ*nb11);
