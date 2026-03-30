@@ -281,3 +281,70 @@ Session 26 Part 2 is DONE when:
 - [ ] Fix committed with root cause explanation
 
 **DO NOT proceed to block-128, bpv corrections, or any S27/S28 work until this matrix is green.**
+
+---
+
+## APPENDIX: Block-128 SET_ROWS Fix (for AFTER bugs are fixed)
+
+When you get to implementing block-128 (`QK_TURBO3=128`, `QK_TURBO2=128`), the SET_ROWS kernel will crash because the warp-to-block mapping assumes 1 warp = 1 block. HyperionMS2040 found and fixed this on SM86 (commit `7cb6edb` in their fork). Their fix is validated — PPL identical at block-128.
+
+**Root cause**: `k_set_rows_turbo3` uses 4 warps (128 threads) per 128-element rotation group. At QK_TURBO3=32, each warp maps to its own block: `blk = blk_base + warp_id` (4 warps, 4 blocks). At QK_TURBO3=128, there's only 1 block per group. Warps 1-3 write to `blk_base[1..3]` which are out of bounds, corrupting adjacent KV memory. Short runs appear to work; long PPL segfaults.
+
+**The fix** — compute element position within the block generically:
+
+### `set-rows.cu` — turbo3 changes:
+
+Replace the block pointer and byte index computation:
+```cuda
+// OLD (assumes 1 warp = 1 block):
+block_turbo3_0 * blk = blk_base + warp_id;
+const int qs_byte_idx = lane / 4;
+
+// NEW (works for any QK_TURBO3):
+const int elem_in_block = j % QK_TURBO3;
+block_turbo3_0 * blk = blk_base + (j / QK_TURBO3);
+const int qs_byte_idx = elem_in_block / 4;
+```
+
+Replace the signs packing:
+```cuda
+// OLD:
+const int signs_byte_idx = lane / 8;
+const uint8_t signs_byte = (uint8_t)((ballot >> (signs_byte_idx * 8)) & 0xFF);
+if (lane % 8 == 0) blk->signs[signs_byte_idx] = signs_byte;
+
+// NEW:
+const int local_signs_byte = lane / 8;             // byte within 32-bit ballot (0..3)
+const int global_signs_byte = elem_in_block / 8;   // byte within block's signs array
+const uint8_t signs_byte = (uint8_t)((ballot >> (local_signs_byte * 8)) & 0xFF);
+if (lane % 8 == 0) blk->signs[global_signs_byte] = signs_byte;
+```
+
+Replace the norm write gate:
+```cuda
+// OLD:
+if (lane == 0) blk->norm = __float2half(corrected_norm);
+
+// NEW:
+if (elem_in_block == 0) blk->norm = __float2half(corrected_norm);
+```
+
+### `set-rows.cu` — turbo2 changes:
+
+Same pattern but simpler (no signs):
+```cuda
+// OLD:
+block_turbo2_0 * blk = blk_base + warp_id;
+if (lane % 4 == 0) blk->qs[lane / 4] = qs_byte;
+if (lane == 0) blk->norm = __float2half(corrected_norm);
+
+// NEW:
+const int elem_in_block = j % QK_TURBO2;
+block_turbo2_0 * blk = blk_base + (j / QK_TURBO2);
+if (lane % 4 == 0) blk->qs[elem_in_block / 4] = qs_byte;
+if (elem_in_block == 0) blk->norm = __float2half(corrected_norm);
+```
+
+**NOTE**: This also includes norm correction (`grp_norm / recon_norm`). That's the spiritbuun quality improvement from S27. If implementing block-128 before S27, you can keep the existing norm write and add norm correction later.
+
+**Validation**: After applying, run PPL at both block_size=32 (revert QK defines) and block_size=128 — both must produce identical PPL to 4 decimal places.
