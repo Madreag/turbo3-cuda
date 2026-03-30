@@ -1,9 +1,9 @@
 # Session 25 Deep Autoresearch Log
 
 ## Summary
-- Iterations: 31/100
+- Iterations: 33/100
 - Wins: 3 (committed)
-- Dead ends: 25 (reverted), 3 info/baseline
+- Dead ends: 27 (reverted), 3 info/baseline
 - Best turbo3 short: 65.26 (+0.23% vs baseline 65.11)
 - Best turbo3 32K: 56.97 (+4.9% vs baseline 54.31)
 - Best turbo2 32K: 60.40 (+12.8% vs baseline 53.57)
@@ -71,6 +71,13 @@
 | 30 | --allow-expensive-optimizations | mixed: -2.2% short, +2.1% 32K | 58.36 (-2.2%) | 52.56 (+2.1%) | — | DEAD | — |
 | 31 | --ftz=true | mixed: -1.9% short, +1.8% 32K | 58.56 (-1.9%) | 52.43 (+1.8%) | — | DEAD | — |
 
+| 32 | --prec-div=false | -1.6% short, -0.8% 32K | 58.76 (-1.6%) | 51.08 (-0.8%) | — | DEAD | — |
+| 33 | 2×4 LUT split (no temps) | neutral in noise | 59.29 (=) | 52.34 (=) | — | DEAD | — |
+
 ### Pattern: ptxas flags help 32K but hurt short
 
-Iterations 29-31 all show the same pattern: ptxas optimization flags that change codegen hurt short context by 1-2% but help 32K by 1.5-2%. The default compiler favors latency (good for short), while aggressive flags favor throughput (good for 32K). Cannot resolve with global flags — would need per-kernel optimization.
+Iterations 29-32 all show the same pattern: ptxas optimization flags that change codegen hurt short context by 1-2% but help 32K by 1.5-2%. The default compiler favors latency (good for short), while aggressive flags favor throughput (good for 32K). Cannot resolve with global flags — would need per-kernel optimization.
+
+### Pattern: Code restructuring is register-sensitive
+
+Iterations 5-9, 13-15, 18-21, 33 show that ANY code change to the VEC kernel that adds or rearranges registers causes regression. At 168/170 registers (98.4%), the compiler has already found a near-optimal allocation. Any perturbation tips the balance.
