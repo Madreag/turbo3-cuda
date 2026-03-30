@@ -1,9 +1,9 @@
 # Session 25 Deep Autoresearch Log
 
 ## Summary
-- Iterations: 30/100
+- Iterations: 31/100
 - Wins: 3 (committed)
-- Dead ends: 24 (reverted), 3 info/baseline
+- Dead ends: 25 (reverted), 3 info/baseline
 - Best turbo3 short: 65.26 (+0.23% vs baseline 65.11)
 - Best turbo3 32K: 56.97 (+4.9% vs baseline 54.31)
 - Best turbo2 32K: 60.40 (+12.8% vs baseline 53.57)
@@ -69,3 +69,8 @@
 | 28 | turbo1.5 threshold=0 | ternary V too cheap to benefit | — | 44.66 (=1e-2) | — | DEAD | — |
 | 29 | --Xptxas --opt-level=4 | slightly better 32K, worse short | 59.15 (-0.9%) | 52.28 (+1.5%) | — | DEAD | — |
 | 30 | --allow-expensive-optimizations | mixed: -2.2% short, +2.1% 32K | 58.36 (-2.2%) | 52.56 (+2.1%) | — | DEAD | — |
+| 31 | --ftz=true | mixed: -1.9% short, +1.8% 32K | 58.56 (-1.9%) | 52.43 (+1.8%) | — | DEAD | — |
+
+### Pattern: ptxas flags help 32K but hurt short
+
+Iterations 29-31 all show the same pattern: ptxas optimization flags that change codegen hurt short context by 1-2% but help 32K by 1.5-2%. The default compiler favors latency (good for short), while aggressive flags favor throughput (good for 32K). Cannot resolve with global flags — would need per-kernel optimization.
