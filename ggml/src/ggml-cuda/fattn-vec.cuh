@@ -274,12 +274,13 @@ static __global__ void flash_attn_ext_vec(
     // Without padding: stride n_centroids → systematic 2-way conflicts for n=8 (-1.8% in Session 18).
     // With padding: stride n_centroids+1, coprime to 32 banks → no conflicts.
     constexpr int lut_stride = n_centroids_lut > 0 ? n_centroids_lut + 1 : 1;
-    __shared__ float turbo_lut[n_centroids_lut > 0 ? D : 1][lut_stride];
+    __shared__ half turbo_lut[n_centroids_lut > 0 ? D : 1][lut_stride];
 
     if constexpr (n_centroids_lut > 0 && ncols == 1) {
         // Build LUT: Q[d] * centroid[c] for each dimension and centroid.
         // Q is read from global memory (still float even when kernel uses q8_1 Q).
         // One-time cost: D×n_centroids FMAs. Negligible vs scanning thousands of KV positions.
+        // Half-precision LUT: halves shmem bandwidth. Q*centroid values are approximate anyway.
         const float * centroids_ptr = (type_K == GGML_TYPE_TURBO3_0) ? TURBO_CENTROIDS_3BIT :
                                       (type_K == GGML_TYPE_TURBO4_0) ? TURBO_CENTROIDS_4BIT :
                                       TURBO_CENTROIDS_2BIT;
@@ -287,7 +288,7 @@ static __global__ void flash_attn_ext_vec(
         for (int d = tid; d < D; d += nthreads) {
             const float q_val = Q_f[d] * scale;
             for (int c = 0; c < n_centroids_lut; c++) {
-                turbo_lut[d][c] = q_val * centroids_ptr[c];
+                turbo_lut[d][c] = __float2half(q_val * centroids_ptr[c]);
             }
         }
         __syncthreads();
@@ -362,10 +363,10 @@ static __global__ void flash_attn_ext_vec(
                             const uint8_t idx5 = ((qs1 >> 2) & 0x3) | (((sgn >> 5) & 0x1) << 2);
                             const uint8_t idx6 = ((qs1 >> 4) & 0x3) | (((sgn >> 6) & 0x1) << 2);
                             const uint8_t idx7 = ((qs1 >> 6) & 0x3) | (((sgn >> 7) & 0x1) << 2);
-                            sum += (turbo_lut[d_base  ][idx0] + turbo_lut[d_base+1][idx1] +
-                                    turbo_lut[d_base+2][idx2] + turbo_lut[d_base+3][idx3] +
-                                    turbo_lut[d_base+4][idx4] + turbo_lut[d_base+5][idx5] +
-                                    turbo_lut[d_base+6][idx6] + turbo_lut[d_base+7][idx7]) * norm;
+                            sum += (__half2float(turbo_lut[d_base  ][idx0]) + __half2float(turbo_lut[d_base+1][idx1]) +
+                                    __half2float(turbo_lut[d_base+2][idx2]) + __half2float(turbo_lut[d_base+3][idx3]) +
+                                    __half2float(turbo_lut[d_base+4][idx4]) + __half2float(turbo_lut[d_base+5][idx5]) +
+                                    __half2float(turbo_lut[d_base+6][idx6]) + __half2float(turbo_lut[d_base+7][idx7])) * norm;
                         }
                     } else if constexpr (n_centroids_lut > 0 && type_K == GGML_TYPE_TURBO4_0) {
                         // LUT scoring for turbo4: process 4 elements at a time (2 qs bytes)
@@ -383,8 +384,8 @@ static __global__ void flash_attn_ext_vec(
                             const uint8_t idx1 = (qs0 >> 4) & 0xF;
                             const uint8_t idx2 = (qs1 >> 0) & 0xF;
                             const uint8_t idx3 = (qs1 >> 4) & 0xF;
-                            sum += (turbo_lut[d_base  ][idx0] + turbo_lut[d_base+1][idx1] +
-                                    turbo_lut[d_base+2][idx2] + turbo_lut[d_base+3][idx3]) * norm;
+                            sum += (__half2float(turbo_lut[d_base  ][idx0]) + __half2float(turbo_lut[d_base+1][idx1]) +
+                                    __half2float(turbo_lut[d_base+2][idx2]) + __half2float(turbo_lut[d_base+3][idx3])) * norm;
                         }
                     } else if constexpr (n_centroids_lut > 0 && type_K == GGML_TYPE_TURBO2_0) {
                         // LUT scoring for turbo2: process 8 elements at a time (2 qs bytes, no signs)
@@ -406,10 +407,10 @@ static __global__ void flash_attn_ext_vec(
                             const uint8_t idx5 = (qs1 >> 2) & 0x3;
                             const uint8_t idx6 = (qs1 >> 4) & 0x3;
                             const uint8_t idx7 = (qs1 >> 6) & 0x3;
-                            sum += (turbo_lut[d_base  ][idx0] + turbo_lut[d_base+1][idx1] +
-                                    turbo_lut[d_base+2][idx2] + turbo_lut[d_base+3][idx3] +
-                                    turbo_lut[d_base+4][idx4] + turbo_lut[d_base+5][idx5] +
-                                    turbo_lut[d_base+6][idx6] + turbo_lut[d_base+7][idx7]) * norm;
+                            sum += (__half2float(turbo_lut[d_base  ][idx0]) + __half2float(turbo_lut[d_base+1][idx1]) +
+                                    __half2float(turbo_lut[d_base+2][idx2]) + __half2float(turbo_lut[d_base+3][idx3]) +
+                                    __half2float(turbo_lut[d_base+4][idx4]) + __half2float(turbo_lut[d_base+5][idx5]) +
+                                    __half2float(turbo_lut[d_base+6][idx6]) + __half2float(turbo_lut[d_base+7][idx7])) * norm;
                         }
                     } else {
                         sum = vec_dot_KQ(K + i_KQ*nb11, Q_reg[j], Q_i32[j], Q_ds[j]);
