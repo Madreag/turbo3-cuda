@@ -147,3 +147,11 @@ a.out.*
 # Project-specific
 /.trash/
 /AGENTS.md
+/CLAUDE.md
+
+# Session/development files (not for release)
+SESSION_*.md
+PROFILE_RESULTS.md
+COMP_TEST_RESULTS.md
+DISCUSSION_DRAFT.md
+model-specs.md
