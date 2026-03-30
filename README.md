@@ -31,7 +31,7 @@ Key takeaways from this table:
 | 8B Llama-3.3 turbo3 at 32K | **105.64 tok/s** (+28% from sparse V skip, Session 25) |
 | MoE (Qwen 3.5 35B-A3B) turbo3 | **195 tok/s** (+107% vs signalnine's original) |
 | Q4_K_M + turbo3 short decode | **77.25 tok/s** — beats vLLM INT4 (68.3) on same GPU die |
-| Stability across 3 GPUs | **1,121+ iterations, 0 failures, PPL bit-exact** |
+| Stability across 3 GPUs | **1,251+ iterations, 0 failures, PPL bit-exact** |
 
 ## Quality (Perplexity)
 
@@ -148,15 +148,17 @@ Validated on 3 NVIDIA GPUs across 3 architecture generations, **1,251+ total sta
 
 turbo2 at 64K = **70.06 tok/s** — runs where q8_0 OOMs. turbo3 32K now **matches q8_0** (72.90 vs 73.06). **486+ stability iterations across 5 builds, PPL bit-exact across all sessions.**
 
+**Note**: turbo1.5 did not benefit from the Session 25 sparse V optimization — at 1.58 bits per value, V vectors are ternary and have no sparse structure to exploit. turbo3 gained +15% at 32K, turbo2 gained +13%, but turbo1.5 was flat (+0.1% at 32K, -1.0% at 64K). For long-context turbo1.5 use cases, consider asymmetric `-ctk turbo1.5 -ctv turbo2` instead.
+
 **Multi-Model (Session 25, 5 models):**
 
-| Model | D | turbo3 | q8_0 | turbo4 | turbo1.5 |
-|-------|:-:|-------:|-----:|-------:|---------:|
-| Llama-3.2-1B | 64 | 513 | 510 | 515 | 514 |
-| Phi-3.5-mini | 96 | 189* | 190 | 189 | 190 |
-| Phi-4-mini | 128 | 183 | 197 | 182 | 180 |
-| Llama-3.3-8B | 128 | 112 | 117 | 111 | 110 |
-| Gemma-3-12B | 256 | 66 | 70 | 66 | 65 |
+| Model | D | turbo2 | turbo3 | q8_0 | turbo4 | turbo1.5 |
+|-------|:-:|-------:|-------:|-----:|-------:|---------:|
+| Llama-3.2-1B | 64 | 506 | 513 | 510 | 515 | 514 |
+| Phi-3.5-mini | 96 | 190* | 189* | 190 | 189 | 190 |
+| Phi-4-mini | 128 | 186 | 183 | 197 | 182 | 180 |
+| Llama-3.3-8B | 128 | 112 | 112 | 117 | 111 | 110 |
+| Gemma-3-12B | 256 | 67 | 66 | 70 | 66 | 65 |
 
 \*D=96: graceful non-FA fallback.
 
@@ -208,6 +210,7 @@ turbo2 and turbo3 are **faster than f16 and q8_0 at 65K+**. At 256K, only turbo 
 - **Head dimension**: Only D∈{64, 128, 256} use native Flash Attention. D=80, D=96, D=112, and others gracefully fall back to mul_mat attention (slower but correct).
 - **Attention sinks**: Implemented but provide 0% PPL improvement across all tested configurations. **Warning**: `TURBO_SINK_SIZE` values {1, 4, 16} crash on SM89 (RTX 4090). Sizes {0, 2, 8} work. SM86 and SM120 are unaffected.
 - **V sinks**: Dead end — register pressure causes -12.7% speed regression at 32K.
+- **turbo1.5 sparse V**: The Session 25 sparse V threshold optimization does not help turbo1.5. At 1.58 bits, V values are ternary ({-1, 0, +1}) and have no sparse structure. turbo3/turbo2/turbo4 all benefit (+5-15% at 32K+), but turbo1.5 long-context speed is unchanged.
 - **FP4 tensor core acceleration**: Not viable. Q values are too small for E2M1 (99.5% map to zero), and no mixed fp16×E2M1 MMA instruction exists on SM120.
 - **Known Gemma 3 issues**: Gibberish after context shift and slow quantized KV cache are upstream llama.cpp bugs, not TurboQuant-specific.
 
