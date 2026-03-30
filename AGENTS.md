@@ -72,15 +72,15 @@ Prefill (Q->ne[1]>1):
   MMA/TILE kernel runs on fp16
 ```
 
-## Current Performance (Session 21 Final, RTX 5090)
+## Current Performance (Session 22B, RTX 5090)
 
 | Type | bpv | Short | 32K | PPL ctx=512 | PPL ctx=2048 | Notes |
 |------|----:|------:|----:|:-----------:|:------------:|-------|
 | f16 | 16 | 59.52 | 54.11 | — | — | Ceiling |
 | q8_0 | 8.5 | 58.58 | 47.99 | 6.759 | 5.674 | Baseline |
 | turbo4 | 4.25 | **58.87** | **46.06** | 6.825 (+0.97%) | 5.694 | LUT disabled (16 centroids net negative) |
-| turbo3 | 3.25 | **60.18** | **48.44** | 6.852 (+1.38%) | **5.674 (=q8_0)** | q8_1 vec_dot + LUT (8 centroids) |
-| turbo2 | 2.5 | **60.67** | **51.29** | 7.080 (+4.75%) | 5.892 | q8_1 vec_dot + LUT (4 centroids), long-ctx champion |
+| turbo3 | 3.25 | **61.27** | **50.74** | 6.852 (+1.38%) | **5.674 (=q8_0)** | q8_1 vec_dot + 8-wide LUT + L2 prefetch |
+| turbo2 | 2.5 | **60.67** | **52.82** | 7.080 (+4.75%) | 5.892 | q8_1 vec_dot + 8-wide LUT, long-ctx champion |
 | turbo1.5 | 2.0 | 58.74 | **45.06** | 7.312 (+8.18%) | 6.103 | **8x compression, 174 MoE** |
 
 **MoE (Qwen 3.5 35B-A3B, S20)**: turbo3=184, turbo1.5=174, turbo4=172, q8_0=191 tok/s
@@ -290,6 +290,8 @@ ALL turbo types now use q8_1 Q path (Session 20 moved turbo3/turbo2 off float Q)
 | 19 | Sinks fix, 36 K×V combos, prefill verified | All bugs fixed |
 | 20 | q8_1 turbo3/turbo2 vec_dot, LUT restored | turbo3 32K +7% |
 | 21 | `__launch_bounds__(128,3)`, turbo4 LUT removed | ALL types +7-13% at 32K |
+| 22 | Multi-model validation (5 models D=64/96/128/256) | Zero crashes, D=96 graceful fallback |
+| 22B | SM89 sink fix, L2 prefetch, 8-wide LUT turbo3/turbo2 | turbo3 short +1.8%, 32K +4.7%, turbo2 32K +3.0% |
 
 ## Dead Ends (Don't Repeat)
 
