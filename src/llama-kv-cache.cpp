@@ -119,6 +119,12 @@ llama_kv_cache::llama_kv_cache(
 
     const bool is_mla = hparams.is_mla();
 
+    // For layer-adaptive modes: use KV layer ordinals (not raw layer indices)
+    // so boundary targeting works correctly on hybrid architectures where only
+    // a subset of layers have KV caches (e.g., Qwen3.5-27B: 16 of 64 layers).
+    const uint32_t n_kv_layers = hparams.n_layer_kv();
+    uint32_t kv_ord = 0;
+
     for (uint32_t il = 0; il < hparams.n_layer; il++) {
         if (!hparams.has_kv(il)) {
             LLAMA_LOG_DEBUG("%s: layer %3d: does not have KV cache\n", __func__, il);
@@ -172,13 +178,19 @@ llama_kv_cache::llama_kv_cache(
         const bool has_k = true;
         const bool has_v = !is_mla;
 
-        // Layer-adaptive: use higher precision for quality-sensitive layers
+        // Layer-adaptive: use higher precision for quality-sensitive layers.
+        // Uses KV layer ordinals (kv_ord, n_kv_layers) not raw layer indices,
+        // so boundary modes work correctly on hybrid architectures where only
+        // a subset of layers have KV caches.
         // TURBO_LAYER_ADAPTIVE env var: 0=uniform (default),
         //   1=q8_0 first4+last4, 2=q8_0 last8, 3=q8_0 last4,
         //   4=q8_0 first4, 5=q8_0 first2+last2,
         //   6=V-only q8_0 last8, 7=K-only q8_0 last8, 8=V-only q8_0 first2+last2,
         //   9=q8_0 last2, 10=K-only q8_0 last4, 11=q8_0 last6,
-        //   12=V-only q8_0 first4+last4 (TheTom boundary V wide — width > precision)
+        //   12=V-only q8_0 first4+last4 (TheTom boundary V wide),
+        //   13=V-only q8_0 first2+last2 (TheTom boundary V narrow),
+        //   14=K=turbo3 all + V boundary q8_0 first4+last4 (combined K+V boundary),
+        //   15=K last8 q8_0 (LA=2) + V boundary first4+last4 (LA=12 stacked)
         ggml_type layer_type_k = type_k;
         ggml_type layer_type_v = type_v;
         {
@@ -186,7 +198,7 @@ llama_kv_cache::llama_kv_cache(
                 const char * env = getenv("TURBO_LAYER_ADAPTIVE");
                 int mode = env ? atoi(env) : 0;
                 if (mode > 0) {
-                    LLAMA_LOG_INFO("llama_kv_cache: layer-adaptive mode %d enabled\n", mode);
+                    LLAMA_LOG_INFO("llama_kv_cache: layer-adaptive mode %d enabled (using KV ordinals)\n", mode);
                 }
                 return mode;
             }();
@@ -194,28 +206,34 @@ llama_kv_cache::llama_kv_cache(
                                    type_k == GGML_TYPE_TURBO2_0 || type_k == GGML_TYPE_TURBO1_5 ||
                                    type_v == GGML_TYPE_TURBO3_0 || type_v == GGML_TYPE_TURBO4_0 ||
                                    type_v == GGML_TYPE_TURBO2_0 || type_v == GGML_TYPE_TURBO1_5);
-            const uint32_t n_layer = hparams.n_layer;
             bool promote_k = false;
             bool promote_v = false;
-            if (is_turbo && n_layer >= 8) {
+            if (is_turbo && n_kv_layers >= 8) {
                 switch (adaptive_mode) {
-                    case  1: promote_k = promote_v = (il < 4 || il >= n_layer - 4); break;
-                    case  2: promote_k = promote_v = (il >= n_layer - 8); break;
-                    case  3: promote_k = promote_v = (il >= n_layer - 4); break;
-                    case  4: promote_k = promote_v = (il < 4); break;
-                    case  5: promote_k = promote_v = (il < 2 || il >= n_layer - 2); break;
-                    case  6: promote_v = (il >= n_layer - 8); break;
-                    case  7: promote_k = (il >= n_layer - 8); break;
-                    case  8: promote_v = (il < 2 || il >= n_layer - 2); break;
-                    case  9: promote_k = promote_v = (il >= n_layer - 2); break;
-                    case 10: promote_k = (il >= n_layer - 4); break;
-                    case 11: promote_k = promote_v = (il >= n_layer - 6); break;
-                    case 12: promote_v = (il < 4 || il >= n_layer - 4); break;
+                    case  1: promote_k = promote_v = (kv_ord < 4 || kv_ord >= n_kv_layers - 4); break;
+                    case  2: promote_k = promote_v = (kv_ord >= n_kv_layers - 8); break;
+                    case  3: promote_k = promote_v = (kv_ord >= n_kv_layers - 4); break;
+                    case  4: promote_k = promote_v = (kv_ord < 4); break;
+                    case  5: promote_k = promote_v = (kv_ord < 2 || kv_ord >= n_kv_layers - 2); break;
+                    case  6: promote_v = (kv_ord >= n_kv_layers - 8); break;
+                    case  7: promote_k = (kv_ord >= n_kv_layers - 8); break;
+                    case  8: promote_v = (kv_ord < 2 || kv_ord >= n_kv_layers - 2); break;
+                    case  9: promote_k = promote_v = (kv_ord >= n_kv_layers - 2); break;
+                    case 10: promote_k = (kv_ord >= n_kv_layers - 4); break;
+                    case 11: promote_k = promote_v = (kv_ord >= n_kv_layers - 6); break;
+                    case 12: promote_v = (kv_ord < 4 || kv_ord >= n_kv_layers - 4); break;
+                    case 13: promote_v = (kv_ord < 2 || kv_ord >= n_kv_layers - 2); break;
+                    case 14: promote_v = (kv_ord < 4 || kv_ord >= n_kv_layers - 4); break;
+                    case 15: {
+                        promote_k = (kv_ord >= n_kv_layers - 8);
+                        promote_v = (kv_ord < 4 || kv_ord >= n_kv_layers - 4);
+                    } break;
                 }
             }
             if (promote_k) layer_type_k = GGML_TYPE_Q8_0;
             if (promote_v) layer_type_v = GGML_TYPE_Q8_0;
         }
+        kv_ord++;
         ggml_tensor * k = has_k ? ggml_new_tensor_3d(ctx, layer_type_k, n_embd_k_gqa, kv_size, n_stream) : nullptr;
         ggml_tensor * v = has_v ? ggml_new_tensor_3d(ctx, layer_type_v, n_embd_v_gqa, kv_size, n_stream) : nullptr;
 
