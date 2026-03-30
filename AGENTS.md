@@ -85,10 +85,11 @@ Prefill (Q->ne[1]>1):
 
 **MoE (Qwen 3.5 35B-A3B, S20)**: turbo3=184, turbo1.5=174, turbo4=172, q8_0=191 tok/s
 
-### Cross-GPU Stability (Session 21)
-- **3090 Ti (SM86)**: 50 iterations, 0 failures, PPL bit-exact (7.5535)
-- **4090M (SM89)**: 70 iterations, 0 failures, PPL bit-exact (7.5912)
+### Cross-GPU Stability (Sessions 20-21)
+- **3090 Ti (SM86)**: 103 iterations, 10 PPL checks, 0 failures, PPL bit-exact (7.5535)
+- **4090M (SM89)**: 125 iterations (25 S20 + 100 S21), 0 failures, PPL bit-exact (7.5912)
 - **turbo2 beats q8_0 at 32K on ALL 3 GPUs**
+- **SM89 sink bug**: TURBO_SINK_SIZE {1, 4, 16} segfault on SM89. Sizes {0, 2, 8} work. SM86 unaffected.
 
 ### Supported Head Dimensions
 Only D∈{64, 128, 256}. VEC kernel requires `D % 64 == 0` (static_assert). D=80, D=96, D=112 fall back to non-FA mul_mat attention (slower but correct, no crash).
@@ -245,7 +246,7 @@ turbo4 and turbo1.5 use q8_1 Q format (`K_is_unquantized = false`). turbo3 and t
 |----------|--------|--------|
 | `TURBO_LAYER_ADAPTIVE=N` | Per-layer KV type (modes 0-11) | Working |
 | `TURBO_INNERQ=N` | InnerQ calibration | Working |
-| `TURBO_SINK_SIZE=N` | Attention sinks (first N positions at fp16) | FIXED in Session 19 (`__device__` + async). 0% PPL on 27B — needs multi-model test. V sinks removed, need restoration. |
+| `TURBO_SINK_SIZE=N` | Attention sinks (first N positions at fp16) | FIXED on SM86/SM120 (Session 19). 0% PPL benefit. **BUG**: SM89 segfault at sizes {1, 4, 16}; sizes {0, 2, 8} work. V sinks = dead end (register pressure). |
 
 ## Commit Message Format
 
@@ -299,6 +300,8 @@ ALL turbo types now use q8_1 Q path (Session 20 moved turbo3/turbo2 off float Q)
 | V-specific 64×64 rotation | Inverse WHT hardcodes group_size from tensor ne[0], not from quantization | 20 |
 | nthreads_KQ=32 for turbo3 q8_1 | Kills warp-level ILP, -17% at 32K | 20 |
 | Sinks for PPL improvement | 0% across 2 models, 5 contexts, 3 sink sizes | 19-20 |
+| TURBO_SINK_SIZE on SM89 | Segfault at sizes {1,4,16}; {0,2,8} work. Host-side addressing bug in sink_get_or_alloc | 21 |
+| FP4 E2M1 for Q | 99.5% of Q values map to zero (σ=0.088, E2M1 min non-zero=0.5). No mixed fp16×E2M1 MMA | 22 |
 
 ## Obsidian Vault Maintenance
 

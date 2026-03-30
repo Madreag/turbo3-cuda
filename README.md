@@ -92,13 +92,18 @@ Validated on 3 NVIDIA GPUs across 2 architecture generations:
 | GPU | SM | VRAM | Stability | PPL Drift | turbo2 > q8_0 at 32K? |
 |-----|:--:|-----:|:---------:|:---------:|:---------------------:|
 | RTX 5090 | SM120 | 32 GB | Continuous | None | Yes (51.29 vs 47.99) |
-| RTX 3090 Ti | SM86 | 24 GB | 8+ iterations, 0 failures | Bit-exact (7.5535) | Yes (71.77 vs 71.55) |
-| RTX 4090M | SM89 | 16 GB | 10+ iterations, 0 failures | Bit-exact (7.5912) | Yes (47.77 vs 31.94) |
+| RTX 3090 Ti | SM86 | 24 GB | 103 iterations, 0 failures | Bit-exact (7.5535) | Yes (71.77 vs 71.55) |
+| RTX 4090M | SM89 | 16 GB | 125 iterations, 0 failures | Bit-exact (7.5912) | Yes (47.0 vs 45.3) |
+
+## Tips
+
+- **Best quality-per-bit**: `K=turbo4/V=q8_0` asymmetric config actually **beats pure q8_0 PPL** (6.155 vs 6.162 at ctx=2048 on 9B) while using less memory.
+- **Layer-adaptive mode 2**: `TURBO_LAYER_ADAPTIVE=2` closes 40% of the turbo3-to-q8_0 PPL gap at zero performance cost.
 
 ## Limitations
 
-- **Head dimension**: Only D∈{64, 128, 256} use native Flash Attention. D=96 and others gracefully fall back.
-- **Attention sinks**: Implemented but provide 0% PPL improvement across all tested configurations.
+- **Head dimension**: Only D∈{64, 128, 256} use native Flash Attention. D=80, D=96, D=112, and others gracefully fall back to mul_mat attention (slower but correct).
+- **Attention sinks**: Implemented but provide 0% PPL improvement across all tested configurations. **Warning**: `TURBO_SINK_SIZE` values {1, 4, 16} crash on SM89 (RTX 4090). Sizes {0, 2, 8} work. SM86 and SM120 are unaffected.
 - **V sinks**: Dead end — register pressure causes -12.7% speed regression at 32K.
 - **FP4 tensor core acceleration**: Not viable. Q values are too small for E2M1 (99.5% map to zero), and no mixed fp16×E2M1 MMA instruction exists on SM120.
 - **Known Gemma 3 issues**: Gibberish after context shift and slow quantized KV cache are upstream llama.cpp bugs, not TurboQuant-specific.

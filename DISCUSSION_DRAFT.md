@@ -69,13 +69,18 @@ Full CUDA implementation of all 4 TurboQuant types (turbo4/turbo3/turbo2/turbo1.
 | GPU | SM | Stability Iterations | Failures | PPL Drift |
 |-----|:--:|:---:|:---:|:---:|
 | RTX 5090 | SM120 | Continuous | 0 | None |
-| RTX 3090 Ti | SM86 | 8+ | 0 | Bit-exact (7.5535) |
-| RTX 4090M | SM89 | 10+ | 0 | Bit-exact (7.5912) |
+| RTX 3090 Ti | SM86 | 103 | 0 | Bit-exact (7.5535) |
+| RTX 4090M | SM89 | 125 | 0 | Bit-exact (7.5912) |
+
+## Additional Findings
+
+- **K=turbo4/V=q8_0 asymmetric** actually beats pure q8_0 in PPL (6.155 vs 6.162 at ctx=2048 on 9B). Best quality configuration.
+- **Layer-adaptive mode 2** (`TURBO_LAYER_ADAPTIVE=2`) closes 40% of the turbo3-to-q8_0 PPL gap at zero performance cost.
 
 ## Known Limitations
 
-1. **Head dimension**: Native FA decode requires D∈{64, 128, 256}. Other D values fall back to mul_mat attention.
-2. **Attention sinks**: Implemented but 0% PPL benefit across 2 models, 5 context lengths, 3 sink sizes.
+1. **Head dimension**: Native FA decode requires D∈{64, 128, 256}. D=80, D=96, D=112, and others fall back to mul_mat attention.
+2. **Attention sinks**: Implemented but 0% PPL benefit across 2 models, 5 context lengths, 3 sink sizes. **Bug**: `TURBO_SINK_SIZE` values {1, 4, 16} crash on SM89 (RTX 4090). Sizes {0, 2, 8} work. SM86/SM120 unaffected.
 3. **FP4 tensor core**: Not viable — Q values are too small for E2M1 (99.5% map to zero), no mixed fp16×E2M1 MMA on SM120.
 4. **Gemma 3**: Upstream llama.cpp bugs (gibberish after context shift, slow quantized KV) are not TurboQuant-specific.
 
