@@ -1,9 +1,9 @@
 # Session 25 Deep Autoresearch Log
 
 ## Summary
-- Iterations: 18/100
-- Wins: 2 (committed)
-- Dead ends: 16 (reverted)
+- Iterations: 23/100
+- Wins: 3 (committed)
+- Dead ends: 20 (reverted)
 - Best turbo3 short: 65.26 (+0.23% vs baseline 65.11)
 - Best turbo3 32K: 56.97 (+4.9% vs baseline 54.31)
 - Best turbo2 32K: 60.40 (+12.8% vs baseline 53.57)
@@ -57,3 +57,8 @@
 | 16 | #pragma unroll 4 outer KQ | smaller code | 65.33 (=) | 57.33 (noise) | — | DEAD | — |
 | 17 | Type-specific sparse V 1e-2 | turbo2/1.5 low bpv | — | turbo2 60.40 (+12.8%) | 7.0797 | **WIN** | 3d609e224 |
 | 18 | Warp-level V tile skip | __shfl max + goto | 65.27 (=) | 56.97 (=) | — | DEAD | — |
+| 19 | nthreads_KQ=16 | -10 regs but only 2 dots/warp | 60.54 (-7.2%) | 53.07 (-6.9%) | — | DEAD | — |
+| 20 | launch_bounds(128,4) | 33% occupancy, 40 spills | — | 53.82 (-5.5%) | — | DEAD | — |
+| 21 | Symmetric LUT construction | if constexpr ruins reg alloc | 60.79 (-6.8%) | — | — | DEAD | — |
+| 22 | turbo4 V at 1e-2 | rename caused codegen change | — | regression | — | DEAD | — |
+| 23 | turbo3/4 V at 5e-3 | constant change | — | 54.80 (+6.4%) | 6.8522 | **WIN** | 8e27f54bc |
