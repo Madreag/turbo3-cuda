@@ -78,6 +78,18 @@
 
 Iterations 29-32 all show the same pattern: ptxas optimization flags that change codegen hurt short context by 1-2% but help 32K by 1.5-2%. The default compiler favors latency (good for short), while aggressive flags favor throughput (good for 32K). Cannot resolve with global flags — would need per-kernel optimization.
 
+## Multi-Model Validation (Iteration 34)
+
+| Model | D | Type | Short | 32K | vs 1e-6 32K |
+|-------|:-:|------|------:|----:|:-----------:|
+| Qwen 27B Q6_K | 256 | turbo3 | 59.70 | 54.80 | +10.8% |
+| Qwen 27B Q4_K_M | 256 | turbo3 | 71.57 | 60.88 | +4.8% |
+| Llama 8B Q6_K | 128 | turbo3 | 176.87 | 105.64 | **+28.4%** |
+| MoE 35B-A3B Q4_K_M | 256 | turbo3 | 194.98 | — | — |
+| Llama 1B Q6_K | 64 | turbo3 | 671.85 | — | — |
+
+**Key finding**: The 8B model shows +28.4% improvement because it has 32 KV heads (no GQA), making FA a larger fraction of decode time. The threshold improvement is MODEL-DEPENDENT: more KV heads = bigger win.
+
 ### Pattern: Code restructuring is register-sensitive
 
 Iterations 5-9, 13-15, 18-21, 33 show that ANY code change to the VEC kernel that adds or rearranges registers causes regression. At 168/170 registers (98.4%), the compiler has already found a near-optimal allocation. Any perturbation tips the balance.
