@@ -1,9 +1,10 @@
 # Session 25 Deep Autoresearch Log
 
 ## Summary
-- Iterations: 43/100
-- Wins: 3 (committed)
-- Dead ends: 29 (reverted), 11 info/validation
+- Iterations: 50/100
+- Wins: 4 (committed)
+- Dead ends: 33 (reverted), 13 info/validation
+- **MINIMUM 50 ITERATIONS REACHED**
 - Best turbo3 short: 65.26 (+0.23% vs baseline 65.11)
 - Best turbo3 32K: 56.97 (+4.9% vs baseline 54.31)
 - Best turbo2 32K: 60.40 (+12.8% vs baseline 53.57)
@@ -73,6 +74,13 @@
 
 | 32 | --prec-div=false | -1.6% short, -0.8% 32K | 58.76 (-1.6%) | 51.08 (-0.8%) | — | DEAD | — |
 | 33 | 2×4 LUT split (no temps) | neutral in noise | 59.29 (=) | 52.34 (=) | — | DEAD | — |
+| 44 | **Half-precision LUT** | halve shmem bandwidth | 59.61 (=) | 52.76 (+2.45%) | 6.8522 | **WIN** | 99e3721d5 |
+| 45 | __align__(32) on LUT | no effect | — | 52.82 (=) | — | DEAD | — |
+| 46 | LUT stride +2, +3 | neutral | — | 52.83/52.99 (=) | — | DEAD | — |
+| 47 | 8B float vs half LUT A/B | half neutral on 8B | — | 109.85 vs 110.05 | — | INFO | — |
+| 48 | turbo2 32K half LUT | neutral for turbo2 (small LUT) | — | 55.52 (=) | — | INFO | — |
+| 49 | 131K context tests | extreme long context | — | turbo3=42.32, turbo2=**49.23** | — | INFO | — |
+| 50 | Final PPL regression | bit-exact confirmed | — | — | 6.8522 | PASS | — |
 
 ### Pattern: ptxas flags help 32K but hurt short
 
