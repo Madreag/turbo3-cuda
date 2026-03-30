@@ -425,29 +425,26 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
         case GGML_TYPE_BF16:
             break;
         case GGML_TYPE_TURBO3_0:
-            // turbo3 VEC kernel instantiated for D in {64, 128, 256}.
-            if (K->ne[0] % 64 != 0) {
-                return BEST_FATTN_KERNEL_NONE;
-            }
-            break;
         case GGML_TYPE_TURBO2_0:
-            // turbo2 VEC kernel instantiated for D in {64, 128, 256}.
-            if (K->ne[0] % 64 != 0) {
-                return BEST_FATTN_KERNEL_NONE;
-            }
-            break;
         case GGML_TYPE_TURBO4_0:
-            // turbo4 VEC kernel instantiated for D in {64, 128, 256}.
-            if (K->ne[0] % 64 != 0) {
+        case GGML_TYPE_TURBO1_5: {
+            // TurboQuant VEC kernel only instantiated for D in {64, 128, 256}.
+            const int64_t D = K->ne[0];
+            if (D != 64 && D != 128 && D != 256) {
+                static bool warned_turbo_d = false;
+                if (!warned_turbo_d) {
+                    fprintf(stderr,
+                        "\n[turbo] WARNING: head_dim=%lld is not supported by TurboQuant Flash Attention.\n"
+                        "[turbo]   Supported dimensions: 64, 128, 256.\n"
+                        "[turbo]   Falling back to standard attention — performance will be reduced.\n\n",
+                        (long long)D);
+                    fflush(stderr);
+                    warned_turbo_d = true;
+                }
                 return BEST_FATTN_KERNEL_NONE;
             }
             break;
-        case GGML_TYPE_TURBO1_5:
-            // turbo1.5 VEC kernel instantiated for D in {64, 128, 256}.
-            if (K->ne[0] % 64 != 0) {
-                return BEST_FATTN_KERNEL_NONE;
-            }
-            break;
+        }
         default:
             return BEST_FATTN_KERNEL_NONE;
     }
