@@ -1,9 +1,9 @@
 # Session 25 Deep Autoresearch Log
 
 ## Summary
-- Iterations: 23/100
+- Iterations: 30/100
 - Wins: 3 (committed)
-- Dead ends: 20 (reverted)
+- Dead ends: 24 (reverted), 3 info/baseline
 - Best turbo3 short: 65.26 (+0.23% vs baseline 65.11)
 - Best turbo3 32K: 56.97 (+4.9% vs baseline 54.31)
 - Best turbo2 32K: 60.40 (+12.8% vs baseline 53.57)
@@ -62,3 +62,10 @@
 | 21 | Symmetric LUT construction | if constexpr ruins reg alloc | 60.79 (-6.8%) | — | — | DEAD | — |
 | 22 | turbo4 V at 1e-2 | rename caused codegen change | — | regression | — | DEAD | — |
 | 23 | turbo3/4 V at 5e-3 | constant change | — | 54.80 (+6.4%) | 6.8522 | **WIN** | 8e27f54bc |
+| 24 | turbo3 V at 1e-2 | saturated at 5e-3 | — | 54.30 (=5e-3) | — | DEAD | — |
+| 25 | turbo2 V at 5e-2 | marginal (+1.4%), noisy | — | 56.26 (noise) | 7.0797 | DEAD | — |
+| 26 | turbo3 V at 1e-6 clean build | baseline for clean build | — | 49.45 | — | INFO | — |
+| 27 | turbo4 32K clean build | clean baseline | — | 48.29 | — | INFO | — |
+| 28 | turbo1.5 threshold=0 | ternary V too cheap to benefit | — | 44.66 (=1e-2) | — | DEAD | — |
+| 29 | --Xptxas --opt-level=4 | slightly better 32K, worse short | 59.15 (-0.9%) | 52.28 (+1.5%) | — | DEAD | — |
+| 30 | --allow-expensive-optimizations | mixed: -2.2% short, +2.1% 32K | 58.36 (-2.2%) | 52.56 (+2.1%) | — | DEAD | — |
