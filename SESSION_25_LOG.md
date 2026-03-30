@@ -44,6 +44,14 @@ turbo3=3392, q8_0=3398, f16=3470 tok/s (all equal, FFN-dominated)
 
 ### Best Speed+Quality Combo
 **K=turbo2 / V=q8_0**: 56.31 at 32K (+5.1% over q8_0/q8_0) with lossless V quality.
+
+### Extreme Context (turbo2 Q4_K_M)
+| Context | tok/s |
+|--------:|------:|
+| 32K | 57.04 |
+| 64K | 54.78 |
+| 131K | 49.23 |
+| **256K** | **36.62** |
 - Best turbo3 short: 65.26 (+0.23% vs baseline 65.11)
 - Best turbo3 32K: 56.97 (+4.9% vs baseline 54.31)
 - Best turbo2 32K: 60.40 (+12.8% vs baseline 53.57)
