@@ -46,7 +46,7 @@ CUDA implementation of [TurboQuant](https://arxiv.org/abs/2504.19874) (ICLR 2026
     - `02 Architecture/Dead Ends.md` — 15+ approaches that FAILED (do NOT repeat)
     - `04 Competitors/` — 14 competitor profiles with code techniques
     - `05 Research/` — K/V norm data, QJL ablation, signalnine comparison correction
-    - `07 Issues/` — 3 OPEN critical bugs + resolved bugs with root cause
+    - `07 Issues/` — 0 open bugs, 10 resolved issues with root cause + commit SHA
     - `10 Knowledge/` — CUDA specifics, hardware constraints, quantization theory
     - `01 Sessions/` — all 18 session reports with what worked and what didn't
 
@@ -249,6 +249,15 @@ S24 replaced all 5 `expf` with `__expf` in VEC kernel. ~2^-21 relative error is 
 ### Norm-out-of-loop: Dead End #32
 S24B tested factoring norm multiplication out of centroid lookup (1 multiply instead of 4 per iteration). Compiler was already doing this optimization — manual refactor interfered with instruction scheduling. -0.8% regression. Reverted.
 
+### Sparse V threshold: 5e-3 for turbo3/4, 1e-2 for turbo2/1.5
+S25 raised sparse V skip threshold from 1e-6 to type-specific values. At 32K, most V positions have negligible attention weight — skipping their dequant saves significant bandwidth. PPL bit-exact at ctx=512 and ctx=2048 across all models tested. turbo3 32K: +5-11%, turbo2 32K: +13%, 8B Llama: **+28%** (32 KV heads, no GQA). Models with more KV heads benefit more because FA is a larger fraction of decode time.
+
+### K type dominates 32K speed, V type barely matters (S25 finding)
+With sparse V skip, most V positions are never read. K scoring is the bottleneck at long context. On 8B Llama at 32K: turbo2 K gives 113-119 tok/s regardless of V type (5% spread). turbo3 K: 105-112. turbo4 K: 74-75. turbo1.5 K: 67. **Implication for LA: use turbo2 K for speed, V type for quality only.**
+
+### VEC kernel at optimization ceiling (168 regs, 98.4% utilization)
+S25 tested 33 micro-optimizations (compiler flags, code restructuring, LUT changes, launch bounds). ALL failed due to register pressure at 168/170. Adding even 1 register causes spills → -2% to -4%. The LUT is essential for BOTH performance AND register pressure (without LUT: 255 regs → massive spilling). The only successful approach was changing CONSTANTS (thresholds), not code STRUCTURE.
+
 ## Environment Variables
 
 | Variable | Effect | Status |
@@ -304,6 +313,7 @@ ALL turbo types use q8_1 Q + nthreads_KQ=8. Centroids are `static constexpr` (re
 | 23 | Q4_K_M validation, LA=12 boundary V, fattn.cu D check, README | Q4_K_M+turbo1.5 131K=25.81, LA=12 74.8% gap recovery |
 | 24 | __expf fast-math, LA kv_ord hybrid fix, LA=13-15, GQA warning | turbo3 short +0.67%, 32K +3.69%, Q4_K_M ctx=2048 beats q8_0 |
 | 24B | nthreads_KQ=8 for turbo4/1.5, constexpr centroids | turbo4 short +10.7%, 32K +17.7%. AmesianX gap closed: +10-11% us |
+| 25 | Sparse V threshold 5e-3/1e-2, 43 iterations autoresearch | turbo3 32K +5-11%, turbo2 +13%, 8B +28%. K type dominates 32K speed. |
 
 ## Dead Ends (Don't Repeat)
 
@@ -322,6 +332,14 @@ ALL turbo types use q8_1 Q + nthreads_KQ=8. Centroids are `static constexpr` (re
 | Tawa producer-consumer warp split | VEC ncols=1 is bandwidth-limited, shared memory staging adds overhead, not compute-limited | 24 |
 | cp.async K loading | K blocks already loaded directly to registers, no staging benefit | 24 |
 | Norm out of loop (simple factor) | Compiler already optimizes norm×centroid multiplication chain. Manual refactor -0.8% regression | 24B |
+| --use_fast_math global | -0.77% short, neutral 32K. FTZ changes codegen for ALL kernels | 25 |
+| --maxrregcount=128 | Neutral. 128 regs = 4 blocks/SM but spill penalty cancels occupancy gain | 25 |
+| launch_bounds(128,2) | -2.57% short. Reduced occupancy hurts | 25 |
+| launch_bounds(128,4) | -5.5% 32K. Spilling 40 regs to fit 4 blocks/SM | 25 |
+| Float Q for turbo types | -2.62% 32K. Q_reg (half2[8]) adds more pressure than Q_i32/Q_ds saves | 25 |
+| nthreads_KQ=16 | -7.2% short, -6.9% 32K. Only 2 interleaved dots/warp vs 4 | 25 |
+| Any code restructuring | -2% to -7%. 168 regs = 98.4% utilization, any change causes spills | 25 |
+| ptxas flags (opt-level=4, expensive-opts, ftz) | Mixed: help 32K +1.5-2%, hurt short -1-2%. Cannot resolve with global flags | 25 |
 
 ## Obsidian Vault Maintenance
 
