@@ -1,9 +1,9 @@
 # Session 25 Deep Autoresearch Log
 
 ## Summary
-- Iterations: 50/100
+- Iterations: 56/100
 - Wins: 4 (committed)
-- Dead ends: 33 (reverted), 13 info/validation
+- Dead ends: 34 (reverted), 18 info/validation
 - **MINIMUM 50 ITERATIONS REACHED**
 
 ## Final Regression Suite (Iterations 51-53)
@@ -30,6 +30,20 @@ turbo3=3392, q8_0=3398, f16=3470 tok/s (all equal, FFN-dominated)
 
 ### Combination Finding
 `--ftz=true` + half LUT synergize: +1.3-1.5% on both short and 32K. Recommend as build flag.
+
+### Context-Speed Curve (27B Q6_K, turbo3)
+| Context | tok/s |
+|--------:|------:|
+| short | 60.48 |
+| 4K | 60.52 |
+| 8K | 58.69 |
+| 16K | 56.24 |
+| 32K | 53.35 |
+| 64K | 46.63 |
+| 131K | 42.32 |
+
+### Best Speed+Quality Combo
+**K=turbo2 / V=q8_0**: 56.31 at 32K (+5.1% over q8_0/q8_0) with lossless V quality.
 - Best turbo3 short: 65.26 (+0.23% vs baseline 65.11)
 - Best turbo3 32K: 56.97 (+4.9% vs baseline 54.31)
 - Best turbo2 32K: 60.40 (+12.8% vs baseline 53.57)
