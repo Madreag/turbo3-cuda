@@ -292,6 +292,7 @@ ALL turbo types now use q8_1 Q path (Session 20 moved turbo3/turbo2 off float Q)
 | 21 | `__launch_bounds__(128,3)`, turbo4 LUT removed | ALL types +7-13% at 32K |
 | 22 | Multi-model validation (5 models D=64/96/128/256) | Zero crashes, D=96 graceful fallback |
 | 22B | SM89 sink fix, L2 prefetch, 8-wide LUT turbo3/turbo2 | turbo3 short +1.8%, 32K +4.7%, turbo2 32K +3.0% |
+| 23 | Q4_K_M validation, LA=12 boundary V, fattn.cu D check, README | Q4_K_M+turbo1.5 131K=25.81, LA=12 74.8% gap recovery |
 
 ## Dead Ends (Don't Repeat)
 
@@ -304,6 +305,8 @@ ALL turbo types now use q8_1 Q path (Session 20 moved turbo3/turbo2 off float Q)
 | Sinks for PPL improvement | 0% across 2 models, 5 contexts, 3 sink sizes | 19-20 |
 | TURBO_SINK_SIZE on SM89 | Segfault at sizes {1,4,16}; {0,2,8} work. Host-side addressing bug in sink_get_or_alloc | 21 |
 | FP4 E2M1 for Q | 99.5% of Q values map to zero (σ=0.088, E2M1 min non-zero=0.5). No mixed fp16×E2M1 MMA | 22 |
+| Inner-loop V prefetch hints | RTX 5090 HW prefetcher already handles sequential pattern. No measurable benefit | 23 |
+| turbo1.5 sparse V threshold=1e-4 | PPL safe but no speed benefit at 32K or 131K | 23 |
 
 ## Obsidian Vault Maintenance
 
