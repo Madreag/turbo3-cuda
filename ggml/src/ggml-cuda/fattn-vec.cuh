@@ -338,24 +338,31 @@ static __global__ void flash_attn_ext_vec(
                         const char * sink_K = (const char *)(d_fattn_sink_K_buf + kv_pos * d_fattn_sink_ne0 + kv_head * D);
                         sum = vec_dot_fattn_vec_KQ_f16<D, nthreads_KQ>(sink_K, Q_reg[j], Q_i32[j], Q_ds[j]);
                     } else if constexpr (n_centroids_lut > 0 && type_K == GGML_TYPE_TURBO3_0) {
-                        // LUT scoring for turbo3: process 4 elements at a time (shared qs_byte + sgn_byte)
+                        // LUT scoring for turbo3: process 8 elements at a time (2 qs bytes + 1 signs byte)
+                        // 8-wide doubles ILP vs 4-wide. d_base aligns to 8 so signs byte covers all 8 elements.
                         const block_turbo3_0 * K_turbo = (const block_turbo3_0 *)(K + i_KQ*nb11);
                         sum = 0.0f;
 #pragma unroll
-                        for (int d0 = 0; d0 < D; d0 += 4 * nthreads_KQ) {
-                            const int d_base = d0 + (threadIdx.x % nthreads_KQ) * 4;
+                        for (int d0 = 0; d0 < D; d0 += 8 * nthreads_KQ) {
+                            const int d_base = d0 + (threadIdx.x % nthreads_KQ) * 8;
                             const int ib = d_base / QK_TURBO3;
                             const int jj = d_base % QK_TURBO3;
                             const float norm = __half2float(K_turbo[ib].norm);
-                            const uint8_t qs_byte = K_turbo[ib].qs[jj / 4];
-                            const uint8_t sgn_byte = K_turbo[ib].signs[jj / 8];
-                            const int ss = jj % 8;
-                            const uint8_t idx0 = ((qs_byte >> 0) & 0x3) | (((sgn_byte >> (ss+0)) & 0x1) << 2);
-                            const uint8_t idx1 = ((qs_byte >> 2) & 0x3) | (((sgn_byte >> (ss+1)) & 0x1) << 2);
-                            const uint8_t idx2 = ((qs_byte >> 4) & 0x3) | (((sgn_byte >> (ss+2)) & 0x1) << 2);
-                            const uint8_t idx3 = ((qs_byte >> 6) & 0x3) | (((sgn_byte >> (ss+3)) & 0x1) << 2);
+                            const uint8_t qs0 = K_turbo[ib].qs[jj / 4];
+                            const uint8_t qs1 = K_turbo[ib].qs[jj / 4 + 1];
+                            const uint8_t sgn = K_turbo[ib].signs[jj / 8];
+                            const uint8_t idx0 = ((qs0 >> 0) & 0x3) | (((sgn >> 0) & 0x1) << 2);
+                            const uint8_t idx1 = ((qs0 >> 2) & 0x3) | (((sgn >> 1) & 0x1) << 2);
+                            const uint8_t idx2 = ((qs0 >> 4) & 0x3) | (((sgn >> 2) & 0x1) << 2);
+                            const uint8_t idx3 = ((qs0 >> 6) & 0x3) | (((sgn >> 3) & 0x1) << 2);
+                            const uint8_t idx4 = ((qs1 >> 0) & 0x3) | (((sgn >> 4) & 0x1) << 2);
+                            const uint8_t idx5 = ((qs1 >> 2) & 0x3) | (((sgn >> 5) & 0x1) << 2);
+                            const uint8_t idx6 = ((qs1 >> 4) & 0x3) | (((sgn >> 6) & 0x1) << 2);
+                            const uint8_t idx7 = ((qs1 >> 6) & 0x3) | (((sgn >> 7) & 0x1) << 2);
                             sum += (turbo_lut[d_base  ][idx0] + turbo_lut[d_base+1][idx1] +
-                                    turbo_lut[d_base+2][idx2] + turbo_lut[d_base+3][idx3]) * norm;
+                                    turbo_lut[d_base+2][idx2] + turbo_lut[d_base+3][idx3] +
+                                    turbo_lut[d_base+4][idx4] + turbo_lut[d_base+5][idx5] +
+                                    turbo_lut[d_base+6][idx6] + turbo_lut[d_base+7][idx7]) * norm;
                         }
                     } else if constexpr (n_centroids_lut > 0 && type_K == GGML_TYPE_TURBO4_0) {
                         // LUT scoring for turbo4: process 4 elements at a time (2 qs bytes)
