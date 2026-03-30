@@ -1,9 +1,9 @@
 # Session 25 Deep Autoresearch Log
 
 ## Summary
-- Iterations: 33/100
+- Iterations: 43/100
 - Wins: 3 (committed)
-- Dead ends: 27 (reverted), 3 info/baseline
+- Dead ends: 29 (reverted), 11 info/validation
 - Best turbo3 short: 65.26 (+0.23% vs baseline 65.11)
 - Best turbo3 32K: 56.97 (+4.9% vs baseline 54.31)
 - Best turbo2 32K: 60.40 (+12.8% vs baseline 53.57)
@@ -89,6 +89,23 @@ Iterations 29-32 all show the same pattern: ptxas optimization flags that change
 | Llama 1B Q6_K | 64 | turbo3 | 671.85 | — | — |
 
 **Key finding**: The 8B model shows +28.4% improvement because it has 32 KV heads (no GQA), making FA a larger fraction of decode time. The threshold improvement is MODEL-DEPENDENT: more KV heads = bigger win.
+
+## Asymmetric K/V Sweep (8B Llama-3.3, D=128, 32K)
+
+| K | V | bpv | 32K tok/s |
+|---|---|:---:|:---------:|
+| turbo2 | turbo1.5 | 4.5 | **118.75** |
+| turbo2 | turbo2 | 5.0 | 117.02 |
+| turbo2 | turbo3 | 5.75 | 114.79 |
+| turbo2 | turbo4 | 6.75 | 113.59 |
+| turbo3 | turbo1.5 | 5.25 | 112.15 |
+| turbo3 | turbo2 | 5.75 | 111.05 |
+| turbo3 | turbo3 | 6.5 | 105.64 |
+| turbo4 | turbo2 | 6.75 | 74.70 |
+| turbo4 | turbo4 | 8.5 | 74.01 |
+| turbo1.5 | turbo1.5 | 4.0 | 66.94 |
+
+**Finding: K type determines 32K speed.** V type barely matters (5-7% spread per K type). With sparse V skip, most V is never read. K scoring is the bottleneck. Implication for LA: use turbo2 K for speed, V type only matters for quality.
 
 ### Pattern: Code restructuring is register-sensitive
 
