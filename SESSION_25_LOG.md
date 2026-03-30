@@ -1,14 +1,22 @@
 # Session 25 Deep Autoresearch Log
 
 ## Summary
-- Iterations: 17/100
+- Iterations: 18/100
 - Wins: 2 (committed)
-- Dead ends: 14 (reverted)
+- Dead ends: 16 (reverted)
 - Best turbo3 short: 65.26 (+0.23% vs baseline 65.11)
 - Best turbo3 32K: 56.97 (+4.9% vs baseline 54.31)
 - Best turbo2 32K: 60.40 (+12.8% vs baseline 53.57)
-- Best turbo3 PPL ctx=512: 6.852 (bit-exact)
-- Best turbo2 PPL ctx=512: 7.080 (bit-exact)
+- Best turbo1.5 32K: 49.80 (+3.4% vs baseline 48.15)
+- All PPL bit-exact at tested contexts
+
+## Key Insights
+
+1. **Register budget: 168/170 = 98.4% utilized** — adding even 1 register causes spills and -2% to -4% regression.
+2. **LUT is essential** — both for performance (-11% without) and REGISTER PRESSURE (LUT offloads data to shared memory, reducing register count from 255 to 168).
+3. **Sparse V threshold was the only successful optimization** — constant changes that skip more V work at long context.
+4. **VEC kernel is at optimization ceiling** — compiler flags, launch bounds, code restructuring, ILP changes, memory hints all neutral or regressive.
+5. **SM120 specifics**: L2 prefetch IS needed (-2.3% without), HW prefetcher handles sequential but not strided patterns, shared memory bank conflicts are steeper.
 
 ## Baselines (Session 24B, RTX 5090, 27B Q6_K)
 
@@ -48,3 +56,4 @@
 | — | turbo4 32K verify | neutral | — | 54.15 (=) | — | OK | dfa84f6b6 |
 | 16 | #pragma unroll 4 outer KQ | smaller code | 65.33 (=) | 57.33 (noise) | — | DEAD | — |
 | 17 | Type-specific sparse V 1e-2 | turbo2/1.5 low bpv | — | turbo2 60.40 (+12.8%) | 7.0797 | **WIN** | 3d609e224 |
+| 18 | Warp-level V tile skip | __shfl max + goto | 65.27 (=) | 56.97 (=) | — | DEAD | — |
