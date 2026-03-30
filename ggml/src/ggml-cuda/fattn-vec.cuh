@@ -690,10 +690,19 @@ void ggml_cuda_flash_attn_ext_vec_case_impl(ggml_backend_cuda_context & ctx, ggm
                 CUDA_CHECK(cudaGetSymbolAddress(&d_addr_ne0, d_fattn_sink_ne0));
             }
 
-            // cudaMemcpyAsync is graph-capturable (unlike cudaMemcpyToSymbolAsync)
-            CUDA_CHECK(cudaMemcpyAsync(d_addr_buf, &k_buf_const, sizeof(const half *), cudaMemcpyHostToDevice, ctx.stream()));
-            CUDA_CHECK(cudaMemcpyAsync(d_addr_ne0, &k_ne0_full,  sizeof(int64_t),      cudaMemcpyHostToDevice, ctx.stream()));
-            CUDA_CHECK(cudaMemcpyAsync(d_addr_n,   &ss,           sizeof(int),          cudaMemcpyHostToDevice, ctx.stream()));
+            // cudaMemcpyAsync is graph-capturable (unlike cudaMemcpyToSymbolAsync).
+            // Use aligned struct — unaligned stack vars cause segfault on SM89 (Ada)
+            // for certain sink sizes {1, 4, 16} due to L1 cache coherency issues.
+            struct __align__(16) sink_async_state {
+                const half * buf;
+                int64_t      ne0;
+                int          n;
+            };
+            static __attribute__((aligned(16))) sink_async_state sink_state;
+            sink_state = {k_buf_const, k_ne0_full, ss};
+            CUDA_CHECK(cudaMemcpyAsync(d_addr_buf, &sink_state.buf, sizeof(const half *), cudaMemcpyHostToDevice, ctx.stream()));
+            CUDA_CHECK(cudaMemcpyAsync(d_addr_ne0, &sink_state.ne0, sizeof(int64_t),      cudaMemcpyHostToDevice, ctx.stream()));
+            CUDA_CHECK(cudaMemcpyAsync(d_addr_n,   &sink_state.n,   sizeof(int),          cudaMemcpyHostToDevice, ctx.stream()));
         }
     }
 
