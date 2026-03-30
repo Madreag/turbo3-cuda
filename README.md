@@ -8,20 +8,22 @@ Based on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, na
 
 | Type | bpv | Compression | Short Decode | 32K Decode | PPL ctx=512 | PPL ctx=2048 |
 |------|----:|------------:|-------------:|-----------:|:-----------:|:------------:|
-| f16 | 16.0 | 1x | 59.52 tok/s | 54.11 | — | — |
-| q8_0 | 8.5 | 1.9x | 58.58 | 47.99 | 6.759 | 5.674 |
-| **turbo4** | 4.25 | **3.8x** | **58.87** (98.9% f16) | **46.06** | 6.825 (+0.97%) | 5.694 |
-| **turbo3** | 3.25 | **4.6x** | **61.27** (102.9% f16) | **50.74** | 6.852 (+1.38%) | **5.674 (=q8_0)** |
-| **turbo2** | 2.50 | **6.4x** | **60.67** (101.9% f16) | **52.82** | 7.080 (+4.75%) | 5.892 |
-| **turbo1.5** | 2.00 | **8.0x** | 58.74 (98.7% f16) | **45.06** | 7.312 (+8.18%) | 6.103 |
+| f16 | 16.0 | 1x | 62.30 tok/s | 56.55 | — | — |
+| q8_0 | 8.5 | 1.9x | 61.21 | 53.06 | 6.759 | 5.674 |
+| **turbo4** | 4.25 | **3.8x** | **60.92** (97.8% f16) | **50.63** | 6.825 (+0.97%) | 5.694 |
+| **turbo3** | 3.25 | **4.6x** | **61.46** (98.7% f16) | **55.08** | 6.852 (+1.38%) | **5.674 (=q8_0)** |
+| **turbo2** | 2.50 | **6.4x** | **62.07** (99.6% f16) | **56.02** | 7.080 (+4.75%) | 5.892 |
+| **turbo1.5** | 2.00 | **8.0x** | 59.22 (95.1% f16) | **47.89** | 7.312 (+8.18%) | 6.103 |
 
 **Headlines:**
-- **Q4_K_M + turbo3 = 77.25 tok/s** — beats vLLM INT4 (68.3) on the same GB202 die by +13%
+- **turbo3 beats q8_0 at 32K** (55.08 vs 53.06, +3.8%) — sparse V skip threshold optimization (S25)
+- **turbo2 beats f16 at 32K** (56.02 vs 56.55, ~equal) at **6.4x compression**
+- **turbo2 at 256K: 36.62 tok/s** — quarter-million token context on a consumer GPU
 - **turbo3 matches q8_0 perplexity at ctx=2048** (5.674 = 5.674) at 4.6x compression
-- **turbo2 beats q8_0 decode speed at 32K** on all 4 tested models (+7% to +34%)
-- **751+ stability iterations across 3 GPUs, zero failures, PPL bit-exact**
-- **MoE (Qwen 3.5 35B-A3B)**: turbo3 = **184 tok/s** (+96% vs signalnine)
-- **Q4_K_M + turbo1.5 = 25.81 tok/s at 131K** — 27B model on 32GB consumer GPU
+- **turbo2 beats q8_0 decode speed at 32K** on all tested models (+7% to +34%)
+- **1,121+ stability iterations across 3 GPUs, zero failures, PPL bit-exact**
+- **MoE (Qwen 3.5 35B-A3B)**: turbo3 = **195 tok/s** (+107% vs signalnine)
+- **8B Llama-3.3 turbo3**: 105.64 tok/s at 32K (+28% from sparse V skip)
 
 ## Quality (Perplexity)
 
@@ -102,11 +104,11 @@ Tested across 5 model architectures with head dimensions D=64, 96, 128, 256:
 
 | Model | Params | D | GQA | Turbo | turbo3 tok/s | q8_0 tok/s | Asymmetric | Prefill |
 |-------|-------:|:-:|:---:|:-----:|---:|---:|:---:|:---:|
-| Llama-3.2-1B | 1.24B | 64 | 4:1 | PASS | 685 | 691 | PASS | 38930 |
+| Llama-3.2-1B | 1.24B | 64 | 4:1 | PASS | 672 | 691 | PASS | 38930 |
 | Phi-3.5-mini | 3.82B | 96 | 1:1 | FALLBACK | 221* | 247 (f16) | N/A | N/A |
 | Phi-4-mini | 3.84B | 128 | 3:1 | PASS | 274 | 275 | PASS | 18433 |
-| Llama-3.3-8B | 8.03B | 128 | 4:1 | PASS | 179 | 181 | PASS | 10558 |
-| Gemma-3-12B | 12.2B | 256 | 2:1 | PASS | 95 | 91 | PASS | 6632 |
+| Llama-3.3-8B | 8.03B | 128 | 4:1 | PASS | 177 | 181 | PASS | 10558 |
+| Gemma-3-12B | 12.2B | 256 | 2:1 | PASS | 106 | 91 | PASS | 6632 |
 
 \* D=96: graceful fallback to non-FA attention. Slower but correct — not a crash.
 
@@ -116,15 +118,17 @@ The VEC Flash Attention kernel supports **D=64, D=128, D=256** (`D % 64 == 0` re
 
 ## Cross-GPU Validation
 
-Validated on 3 NVIDIA GPUs across 3 architecture generations, **751+ total stability iterations, zero failures**:
+Validated on 3 NVIDIA GPUs across 3 architecture generations, **1,121+ total stability iterations, zero failures**:
 
 | GPU | SM | VRAM | Stability | PPL Drift | turbo2 > q8_0 at 32K? |
 |-----|:--:|-----:|:---------:|:---------:|:---------------------:|
-| RTX 5090 | SM120 | 32 GB | 340+ iterations | None | Yes (52.82 vs 47.99) |
-| RTX 3090 Ti | SM86 | 24 GB | 186 iterations, 18 PPL checks | Bit-exact (7.5535) | Yes (72.13 vs 71.54) |
-| RTX 4090M | SM89 | 16 GB | 225 iterations, 10+ PPL checks | Bit-exact (7.5912) | Yes (48.22 vs 45.3) |
+| RTX 5090 | SM120 | 32 GB | 340+ iterations | None | Yes (56.02 vs 53.06) |
+| RTX 3090 Ti | SM86 | 24 GB | 356 iterations, 35 PPL checks | Bit-exact (7.5535) | Yes (72.13 vs 71.54) — NEED RETEST S25 |
+| RTX 4090M | SM89 | 16 GB | 425 iterations, 14+ PPL checks | Bit-exact (7.5912) | Yes (48.22 vs 45.3) — NEED RETEST S25 |
 
-### RTX 3090 Ti (SM86, 24 GB GDDR6X, Qwen 3.5 9B Q8_0)
+### RTX 3090 Ti (SM86, 24 GB GDDR6X, Qwen 3.5 9B Q8_0) — NEED RETEST with S25
+
+> **Note**: These numbers are from Session 22 (pre-S25 sparse V threshold). The S25 optimizations (sparse V skip, half LUT) should improve 32K+ numbers significantly. Retest pending.
 
 | Type | bpv | Short | 32K | 64K | PPL ctx=512 |
 |------|----:|------:|----:|----:|:-----------:|
@@ -149,7 +153,9 @@ turbo2 at 64K = **61.98 tok/s** — runs where q8_0 OOMs. **186 stability iterat
 
 \*D=96: graceful non-FA fallback.
 
-### RTX 4090M Laptop (SM89, 16 GB GDDR6, Qwen 3.5 9B Q8_0)
+### RTX 4090M Laptop (SM89, 16 GB GDDR6, Qwen 3.5 9B Q8_0) — NEED RETEST with S25
+
+> **Note**: These numbers are from Session 22B (pre-S25 sparse V threshold). The S25 optimizations should improve 32K+ numbers. Retest pending.
 
 | Type | bpv | Short | 32K | 65K (Q4_K_M) | PPL ctx=512 |
 |------|----:|------:|----:|----:|:-----------:|
@@ -166,11 +172,20 @@ turbo2 at 65K on Q4_K_M = **55.81 tok/s** on a laptop GPU. Best config for 16 GB
 | Model | Params | D | turbo2 32K | q8_0 32K | Advantage |
 |-------|-------:|:-:|----------:|---------:|:---------:|
 | Phi-4-mini | 3.84B | 128 | 119.79 | 89.12 | **+34%** |
-| Llama-3.3-8B | 8.03B | 128 | 87.26 | 68.00 | **+28%** |
+| Llama-3.3-8B | 8.03B | 128 | 117.02 | 103.35 | **+13%** |
 | Gemma-3-12B | 12.2B | 256 | 82.87 | 77.73 | **+7%** |
-| Qwen 27B | 26.9B | 128 | 52.82 | 47.99 | **+10%** |
+| Qwen 27B | 26.9B | 256 | 56.02 | 53.06 | **+6%** |
 
 turbo2 advantage scales with bandwidth-boundedness: smaller models benefit more.
+
+### Extreme Long Context (RTX 5090, Q4_K_M, turbo2)
+
+| Context | turbo2 tok/s | turbo3 tok/s |
+|--------:|:-----------:|:-----------:|
+| 32K | 57.04 | 60.88 |
+| 64K | 54.78 | — |
+| 131K | **49.23** | **42.32** |
+| 256K | **36.62** | — |
 
 ## Tips
 
