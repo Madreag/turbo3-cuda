@@ -87,13 +87,38 @@ The VEC Flash Attention kernel supports **D=64, D=128, D=256** (`D % 64 == 0` re
 
 ## Cross-GPU Validation
 
-Validated on 3 NVIDIA GPUs across 2 architecture generations:
+Validated on 3 NVIDIA GPUs across 2 architecture generations, 228+ total stability iterations, zero failures:
 
 | GPU | SM | VRAM | Stability | PPL Drift | turbo2 > q8_0 at 32K? |
 |-----|:--:|-----:|:---------:|:---------:|:---------------------:|
-| RTX 5090 | SM120 | 32 GB | Continuous | None | Yes (51.29 vs 47.99) |
+| RTX 5090 | SM120 | 32 GB | Continuous | None | Yes (52.82 vs 47.99) |
 | RTX 3090 Ti | SM86 | 24 GB | 103 iterations, 0 failures | Bit-exact (7.5535) | Yes (71.77 vs 71.55) |
 | RTX 4090M | SM89 | 16 GB | 125 iterations, 0 failures | Bit-exact (7.5912) | Yes (47.0 vs 45.3) |
+
+### RTX 3090 Ti (SM86, 24 GB GDDR6X, Qwen 3.5 9B Q8_0)
+
+| Type | bpv | Short | 32K | 64K | PPL ctx=512 |
+|------|----:|------:|----:|----:|:-----------:|
+| f16 | 16 | 85.56 | OOM | OOM | — |
+| q8_0 | 8.5 | 84.98 | 71.55 | OOM | 8.525 |
+| turbo4 | 4.25 | 82.89 | 66.35 | 45.17 | 8.634 |
+| **turbo3** | 3.25 | 83.66 | 63.07 | 43.86 | 8.624 |
+| **turbo2** | 2.5 | **83.93** | **71.77** | **61.98** | 8.937 |
+| turbo1.5 | 2.0 | 81.92 | 63.91 | 52.25 | 9.402 |
+
+turbo2 at 64K = **61.98 tok/s** — runs where q8_0 OOMs. turbo1.5 reaches 131K at 37.10 tok/s on 24 GB.
+
+### RTX 4090M Laptop (SM89, 16 GB GDDR6, Qwen 3.5 9B Q8_0)
+
+| Type | bpv | Short | 32K | 65K (Q4_K_M) | PPL ctx=512 |
+|------|----:|------:|----:|----:|:-----------:|
+| q8_0 | 8.5 | ~54 | 45.3 | — | 8.477 |
+| turbo4 | 4.25 | ~53 | 44.48 | — | 8.598 |
+| **turbo3** | 3.25 | ~53 | 43.24 | 46.89 | 8.586 |
+| **turbo2** | 2.5 | ~53 | **47.77** | **55.81** | 8.898 |
+| turbo1.5 | 2.0 | ~52 | 44.13 | 46.71 | 9.211 |
+
+turbo2 at 65K on Q4_K_M = **55.81 tok/s** on a laptop GPU. Best config for 16 GB: Q4_K_M weights + turbo2 KV.
 
 ## Tips
 
