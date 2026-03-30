@@ -139,7 +139,7 @@ static __global__ void flash_attn_ext_vec(
     // Sparse V: skip V dequant for positions with negligible attention weights.
     // At long context, most V positions contribute < 1e-6 to the output — skipping
     // their dequant saves significant compute (especially for quantized V types).
-    constexpr float sparse_v_threshold_f = 1e-6f;
+    constexpr float sparse_v_threshold_f = 1e-3f;
 #ifdef V_DOT2_F32_F16_AVAILABLE
     const     half  sparse_v_threshold_h = __float2half(sparse_v_threshold_f);
 #endif
