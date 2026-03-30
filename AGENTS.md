@@ -72,17 +72,18 @@ Prefill (Q->ne[1]>1):
   MMA/TILE kernel runs on fp16
 ```
 
-## Current Performance (Session 22B, RTX 5090)
+## Current Performance (Session 24, RTX 5090)
 
 | Type | bpv | Short | 32K | PPL ctx=512 | PPL ctx=2048 | Notes |
 |------|----:|------:|----:|:-----------:|:------------:|-------|
 | f16 | 16 | 59.52 | 54.11 | — | — | Ceiling |
 | q8_0 | 8.5 | 58.58 | 47.99 | 6.759 | 5.674 | Baseline |
 | turbo4 | 4.25 | **58.87** | **46.06** | 6.825 (+0.97%) | 5.694 | LUT disabled (16 centroids net negative) |
-| turbo3 | 3.25 | **61.27** | **50.74** | 6.852 (+1.38%) | **5.674 (=q8_0)** | q8_1 vec_dot + 8-wide LUT + L2 prefetch |
+| turbo3 | 3.25 | **65.05** | **53.44** | 6.852 (+1.38%) | **5.674 (=q8_0)** | __expf fast-math softmax (S24) |
 | turbo2 | 2.5 | **60.67** | **52.82** | 7.080 (+4.75%) | 5.892 | q8_1 vec_dot + 8-wide LUT, long-ctx champion |
 | turbo1.5 | 2.0 | 58.74 | **45.06** | 7.312 (+8.18%) | 6.103 | **8x compression, 174 MoE** |
 
+**Q4_K_M (Session 24)**: turbo3=77.25 short, 58.08 32K. **PPL ctx=2048=7.716 (beats q8_0 7.730!)**
 **MoE (Qwen 3.5 35B-A3B, S20)**: turbo3=184, turbo1.5=174, turbo4=172, q8_0=191 tok/s
 
 ### Cross-GPU Stability (Sessions 20-21)
@@ -281,7 +282,7 @@ ALL turbo types now use q8_1 Q path (Session 20 moved turbo3/turbo2 off float Q)
 5. **FP4 Q precision test** — can Q survive E2M1 quantization? (16 levels, most Q values near 0)
 6. **PR to TheTom upstream**
 
-## Completed Optimizations (Sessions 17-21)
+## Completed Optimizations (Sessions 17-24)
 
 | Session | What | Impact |
 |---------|------|--------|
@@ -293,6 +294,7 @@ ALL turbo types now use q8_1 Q path (Session 20 moved turbo3/turbo2 off float Q)
 | 22 | Multi-model validation (5 models D=64/96/128/256) | Zero crashes, D=96 graceful fallback |
 | 22B | SM89 sink fix, L2 prefetch, 8-wide LUT turbo3/turbo2 | turbo3 short +1.8%, 32K +4.7%, turbo2 32K +3.0% |
 | 23 | Q4_K_M validation, LA=12 boundary V, fattn.cu D check, README | Q4_K_M+turbo1.5 131K=25.81, LA=12 74.8% gap recovery |
+| 24 | __expf fast-math, LA kv_ord hybrid fix, LA=13-15, GQA warning | turbo3 short +0.67%, 32K +3.69%, Q4_K_M ctx=2048 beats q8_0 |
 
 ## Dead Ends (Don't Repeat)
 
@@ -307,6 +309,9 @@ ALL turbo types now use q8_1 Q path (Session 20 moved turbo3/turbo2 off float Q)
 | FP4 E2M1 for Q | 99.5% of Q values map to zero (σ=0.088, E2M1 min non-zero=0.5). No mixed fp16×E2M1 MMA | 22 |
 | Inner-loop V prefetch hints | RTX 5090 HW prefetcher already handles sequential pattern. No measurable benefit | 23 |
 | turbo1.5 sparse V threshold=1e-4 | PPL safe but no speed benefit at 32K or 131K | 23 |
+| elect_leader() PTX | VEC kernel warp-leader branches are outside hot loop, no serialization to eliminate | 24 |
+| Tawa producer-consumer warp split | VEC ncols=1 is bandwidth-limited, shared memory staging adds overhead, not compute-limited | 24 |
+| cp.async K loading | K blocks already loaded directly to registers, no staging benefit | 24 |
 
 ## Obsidian Vault Maintenance
 
