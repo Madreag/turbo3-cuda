@@ -147,3 +147,10 @@ a.out.*
 # Project-specific
 /.trash/
 /AGENTS.md
+/CLAUDE.md
+/[Ss]ession*
+/SESSION*
+PROFILE_RESULTS.md
+COMP_TEST_RESULTS.md
+DISCUSSION_DRAFT.md
+model-specs.md
