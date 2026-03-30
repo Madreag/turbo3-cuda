@@ -84,13 +84,14 @@ static __global__ void flash_attn_ext_vec(
 #endif // GGML_USE_HIP
 
     constexpr int nthreads    = ggml_cuda_fattn_vec_get_nthreads_device();
-    // turbo3/turbo2 now use q8_1 Q path (Session 20) — eliminates 4x Q bandwidth penalty at long context
-    // But keep nthreads_KQ=8 (like unquantized path) for better warp-level ILP at long context.
+    // ALL turbo types use nthreads_KQ=8 for better warp-level ILP at long context (S24B).
     // nthreads_KQ_q=32 gives 1 KQ dot per warp; 8 gives 4 interleaved dots → better latency hiding.
+    // Dead End #19: nthreads_KQ=32 for turbo3 was -17% at 32K. turbo4/turbo1.5 had the same bug.
     constexpr bool K_is_unquantized = (type_K == GGML_TYPE_F16 || type_K == GGML_TYPE_BF16);
     constexpr bool V_is_unquantized = (type_V == GGML_TYPE_F16 || type_V == GGML_TYPE_BF16);
-    constexpr bool K_is_turbo_q8_1  = (type_K == GGML_TYPE_TURBO3_0 || type_K == GGML_TYPE_TURBO2_0);
-    constexpr int nthreads_KQ = K_is_unquantized ? 128 / cpy_nb : (K_is_turbo_q8_1 ? 128 / cpy_nb : nthreads_KQ_q);
+    constexpr bool K_is_turbo       = (type_K == GGML_TYPE_TURBO3_0 || type_K == GGML_TYPE_TURBO2_0 ||
+                                       type_K == GGML_TYPE_TURBO4_0 || type_K == GGML_TYPE_TURBO1_5);
+    constexpr int nthreads_KQ = K_is_unquantized ? 128 / cpy_nb : (K_is_turbo ? 128 / cpy_nb : nthreads_KQ_q);
     constexpr int nthreads_V  = V_is_unquantized ? 128 / cpy_nb : nthreads_V_q;
 
     static_assert(WARP_SIZE % nthreads_KQ == 0, "bad nthreads_K");
