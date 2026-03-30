@@ -141,7 +141,7 @@ static __global__ void flash_attn_ext_vec(
     // their dequant saves significant compute (especially for quantized V types).
     // Lower-precision V types tolerate more aggressive thresholds (less info in skipped values).
     constexpr bool V_is_low_bpv = (type_V == GGML_TYPE_TURBO2_0 || type_V == GGML_TYPE_TURBO1_5);
-    constexpr float sparse_v_threshold_f = V_is_low_bpv ? 1e-2f : 1e-3f;
+    constexpr float sparse_v_threshold_f = V_is_low_bpv ? 1e-2f : 5e-3f;
 #ifdef V_DOT2_F32_F16_AVAILABLE
     const     half  sparse_v_threshold_h = __float2half(sparse_v_threshold_f);
 #endif
