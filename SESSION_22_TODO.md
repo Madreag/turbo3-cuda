@@ -16,8 +16,9 @@
 - [x] SESSION_22_MULTIMODEL.md created
 
 ## Part 3: Cross-GPU Data
-- [x] 3090 Ti: 8 iterations, 0 failures, PPL bit-exact (7.5535)
-- [x] 4090M: 10 iterations, 0 failures, PPL bit-exact (7.5912)
+- [x] 3090 Ti: 103 iterations, 10 PPL checks, 0 failures, PPL bit-exact (7.5535)
+- [x] 4090M: 125 iterations (25 S20 + 100 S21), 0 failures, PPL bit-exact (7.5912)
+- [x] SM89 sink bug found: TURBO_SINK_SIZE {1,4,16} segfault (documented)
 
 ## Part 4: FP4 E2M1 Q Precision Test
 - [x] Python test: 99.5% map to zero, 3 values used — DEAD
@@ -25,7 +26,15 @@
 - [x] Documented findings
 
 ## Part 5: Ship
-- [x] README.md rewrite (S21 finals + multi-model + cross-GPU + limitations)
+- [x] README.md rewrite (S21 finals + multi-model + cross-GPU + limitations + tips)
 - [x] DISCUSSION_DRAFT.md for #20969
 - [x] Update Obsidian vault (Dashboard, Benchmark Hub, Roadmap, Session 22 note)
-- [ ] Push to myfork
+- [x] Push to myfork (2 commits: 77bac16 + 6e891da)
+
+## Review Pass Fixes (from cross-GPU data review)
+- [x] Fixed iteration counts: 3090 Ti 103, 4090M 125 (were wrong in all docs)
+- [x] Documented SM89 sink crash bug in AGENTS.md, README.md, DISCUSSION_DRAFT.md
+- [x] Added K=turbo4/V=q8_0 finding and LA=2 tip to README + DISCUSSION_DRAFT
+- [x] Added D=80, D=112 to fallback dimension list in README
+- [x] Added FP4 E2M1 to Dead Ends table in AGENTS.md
+- [x] Fixed 4090M turbo2 vs q8_0 comparison number
