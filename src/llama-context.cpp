@@ -2974,6 +2974,20 @@ llama_context * llama_init_from_model(
         params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
     }
 
+    // GQA >8:1 vulnerability warning for turbo K types
+    // HyperionMS2040 found GLM4 (GQA-16) degrades +19.6% with turbo3 K.
+    // High GQA ratios amplify K quantization errors through softmax.
+    if (params.type_k == GGML_TYPE_TURBO3_0 || params.type_k == GGML_TYPE_TURBO4_0 ||
+        params.type_k == GGML_TYPE_TURBO2_0 || params.type_k == GGML_TYPE_TURBO1_5) {
+        const uint32_t n_head    = model->hparams.n_head();
+        const uint32_t n_head_kv = model->hparams.n_head_kv();
+        if (n_head_kv > 0 && n_head / n_head_kv > 8) {
+            LLAMA_LOG_WARN("%s: high GQA ratio (%u:%u). Turbo K may degrade quality — "
+                           "consider -ctk q8_0 -ctv %s for better PPL\n",
+                           __func__, n_head, n_head_kv, ggml_type_name(params.type_v));
+        }
+    }
+
     if (ggml_is_quantized(params.type_v) && params.flash_attn_type == LLAMA_FLASH_ATTN_TYPE_DISABLED) {
         LLAMA_LOG_ERROR("%s: V cache quantization requires flash_attn\n", __func__);
         return nullptr;
