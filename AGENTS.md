@@ -51,7 +51,7 @@ CUDA implementation of [TurboQuant](https://arxiv.org/abs/2504.19874) (ICLR 2026
     - `01 Sessions/` — all 18 session reports with what worked and what didn't
 
 - **Models**: `/home/erol/ai/turboquant/models/opus-v2-Q6_K.gguf` (27B dense), `Qwen3.5-35B-A3B-Q4_K_M.gguf` (MoE)
-- **Hardware**: RTX 5090 32GB (SM120), RTX 3090 Ti 24GB (SM86), RTX 4090M 16GB (SM89)
+- **Hardware**: RTX 5090 32GB (SM120), RTX 3090 Ti 24GB (SM86), RTX 4090M 16GB (SM89), Mac Mini M4 Pro 24GB (Metal)
 
 ## ⚠️ ARCHITECTURE — Pre-Rotate-Queries (NOT Shadow Cache)
 
@@ -247,7 +247,7 @@ turbo4 and turbo1.5 use q8_1 Q format (`K_is_unquantized = false`). turbo3 and t
 |----------|--------|--------|
 | `TURBO_LAYER_ADAPTIVE=N` | Per-layer KV type (modes 0-11) | Working |
 | `TURBO_INNERQ=N` | InnerQ calibration | Working |
-| `TURBO_SINK_SIZE=N` | Attention sinks (first N positions at fp16) | FIXED on SM86/SM120 (Session 19). 0% PPL benefit. **BUG**: SM89 segfault at sizes {1, 4, 16}; sizes {0, 2, 8} work. V sinks = dead end (register pressure). |
+| `TURBO_SINK_SIZE=N` | Attention sinks (first N positions at fp16) | FIXED on all GPUs (S19 SM86, S22B SM89 alignment fix). 0% PPL benefit. V sinks = dead end (register pressure). |
 
 ## Commit Message Format
 
@@ -268,9 +268,9 @@ ALL turbo types now use q8_1 Q path (Session 20 moved turbo3/turbo2 off float Q)
 
 | Type | Q Path | LUT | Short | 32K | Key Optimization |
 |------|:------:|:---:|------:|----:|-----------------|
-| turbo3 | q8_1 | 8 centroids | 60.18 | 48.44 | q8_1 vec_dot + LUT + launch_bounds |
-| turbo4 | q8_1 | disabled | 58.87 | 46.06 | 16-centroid LUT was net negative |
-| turbo2 | q8_1 | 4 centroids | 60.67 | 51.29 | Long-context champion |
+| turbo3 | q8_1 | 8 centroids (8-wide) | **65.05** | **53.44** | q8_1 vec_dot + 8-wide LUT + __expf + L2 prefetch |
+| turbo4 | q8_1 | disabled | 58.87 | 46.06 | 16-centroid LUT net negative. **AmesianX +5.6% at 32K — fix needed** |
+| turbo2 | q8_1 | 4 centroids (8-wide) | 60.67 | **52.82** | Long-context champion |
 | turbo1.5 | q8_1 | none | 58.74 | 45.06 | Branchless ternary |
 
 ## What To Build Next — Session 22 (Priority Order)
@@ -327,14 +327,18 @@ If you discover a bug, create an issue file in `07 Issues/`. If you make an arch
 
 ## Remember
 
-- **Sessions 17-21 COMPLETE** — all 4 turbo types optimized, 36 K×V combos, 3 GPUs validated
-- **turbo2 = long-context champion** — 51.29 at 32K (beats q8_0), confirmed on all 3 GPUs
+- **Sessions 17-24 COMPLETE** — all 4 turbo types optimized, 36 K×V combos, 4 GPUs validated
+- **turbo3 short=65.05, 32K=53.44** (S24, +6.2%/+5.3% vs S22B from __expf)
+- **turbo2 = long-context champion** — 52.82 at 32K (beats q8_0 47.99 by 10%)
 - **turbo3 = q8_0 PPL at ctx=2048** (5.674 = 5.674) at 4.6x compression
+- **Q4_K_M turbo3 = 77.25 tok/s** (beats vLLM INT4 68.3 on same GB202 die)
+- **Q4_K_M turbo3 PPL ctx=2048 = 7.716** (BEATS q8_0 7.730!)
 - **MoE: turbo3=184 tok/s** (+96% vs S18), turbo1.5=174
-- **Cross-GPU stability**: 3090 Ti 50 iterations zero failures, 4090M 70 iterations zero failures, PPL bit-exact
+- **AmesianX head-to-head**: we win turbo3 by +16-32%. They edge turbo4 by +0.5-5.6% (register centroids)
+- **Cross-GPU stability**: 1,121+ iterations (356 SM86 + 425 SM89 + 340 SM120), 49+ PPL checks bit-exact, 0 failures
 - **D∈{64, 128, 256} only** — D=96 falls back to non-FA. VEC kernel: `static_assert(D % 64 == 0)`
 - **Vault**: `/mnt/c/vaults/forge/` — `06 Models/Validation Target Models.md` for multi-model specs, `09 Infrastructure/Test Machines.md` for GPU fleet
-- **Dump folder**: `/mnt/c/vaults/dump/` — incoming test results from 3090 Ti and 4090M
+- **Dump folder**: `/mnt/c/vaults/dump/` — incoming test results from 3090 Ti, 4090M, and M4 Pro
 - **MEASURE SHORT + 32K + PPL** after every change
 - **READ THE CODE** before writing code
 - **Search the Obsidian vault** for any context you need
