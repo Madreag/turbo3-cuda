@@ -5,6 +5,31 @@
 - Wins: 4 (committed)
 - Dead ends: 33 (reverted), 13 info/validation
 - **MINIMUM 50 ITERATIONS REACHED**
+
+## Final Regression Suite (Iterations 51-53)
+
+### PPL — All Types Bit-Exact
+| Type | PPL ctx=512 | Baseline |
+|------|:-----------:|:--------:|
+| turbo3 | 6.8522 | 6.852 |
+| turbo4 | 6.8249 | 6.825 |
+| turbo2 | 7.0797 | 7.080 |
+| turbo1.5 | 7.3120 | 7.312 |
+
+### Prefill (pp512) — No Regression
+turbo3=3392, q8_0=3398, f16=3470 tok/s (all equal, FFN-dominated)
+
+### 32K Symmetric Combos (27B Q6_K)
+| Type | 32K tok/s | vs q8_0 |
+|------|:---------:|:-------:|
+| turbo2 | **57.04** | **+6.5%** |
+| q8_0 | 53.56 | baseline |
+| turbo3 | 53.35 | -0.4% |
+| turbo4 | 50.30 | -6.1% |
+| turbo1.5 | 46.12 | -13.9% |
+
+### Combination Finding
+`--ftz=true` + half LUT synergize: +1.3-1.5% on both short and 32K. Recommend as build flag.
 - Best turbo3 short: 65.26 (+0.23% vs baseline 65.11)
 - Best turbo3 32K: 56.97 (+4.9% vs baseline 54.31)
 - Best turbo2 32K: 60.40 (+12.8% vs baseline 53.57)
