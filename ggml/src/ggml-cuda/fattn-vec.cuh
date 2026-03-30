@@ -298,6 +298,21 @@ static __global__ void flash_attn_ext_vec(
              // Increment pointers after each loop:
              K += gridDim.y*nthreads*nb11, V += gridDim.y*nthreads*nb21, maskh += gridDim.y*nthreads) {
 
+        // L2 prefetch: issue hints for the NEXT outer iteration's K and V blocks
+        // while computing the current iteration. Hides GDDR latency (~300-400 cycles).
+        // Available on SM50+, no correctness impact (hint only).
+#if __CUDA_ARCH__ >= 500
+        if (k_VKQ_0 + gridDim.y*nthreads < k_VKQ_max) {
+            const char * K_next = K + gridDim.y*nthreads*nb11;
+            const char * V_next = V + gridDim.y*nthreads*nb21;
+            // Prefetch first few K and V cache lines of next chunk (128 bytes each)
+            asm volatile("prefetch.global.L2 [%0];" :: "l"(K_next));
+            asm volatile("prefetch.global.L2 [%0];" :: "l"(K_next + nb11));
+            asm volatile("prefetch.global.L2 [%0];" :: "l"(V_next));
+            asm volatile("prefetch.global.L2 [%0];" :: "l"(V_next + nb21));
+        }
+#endif
+
         // Calculate KQ tile and keep track of new maximum KQ values:
         float KQ_reg[ncols]; // KQ in registers.
 
