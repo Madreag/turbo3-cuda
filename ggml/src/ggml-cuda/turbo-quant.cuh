@@ -18,8 +18,9 @@
 #define QR_TURBO2 1  // Each dequantize call produces 2 consecutive elements (like q8_0)
 
 // ---- 2-bit centroids (Lloyd-Max for N(0, 1/128)) ----
+// constexpr → register allocation (0 latency vs ~30 cycle __constant__ memory)
 
-static __constant__ float TURBO_CENTROIDS_2BIT[4] = {
+static constexpr __device__ float TURBO_CENTROIDS_2BIT[4] = {
     -0.133462f, -0.039994f, 0.039994f, 0.133462f
 };
 
@@ -29,7 +30,7 @@ static __constant__ float TURBO_MID_2BIT[3] = {
 
 // ---- 3-bit centroids (Lloyd-Max for N(0, 1/128)) ----
 
-static __constant__ float TURBO_CENTROIDS_3BIT[8] = {
+static constexpr __device__ float TURBO_CENTROIDS_3BIT[8] = {
     -0.190685f, -0.117832f, -0.065717f, -0.021460f,
      0.021460f,  0.065717f,  0.117832f,  0.190685f
 };
@@ -366,7 +367,8 @@ static __device__ __forceinline__ float turbo2_dequant_element(
 
 // 16 Lloyd-Max optimal centroids for N(0, 1/sqrt(128))
 // Must match CPU reference in ggml-turbo-quant.c
-static __device__ const float TURBO_CENTROIDS_4BIT[16] = {
+// constexpr → register allocation (0 latency vs ~30 cycle __constant__/__device__ memory)
+static constexpr __device__ float TURBO_CENTROIDS_4BIT[16] = {
     -0.173926f, -0.117195f, -0.089527f, -0.068756f,
     -0.051262f, -0.035597f, -0.020989f, -0.006938f,
      0.006938f,  0.020989f,  0.035597f,  0.051262f,
