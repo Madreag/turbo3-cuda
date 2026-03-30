@@ -72,18 +72,26 @@ Prefill (Q->ne[1]>1):
   MMA/TILE kernel runs on fp16
 ```
 
-## Current Performance (Session 20 Final, RTX 5090)
+## Current Performance (Session 21 Final, RTX 5090)
 
 | Type | bpv | Short | 32K | PPL ctx=512 | PPL ctx=2048 | Notes |
 |------|----:|------:|----:|:-----------:|:------------:|-------|
-| f16 | 16 | ~60 | ~51 | — | — | Ceiling |
-| q8_0 | 8.5 | 60.7 | 49.6 | 6.759 | 5.674 | Baseline |
-| turbo4 | 4.25 | **59.4** | 42.2 | 6.825 (+0.97%) | 5.694 | LUT restored (16 centroids) |
-| turbo3 | 3.25 | **60.2** | **45.9** | 6.852 (+1.38%) | **5.674 (=q8_0)** | q8_1 vec_dot + LUT with [D][9] padding |
-| turbo2 | 2.5 | **60.4** | **47.9** | 7.080 (+4.75%) | 5.892 | q8_1 vec_dot + LUT, long-ctx champion |
-| turbo1.5 | 2.0 | 59.0 | 38.2 | 7.312 (+8.18%) | 6.103 | **8x compression, 113 MoE, 15.26 @204K** |
+| f16 | 16 | 59.52 | 54.11 | — | — | Ceiling |
+| q8_0 | 8.5 | 58.58 | 47.99 | 6.759 | 5.674 | Baseline |
+| turbo4 | 4.25 | **58.87** | **46.06** | 6.825 (+0.97%) | 5.694 | LUT disabled (16 centroids net negative) |
+| turbo3 | 3.25 | **60.18** | **48.44** | 6.852 (+1.38%) | **5.674 (=q8_0)** | q8_1 vec_dot + LUT (8 centroids) |
+| turbo2 | 2.5 | **60.67** | **51.29** | 7.080 (+4.75%) | 5.892 | q8_1 vec_dot + LUT (4 centroids), long-ctx champion |
+| turbo1.5 | 2.0 | 58.74 | **45.06** | 7.312 (+8.18%) | 6.103 | **8x compression, 174 MoE** |
 
-**MoE (Qwen 3.5 35B-A3B)**: turbo1.5 = 113 tok/s, turbo4 = 98, turbo3 = 94.
+**MoE (Qwen 3.5 35B-A3B, S20)**: turbo3=184, turbo1.5=174, turbo4=172, q8_0=191 tok/s
+
+### Cross-GPU Stability (Session 21)
+- **3090 Ti (SM86)**: 50 iterations, 0 failures, PPL bit-exact (7.5535)
+- **4090M (SM89)**: 70 iterations, 0 failures, PPL bit-exact (7.5912)
+- **turbo2 beats q8_0 at 32K on ALL 3 GPUs**
+
+### Supported Head Dimensions
+Only D∈{64, 128, 256}. VEC kernel requires `D % 64 == 0` (static_assert). D=80, D=96, D=112 fall back to non-FA mul_mat attention (slower but correct, no crash).
 
 ## Session 19 Bugs — ALL FIXED
 
@@ -252,24 +260,45 @@ turbo4 and turbo1.5 use q8_1 Q format (`K_is_unquantized = false`). turbo3 and t
 
 **NEVER add Co-Authored-By lines.**
 
-## Q Format Architecture (Key Insight from Session 18)
+## Q Format Architecture (Updated Session 20-21)
 
-The VEC FA kernel has two Q data paths that dominate long-context performance:
+ALL turbo types now use q8_1 Q path (Session 20 moved turbo3/turbo2 off float Q). LUT scoring uses Q from global memory (still float) for one-time construction.
 
-| Q Format | Types | Short Decode | Long Context | Why |
-|----------|-------|:---:|:---:|-----|
-| **float Q** | turbo3, turbo2 | Best (LUT compatible) | **Worst** | 4x Q bandwidth |
-| **q8_1 Q** | turbo4, turbo1.5 | Good | **Best** | Minimal bandwidth |
+| Type | Q Path | LUT | Short | 32K | Key Optimization |
+|------|:------:|:---:|------:|----:|-----------------|
+| turbo3 | q8_1 | 8 centroids | 60.18 | 48.44 | q8_1 vec_dot + LUT + launch_bounds |
+| turbo4 | q8_1 | disabled | 58.87 | 46.06 | 16-centroid LUT was net negative |
+| turbo2 | q8_1 | 4 centroids | 60.67 | 51.29 | Long-context champion |
+| turbo1.5 | q8_1 | none | 58.74 | 45.06 | Branchless ternary |
 
-turbo3 at 32K = 40.90 vs turbo4 = 46.51 (-12%). Root cause: `K_is_unquantized=true` for turbo3 → float Q. **Highest-priority optimization: q8_1-compatible turbo3 vec_dot** to eliminate this gap.
+## What To Build Next — Session 22 (Priority Order)
 
-## What To Build Next — Session 20 (Priority Order)
+1. **Multi-model validation** — 5 models: Llama-3.2-1B (D=64), Phi-4-mini (D=128, 3:1 GQA), Llama-3.3-8B (D=128, 4:1 GQA), Gemma-3-12B (D=256), Phi-3.5-mini (D=96, expected graceful fallback). See `06 Models/Validation Target Models.md` in vault.
+2. **D=96 graceful fallback verification** — Phi-3.5-mini should fall back to non-FA attention, NOT crash.
+3. **README.md rewrite** — final numbers, usage examples, honest limitations
+4. **Discussion #20969 post** — headline: turbo3=q8_0 PPL at 4.6x compression, turbo2 beats q8_0 at 32K
+5. **FP4 Q precision test** — can Q survive E2M1 quantization? (16 levels, most Q values near 0)
+6. **PR to TheTom upstream**
 
-1. **q8_1 turbo3/turbo2 vec_dot** — move off float Q, eliminate 4x bandwidth penalty at long ctx
-2. **Restore LUT scoring for ALL turbo types** — retrieve from `git show 54d119831`, add `[D][9]` padding + q8_1 Q dequant in construction. Build turbo2/turbo4 LUT scoring too (currently dead code).
-3. **Restore V sinks** — retrieve from `git show 399549616`, use Session 19's `__device__` approach
-4. **turbo1.5 branchless ternary** — `float(trit) * C * norm` instead of centroid lookup
-5. **FP4 tensor core for turbo1.5** — SM120 moonshot: map ternary to FP4 E2M1 `mma.sync`
+## Completed Optimizations (Sessions 17-21)
+
+| Session | What | Impact |
+|---------|------|--------|
+| 17 | signalnine base + LUT attention | turbo3 60.77 (+7.2%) |
+| 18 | turbo4, turbo1.5, trit LUT, review pass | 4 types complete |
+| 19 | Sinks fix, 36 K×V combos, prefill verified | All bugs fixed |
+| 20 | q8_1 turbo3/turbo2 vec_dot, LUT restored | turbo3 32K +7% |
+| 21 | `__launch_bounds__(128,3)`, turbo4 LUT removed | ALL types +7-13% at 32K |
+
+## Dead Ends (Don't Repeat)
+
+| What | Why It Failed | Session |
+|------|--------------|---------|
+| V sinks in V accumulation loop | Register pressure -12.7% at 32K (not __managed__) | 20 |
+| turbo4 16-centroid LUT | 8.7KB shmem net negative at all contexts | 21 |
+| V-specific 64×64 rotation | Inverse WHT hardcodes group_size from tensor ne[0], not from quantization | 20 |
+| nthreads_KQ=32 for turbo3 q8_1 | Kills warp-level ILP, -17% at 32K | 20 |
+| Sinks for PPL improvement | 0% across 2 models, 5 contexts, 3 sink sizes | 19-20 |
 
 ## Obsidian Vault Maintenance
 
@@ -285,15 +314,16 @@ If you discover a bug, create an issue file in `07 Issues/`. If you make an arch
 
 ## Remember
 
-- **Session 19 bugs FIXED** — all 36 K×V combos work, sinks graph-compatible, SM86 pending verification
-- **LUT scoring is DEAD CODE** for ALL turbo types — table built, nobody reads it. Restore in Session 20.
-- **V sinks were removed** — the `__managed__` reason is gone (Session 19 fix). Restore with `__device__` approach.
-- **turbo3/turbo2 need q8_1 vec_dot** — float Q = 4x bandwidth penalty at long context
-- **turbo1.5 = 113 tok/s on MoE**, 15.26 at 204K — long-context champion
-- **Use `git show <SHA>` to retrieve deleted code** — don't rewrite from scratch
-- **Search the Obsidian vault** at `/mnt/c/vaults/forge/` for any context you need
-- **Read `10 Knowledge/README.md`** for CUDA reference docs before kernel work
-- **MEASURE SHORT + 32K + PPL** after every change. Session 18 caught -14% at 32K that short missed.
-- **READ THE CODE** before writing code. Every Session 18 bug came from not reading first.
+- **Sessions 17-21 COMPLETE** — all 4 turbo types optimized, 36 K×V combos, 3 GPUs validated
+- **turbo2 = long-context champion** — 51.29 at 32K (beats q8_0), confirmed on all 3 GPUs
+- **turbo3 = q8_0 PPL at ctx=2048** (5.674 = 5.674) at 4.6x compression
+- **MoE: turbo3=184 tok/s** (+96% vs S18), turbo1.5=174
+- **Cross-GPU stability**: 3090 Ti 50 iterations zero failures, 4090M 70 iterations zero failures, PPL bit-exact
+- **D∈{64, 128, 256} only** — D=96 falls back to non-FA. VEC kernel: `static_assert(D % 64 == 0)`
+- **Vault**: `/mnt/c/vaults/forge/` — `06 Models/Validation Target Models.md` for multi-model specs, `09 Infrastructure/Test Machines.md` for GPU fleet
+- **Dump folder**: `/mnt/c/vaults/dump/` — incoming test results from 3090 Ti and 4090M
+- **MEASURE SHORT + 32K + PPL** after every change
+- **READ THE CODE** before writing code
+- **Search the Obsidian vault** for any context you need
 - **DO NOT STOP. DO NOT DEFER. DO NOT SKIP. FINISH THE WORK.**
 - **⛔ BENCHMARKS: Foreground Bash call ONLY — it blocks and WAKES YOU UP when done. NO run_in_background. NO timeouts. ONE at a time. See Rule 11. ⛔**

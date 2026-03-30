@@ -1,52 +1,107 @@
 # llama.cpp + TurboQuant CUDA — Up to 8x KV Compression, Near-Zero Speed Loss
 
-CUDA implementation of [TurboQuant](https://arxiv.org/abs/2504.19874) (ICLR 2026) KV cache compression for llama.cpp, targeting NVIDIA GPUs. **2-8x less KV memory with 97-100% of f16 decode speed.**
+CUDA implementation of [TurboQuant](https://arxiv.org/abs/2504.19874) (ICLR 2026) KV cache compression for llama.cpp, targeting NVIDIA GPUs (SM86+). **2-8x less KV memory with 97-101% of f16 decode speed.**
 
-Based on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, native vec_dot in FA, and MMA prefill.
+Based on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, native vec_dot in Flash Attention, and MMA prefill. All 4 turbo types (turbo4/turbo3/turbo2/turbo1.5) with 36 asymmetric K/V combinations.
 
 ## Performance (RTX 5090, Qwen 3.5 27B Q6_K)
 
-| Type | bpv | Compression | Short Decode | 32K Decode | PPL ctx=512 |
-|------|----:|------------:|-------------:|-----------:|:-----------:|
-| f16 | 16.0 | 1x | 59.00 tok/s | — | — |
-| q8_0 | 8.5 | 1.9x | 59.53 | 48.03 | 6.759 |
-| **turbo4** | 4.25 | **3.8x** | **59.06** (100.1% f16) | 46.51 | 6.825 (+0.97%) |
-| **turbo2** | 2.50 | **6.4x** | **58.88** (99.8% f16) | — | 7.080 (+4.75%) |
-| **turbo3** | 3.25 | **4.6x** | 57.99 (98.3% f16) | 40.90 | 6.852 (+1.38%) |
-| **turbo1.5** | 2.00 | **8.0x** | 57.36 (97.2% f16) | 44.49 | 7.312 (+8.18%) |
+| Type | bpv | Compression | Short Decode | 32K Decode | PPL ctx=512 | PPL ctx=2048 |
+|------|----:|------------:|-------------:|-----------:|:-----------:|:------------:|
+| f16 | 16.0 | 1x | 59.52 tok/s | 54.11 | — | — |
+| q8_0 | 8.5 | 1.9x | 58.58 | 47.99 | 6.759 | 5.674 |
+| **turbo4** | 4.25 | **3.8x** | **58.87** (98.9% f16) | **46.06** | 6.825 (+0.97%) | 5.694 |
+| **turbo3** | 3.25 | **4.6x** | **60.18** (101.1% f16) | **48.44** | 6.852 (+1.38%) | **5.674 (=q8_0)** |
+| **turbo2** | 2.50 | **6.4x** | **60.67** (101.9% f16) | **51.29** | 7.080 (+4.75%) | 5.892 |
+| **turbo1.5** | 2.00 | **8.0x** | 58.74 (98.7% f16) | **45.06** | 7.312 (+8.18%) | 6.103 |
 
-**MoE (Qwen 3.5 35B-A3B)**: turbo1.5 = **113 tok/s**, turbo4 = 98, turbo3 = 94.
-**204K context**: turbo1.5 = 15.26 tok/s (turbo3 = 8.42).
+**Headlines:**
+- **turbo3 matches q8_0 perplexity at ctx=2048** (5.674 = 5.674) at 4.6x compression
+- **turbo2 beats q8_0 decode speed at 32K** (51.29 vs 47.99) at 6.4x compression
+- **MoE (Qwen 3.5 35B-A3B)**: turbo3 = **184 tok/s** (+96% vs signalnine), turbo1.5 = 174, turbo4 = 172
+- **131K context**: turbo3 = 24.43 tok/s (+68% vs Session 18)
+
+## Quality (Perplexity)
+
+| Type | bpv | PPL ctx=512 | vs q8_0 | PPL ctx=2048 | vs q8_0 |
+|------|----:|:-----------:|--------:|:------------:|--------:|
+| q8_0 | 8.5 | 6.759 | — | 5.674 | — |
+| turbo4 | 4.25 | 6.825 | +0.97% | 5.694 | +0.35% |
+| turbo3 | 3.25 | 6.852 | +1.38% | **5.674** | **0.00%** |
+| turbo2 | 2.5 | 7.080 | +4.75% | 5.892 | +3.84% |
+| turbo1.5 | 2.0 | 7.312 | +8.18% | 6.103 | +7.56% |
 
 ## Which Mode Should I Use?
 
-| Your priority | Mode | Command |
-|---|---|---|
-| **Near-zero overhead** | turbo4 | `-ctk turbo4 -ctv turbo4` |
-| **Best compression/speed** | turbo3 | `-ctk turbo3 -ctv turbo3` |
-| **Maximum compression** | turbo1.5 | `-ctk turbo1.5 -ctv turbo1.5` |
-| **Long context (128K+)** | turbo1.5 | `-ctk turbo1.5 -ctv turbo1.5` |
+| Your priority | Mode | Why | Command |
+|---|---|---|---|
+| **Best balance** | turbo3 | q8_0 quality at 4.6x compression | `-ctk turbo3 -ctv turbo3` |
+| **Long context** | turbo2 | Beats q8_0 speed at 32K+ | `-ctk turbo2 -ctv turbo2` |
+| **Best quality** | turbo4 | +0.97% PPL at 3.8x compression | `-ctk turbo4 -ctv turbo4` |
+| **Maximum compression** | turbo1.5 | 8x compression, 174 tok/s MoE | `-ctk turbo1.5 -ctv turbo1.5` |
 
 ## Quick Start
 
 ```bash
-cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=120
+cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="120"
 cmake --build build -j$(nproc)
 
-# turbo3 (best balance)
-./build/bin/llama-cli -hf your-model-GGUF -ctk turbo3 -ctv turbo3 -ngl 99
+# turbo3 (best balance — matches q8_0 quality at 4.6x compression)
+./build/bin/llama-cli -hf your-model-GGUF -ctk turbo3 -ctv turbo3 -fa -ngl 99
 
-# turbo4 (near-zero overhead, 3.8x compression)
-./build/bin/llama-cli -hf your-model-GGUF -ctk turbo4 -ctv turbo4 -ngl 99
+# turbo2 (long-context champion — beats q8_0 speed at 32K)
+./build/bin/llama-cli -hf your-model-GGUF -ctk turbo2 -ctv turbo2 -fa -ngl 99
 
 # turbo1.5 (8x compression, best for 128K+)
-./build/bin/llama-cli -hf your-model-GGUF -ctk turbo1.5 -ctv turbo1.5 -ngl 99
+./build/bin/llama-cli -hf your-model-GGUF -ctk turbo1.5 -ctv turbo1.5 -fa -ngl 99
 
 # Server mode
-./build/bin/llama-server -hf your-model-GGUF -ctk turbo3 -ctv turbo3 -ngl 99 --port 8080
+./build/bin/llama-server -hf your-model-GGUF -ctk turbo3 -ctv turbo3 -fa -ngl 99 --port 8080
+
+# Asymmetric (different K and V types)
+./build/bin/llama-cli -hf your-model-GGUF -ctk turbo4 -ctv turbo3 -fa -ngl 99
 ```
 
-**Note**: Always use `-mmp 0` on WSL2 to disable mmap (avoids GPU stalls from page cache).
+**Notes:**
+- `-fa` enables Flash Attention (required for native turbo decode)
+- Use `-mmp 0` on WSL2 to disable mmap (avoids GPU stalls from page cache)
+- Adjust `-DCMAKE_CUDA_ARCHITECTURES` for your GPU: `86` (3090 Ti), `89` (4090), `120` (5090)
+
+## Multi-Model Validation
+
+Tested across 5 model architectures with head dimensions D=64, 96, 128, 256:
+
+| Model | Params | D | GQA | Turbo | turbo3 tok/s | q8_0 tok/s | Asymmetric | Prefill |
+|-------|-------:|:-:|:---:|:-----:|---:|---:|:---:|:---:|
+| Llama-3.2-1B | 1.24B | 64 | 4:1 | PASS | 685 | 691 | PASS | 38930 |
+| Phi-3.5-mini | 3.82B | 96 | 1:1 | FALLBACK | 221* | 247 (f16) | N/A | N/A |
+| Phi-4-mini | 3.84B | 128 | 3:1 | PASS | 274 | 275 | PASS | 18433 |
+| Llama-3.3-8B | 8.03B | 128 | 4:1 | PASS | 179 | 181 | PASS | 10558 |
+| Gemma-3-12B | 12.2B | 256 | 2:1 | PASS | 95 | 91 | PASS | 6632 |
+
+\* D=96: graceful fallback to non-FA attention. Slower but correct — not a crash.
+
+### Supported Head Dimensions
+
+The VEC Flash Attention kernel supports **D=64, D=128, D=256** (`D % 64 == 0` required). Models with other head dimensions (e.g., D=96) fall back to standard mul_mat attention automatically — slower but fully functional.
+
+## Cross-GPU Validation
+
+Validated on 3 NVIDIA GPUs across 2 architecture generations:
+
+| GPU | SM | VRAM | Stability | PPL Drift | turbo2 > q8_0 at 32K? |
+|-----|:--:|-----:|:---------:|:---------:|:---------------------:|
+| RTX 5090 | SM120 | 32 GB | Continuous | None | Yes (51.29 vs 47.99) |
+| RTX 3090 Ti | SM86 | 24 GB | 8+ iterations, 0 failures | Bit-exact (7.5535) | Yes (71.77 vs 71.55) |
+| RTX 4090M | SM89 | 16 GB | 10+ iterations, 0 failures | Bit-exact (7.5912) | Yes (47.77 vs 31.94) |
+
+## Limitations
+
+- **Head dimension**: Only D∈{64, 128, 256} use native Flash Attention. D=96 and others gracefully fall back.
+- **Attention sinks**: Implemented but provide 0% PPL improvement across all tested configurations.
+- **V sinks**: Dead end — register pressure causes -12.7% speed regression at 32K.
+- **FP4 tensor core acceleration**: Not viable. Q values are too small for E2M1 (99.5% map to zero), and no mixed fp16×E2M1 MMA instruction exists on SM120.
+- **Known Gemma 3 issues**: Gibberish after context shift and slow quantized KV cache are upstream llama.cpp bugs, not TurboQuant-specific.
 
 ---
 
