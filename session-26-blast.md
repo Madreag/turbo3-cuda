@@ -39,21 +39,29 @@ Phase 1 (Passkey Retrieval) and Phase 2 (NIAH) running on both 5090 and 3090 Ti.
 
 ## WHAT SESSION 26 MUST DO
 
-### Task 1: Check Quality Test Results (FIRST)
+### Task 1: Investigate SM120 Qwen 3.5 Generation Bug (CRITICAL)
 
-Before any code changes, check if the quality test results are in:
+**S25 found a bug**: On the RTX 5090 (SM120), Qwen 3.5 models generate empty/garbage output when using turbo KV types with FA enabled (`-ctk turbo3 -ctv turbo3 -fa on`). The q8_0 FA path works correctly on the same model. The 3090 Ti (SM86) does NOT have this bug — turbo types generate correctly there.
 
-```bash
-ls quality-tests/*.json
-```
+**Symptoms**:
+- `q8_0 -fa on` → correct answers (uses upstream q8_0 VEC kernel)
+- `turbo3 -fa on` → empty `content` field, `????` in reasoning (uses OUR turbo VEC kernel)
+- `-fa off` (no FA, mul_mat attention) → correct answers with all types
+- PPL is bit-exact (PPL uses MMA prefill path, not VEC decode path)
+- llama-bench reports normal tok/s (bench doesn't check output correctness)
 
-If results exist, analyze them:
-- Compare q8_0 baseline accuracy vs turbo3/turbo2/turbo1.5 at each context × depth
-- Any failures unique to a turbo type (not present in q8_0) = quality regression
-- If turbo1.5 or turbo2 fail where q8_0 passes: lower the sparse V threshold for that type
-- Report the full results matrix in the session log
+**Partial results from S25** (saved in `quality-tests/passkey_results_*.json`):
+- `q8_0`: 43.8% overall (model limitation at long context, but it DOES generate real answers)
+- `turbo3`: 0% — ALL responses empty strings. The VEC kernel produces wrong attention output.
 
-Also check `/mnt/c/vaults/dump/` for 3090 Ti results.
+**This is an SM120-specific bug in the turbo VEC FA decode path.** The 3090 Ti agent confirmed turbo3/turbo2/turbo1.5 all work on SM86. Investigate:
+1. Is the LUT construction correct for D=256 (Qwen 3.5 head dim)?
+2. Is the sparse V threshold causing issues at D=256?
+3. Does the half-precision LUT have precision issues at D=256?
+4. Does Llama-3.3-8B (D=128) work correctly with turbo types + FA on SM120? (Smoke test showed yes)
+5. Test each S25 commit in reverse to find which change broke D=256 generation
+
+**Also check `/mnt/c/vaults/dump/` for 3090 Ti quality test results — those ARE valid.**
 
 ### Task 2: Block-128 Storage Size (TheTom's Research — CUDA Validation)
 
