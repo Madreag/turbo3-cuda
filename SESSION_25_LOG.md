@@ -1,12 +1,14 @@
 # Session 25 Deep Autoresearch Log
 
 ## Summary
-- Iterations: 10/100
-- Wins: 1 (committed)
-- Dead ends: 8 (reverted)
+- Iterations: 17/100
+- Wins: 2 (committed)
+- Dead ends: 14 (reverted)
 - Best turbo3 short: 65.26 (+0.23% vs baseline 65.11)
-- Best turbo3 32K: 56.95 (+4.86% vs baseline 54.31)
+- Best turbo3 32K: 56.97 (+4.9% vs baseline 54.31)
+- Best turbo2 32K: 60.40 (+12.8% vs baseline 53.57)
 - Best turbo3 PPL ctx=512: 6.852 (bit-exact)
+- Best turbo2 PPL ctx=512: 7.080 (bit-exact)
 
 ## Baselines (Session 24B, RTX 5090, 27B Q6_K)
 
@@ -44,3 +46,5 @@
 | — | turbo2 32K verify | 1e-3 threshold benefit | — | 58.60 (+9.4%) | — | WIN | dfa84f6b6 |
 | — | turbo1.5 32K verify | 1e-3 threshold benefit | — | 49.80 (+3.4%) | — | WIN | dfa84f6b6 |
 | — | turbo4 32K verify | neutral | — | 54.15 (=) | — | OK | dfa84f6b6 |
+| 16 | #pragma unroll 4 outer KQ | smaller code | 65.33 (=) | 57.33 (noise) | — | DEAD | — |
+| 17 | Type-specific sparse V 1e-2 | turbo2/1.5 low bpv | — | turbo2 60.40 (+12.8%) | 7.0797 | **WIN** | 3d609e224 |
