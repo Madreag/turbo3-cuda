@@ -11,17 +11,17 @@ Based on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, na
 | f16 | 16.0 | 1x | 59.52 tok/s | 54.11 | — | — |
 | q8_0 | 8.5 | 1.9x | 58.58 | 47.99 | 6.759 | 5.674 |
 | **turbo4** | 4.25 | **3.8x** | **58.87** (98.9% f16) | **46.06** | 6.825 (+0.97%) | 5.694 |
-| **turbo3** | 3.25 | **4.6x** | **60.18** (101.1% f16) | **48.44** | 6.852 (+1.38%) | **5.674 (=q8_0)** |
-| **turbo2** | 2.50 | **6.4x** | **60.67** (101.9% f16) | **51.29** | 7.080 (+4.75%) | 5.892 |
+| **turbo3** | 3.25 | **4.6x** | **61.27** (102.9% f16) | **50.74** | 6.852 (+1.38%) | **5.674 (=q8_0)** |
+| **turbo2** | 2.50 | **6.4x** | **60.67** (101.9% f16) | **52.82** | 7.080 (+4.75%) | 5.892 |
 | **turbo1.5** | 2.00 | **8.0x** | 58.74 (98.7% f16) | **45.06** | 7.312 (+8.18%) | 6.103 |
 
 **Headlines:**
 - **Q4_K_M + turbo3 = 77.25 tok/s** — beats vLLM INT4 (68.3) on the same GB202 die by +13%
 - **turbo3 matches q8_0 perplexity at ctx=2048** (5.674 = 5.674) at 4.6x compression
-- **turbo2 beats q8_0 decode speed at 32K** (52.82 vs 47.99) at 6.4x compression
-- **751+ stability iterations across 3 GPUs, zero failures**
+- **turbo2 beats q8_0 decode speed at 32K** on all 4 tested models (+7% to +34%)
+- **751+ stability iterations across 3 GPUs, zero failures, PPL bit-exact**
 - **MoE (Qwen 3.5 35B-A3B)**: turbo3 = **184 tok/s** (+96% vs signalnine)
-- **131K context**: turbo3 = 24.43 tok/s (+68% vs Session 18)
+- **Q4_K_M + turbo1.5 = 25.81 tok/s at 131K** — 27B model on 32GB consumer GPU
 
 ## Quality (Perplexity)
 
@@ -41,6 +41,33 @@ Based on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, na
 | **Long context** | turbo2 | Beats q8_0 speed at 32K+ | `-ctk turbo2 -ctv turbo2` |
 | **Best quality** | turbo4 | +0.97% PPL at 3.8x compression | `-ctk turbo4 -ctv turbo4` |
 | **Maximum compression** | turbo1.5 | 8x compression, 174 tok/s MoE | `-ctk turbo1.5 -ctv turbo1.5` |
+
+## Q4_K_M Weight Quantization (Speed Champion)
+
+Combining Q4_K_M weight quantization with turbo KV cache compression yields the highest decode speeds:
+
+| Config | Weights | KV | Short | 32K | 65K | 131K |
+|--------|---------|-----|------:|----:|----:|-----:|
+| **turbo3 KV** | **Q4_K_M** | **turbo3** | **77.25** | **58.08** | — | — |
+| **turbo2 KV** | **Q4_K_M** | **turbo2** | **74.94** | **61.49** | **52.79** | — |
+| **turbo1.5 KV** | **Q4_K_M** | **turbo1.5** | 73.40 | — | — | **25.81** |
+| q8_0 KV | Q4_K_M | q8_0 | 73.40 | 57.24 | — | — |
+| f16 KV | Q4_K_M | f16 | 76.62 | — | — | OOM |
+
+PPL impact: Q4_K_M + turbo3 = 7.127 (+1.39% vs q8_0 = 7.030). Safe on 27B+ models.
+
+**Warning**: Small Q4_K_M models (<10B) may have catastrophic PPL with symmetric turbo K. Use asymmetric (`-ctk q8_0 -ctv turbo3`) for safety. See [TheTom's research](https://github.com/ggml-org/llama.cpp/discussions/20969).
+
+## Recommended Configurations
+
+| Goal | Config | Command |
+|------|--------|---------|
+| **Maximum short-ctx speed** | Q4_K_M weights + turbo3 KV | `-m model-Q4_K_M.gguf -ctk turbo3 -ctv turbo3 -fa` |
+| **Maximum long-ctx speed** | Q4_K_M weights + turbo2 KV | `-m model-Q4_K_M.gguf -ctk turbo2 -ctv turbo2 -fa` |
+| **Best quality** | Q6_K weights + turbo4 KV | `-m model-Q6_K.gguf -ctk turbo4 -ctv turbo4 -fa` |
+| **Quality-optimal asymmetric** | Q6_K weights + K=turbo4/V=q8_0 | `-m model-Q6_K.gguf -ctk turbo4 -ctv q8_0 -fa` |
+| **Maximum compression** | Q4_K_M weights + turbo1.5 KV | `-m model-Q4_K_M.gguf -ctk turbo1.5 -ctv turbo1.5 -fa` |
+| **Boundary V protection** | turbo2 V + q8_0 boundary layers | `TURBO_LAYER_ADAPTIVE=12 -ctk turbo3 -ctv turbo2 -fa` |
 
 ## Quick Start
 
@@ -89,26 +116,38 @@ The VEC Flash Attention kernel supports **D=64, D=128, D=256** (`D % 64 == 0` re
 
 ## Cross-GPU Validation
 
-Validated on 3 NVIDIA GPUs across 2 architecture generations, 228+ total stability iterations, zero failures:
+Validated on 3 NVIDIA GPUs across 3 architecture generations, **751+ total stability iterations, zero failures**:
 
 | GPU | SM | VRAM | Stability | PPL Drift | turbo2 > q8_0 at 32K? |
 |-----|:--:|-----:|:---------:|:---------:|:---------------------:|
-| RTX 5090 | SM120 | 32 GB | Continuous | None | Yes (52.82 vs 47.99) |
-| RTX 3090 Ti | SM86 | 24 GB | 103 iterations, 0 failures | Bit-exact (7.5535) | Yes (71.77 vs 71.55) |
-| RTX 4090M | SM89 | 16 GB | 125 iterations, 0 failures | Bit-exact (7.5912) | Yes (47.0 vs 45.3) |
+| RTX 5090 | SM120 | 32 GB | 340+ iterations | None | Yes (52.82 vs 47.99) |
+| RTX 3090 Ti | SM86 | 24 GB | 186 iterations, 18 PPL checks | Bit-exact (7.5535) | Yes (72.13 vs 71.54) |
+| RTX 4090M | SM89 | 16 GB | 225 iterations, 10+ PPL checks | Bit-exact (7.5912) | Yes (48.22 vs 45.3) |
 
 ### RTX 3090 Ti (SM86, 24 GB GDDR6X, Qwen 3.5 9B Q8_0)
 
 | Type | bpv | Short | 32K | 64K | PPL ctx=512 |
 |------|----:|------:|----:|----:|:-----------:|
-| f16 | 16 | 85.56 | OOM | OOM | — |
-| q8_0 | 8.5 | 84.98 | 71.55 | OOM | 8.525 |
-| turbo4 | 4.25 | 82.89 | 66.35 | 45.17 | 8.634 |
-| **turbo3** | 3.25 | 83.66 | 63.07 | 43.86 | 8.624 |
-| **turbo2** | 2.5 | **83.93** | **71.77** | **61.98** | 8.937 |
-| turbo1.5 | 2.0 | 81.92 | 63.91 | 52.25 | 9.402 |
+| f16 | 16 | 85.81 | OOM | OOM | — |
+| q8_0 | 8.5 | 85.24 | 71.54 | OOM | 8.525 |
+| turbo4 | 4.25 | 82.92 | 68.89 | 45.17 | 8.634 |
+| **turbo3** | 3.25 | 83.94 | 63.56 | 43.86 | 8.624 |
+| **turbo2** | 2.5 | **84.17** | **72.13** | **61.98** | 8.937 |
+| turbo1.5 | 2.0 | 82.66 | 64.32 | 52.25 | 9.402 |
 
-turbo2 at 64K = **61.98 tok/s** — runs where q8_0 OOMs. turbo1.5 reaches 131K at 37.10 tok/s on 24 GB.
+turbo2 at 64K = **61.98 tok/s** — runs where q8_0 OOMs. **186 stability iterations, PPL bit-exact across sessions.**
+
+**Multi-Model (Session 22, 5 models):**
+
+| Model | D | turbo3 | q8_0 | turbo4 | turbo1.5 |
+|-------|:-:|-------:|-----:|-------:|---------:|
+| Llama-3.2-1B | 64 | 511 | 509 | 508 | 510 |
+| Phi-3.5-mini | 96 | 190* | 190 | 191 | 190 |
+| Phi-4-mini | 128 | 179 | 194 | 173 | 172 |
+| Llama-3.3-8B | 128 | 110 | 115 | 108 | 107 |
+| Gemma-3-12B | 256 | 65 | 69 | 62 | 61 |
+
+\*D=96: graceful non-FA fallback.
 
 ### RTX 4090M Laptop (SM89, 16 GB GDDR6, Qwen 3.5 9B Q8_0)
 
@@ -122,10 +161,23 @@ turbo2 at 64K = **61.98 tok/s** — runs where q8_0 OOMs. turbo1.5 reaches 131K 
 
 turbo2 at 65K on Q4_K_M = **55.81 tok/s** on a laptop GPU. Best config for 16 GB: Q4_K_M weights + turbo2 KV.
 
+### 32K Context — turbo2 Beats q8_0 on ALL Models (RTX 5090)
+
+| Model | Params | D | turbo2 32K | q8_0 32K | Advantage |
+|-------|-------:|:-:|----------:|---------:|:---------:|
+| Phi-4-mini | 3.84B | 128 | 119.79 | 89.12 | **+34%** |
+| Llama-3.3-8B | 8.03B | 128 | 87.26 | 68.00 | **+28%** |
+| Gemma-3-12B | 12.2B | 256 | 82.87 | 77.73 | **+7%** |
+| Qwen 27B | 26.9B | 128 | 52.82 | 47.99 | **+10%** |
+
+turbo2 advantage scales with bandwidth-boundedness: smaller models benefit more.
+
 ## Tips
 
 - **Best quality-per-bit**: `K=turbo4/V=q8_0` asymmetric config actually **beats pure q8_0 PPL** (6.155 vs 6.162 at ctx=2048 on 9B) while using less memory.
 - **Layer-adaptive mode 2**: `TURBO_LAYER_ADAPTIVE=2` closes 40% of the turbo3-to-q8_0 PPL gap at zero performance cost.
+- **Boundary V protection**: `TURBO_LAYER_ADAPTIVE=12` with turbo2 V recovers 75% of the turbo2-to-turbo3 quality gap by protecting first4+last4 layers with q8_0 V (only 12.5% extra V memory).
+- **Q4_K_M stacking**: Safe on 27B+ models (PPL +1.39%). For small Q4_K_M models (<10B), use `-ctk q8_0 -ctv turbo3` to avoid catastrophic PPL from double quantization noise in K.
 
 ## Limitations
 
