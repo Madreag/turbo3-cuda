@@ -56,13 +56,14 @@ Key takeaways from this table:
 
 Combining Q4_K_M weight quantization with turbo KV cache compression yields the highest decode speeds:
 
-| Config | Weights | KV | Short | 32K | 65K | 131K |
-|--------|---------|-----|------:|----:|----:|-----:|
-| **turbo3 KV** | **Q4_K_M** | **turbo3** | **77.25** | **58.08** | — | — |
-| **turbo2 KV** | **Q4_K_M** | **turbo2** | **74.94** | **61.49** | **52.79** | — |
-| **turbo1.5 KV** | **Q4_K_M** | **turbo1.5** | 73.40 | — | — | **25.81** |
-| q8_0 KV | Q4_K_M | q8_0 | 73.40 | 57.24 | — | — |
-| f16 KV | Q4_K_M | f16 | 76.62 | — | — | OOM |
+| Config | Weights | KV | Short | 32K | 65K | 131K | 256K |
+|--------|---------|-----|------:|----:|----:|-----:|-----:|
+| f16 KV | Q4_K_M | f16 | 76.62 | 67.47 | 53.51 | 47.44 | OOM |
+| q8_0 KV | Q4_K_M | q8_0 | 73.40 | 57.24 | 53.45 | 39.13 | OOM |
+| **turbo4 KV** | **Q4_K_M** | **turbo4** | **75.08** | **59.06** | **48.78** | **36.60** | OOM |
+| **turbo3 KV** | **Q4_K_M** | **turbo3** | **77.25** | **60.88** | **57.05** | **45.52** | **29.84** |
+| **turbo2 KV** | **Q4_K_M** | **turbo2** | **74.94** | **61.49** | **54.78** | **53.19** | **36.62** |
+| **turbo1.5 KV** | **Q4_K_M** | **turbo1.5** | 74.85 | 51.60 | 42.23 | 29.72 | 17.53 |
 
 PPL impact: Q4_K_M + turbo3 = 7.127 (+1.39% vs q8_0 = 7.030). Safe on 27B+ models.
 
@@ -188,12 +189,14 @@ turbo2 advantage scales with bandwidth-boundedness: smaller models benefit more.
 
 ### Extreme Long Context (RTX 5090, Qwen 3.5 27B Q4_K_M)
 
-| Context | turbo2 tok/s | turbo3 tok/s | turbo1.5 tok/s |
-|--------:|:-----------:|:-----------:|:-------------:|
-| 32K | 61.49 | **60.88** | — |
-| 64K | **54.78** | — | — |
-| 131K | **49.23** | 42.32 | 25.81 |
-| 256K | **36.62** | — | — |
+| Context | f16 | q8_0 | turbo4 | turbo3 | turbo2 | turbo1.5 |
+|--------:|:---:|:----:|:------:|:------:|:------:|:--------:|
+| 32K | 67.47 | 57.24 | 59.06 | 60.88 | **61.49** | 51.60 |
+| 65K | 53.51 | 53.45 | 48.78 | **57.05** | 54.78 | 42.23 |
+| 131K | 47.44 | 39.13 | 36.60 | 45.52 | **53.19** | 29.72 |
+| 256K | OOM | OOM | OOM | 29.84 | **36.62** | 17.53 |
+
+turbo2 and turbo3 are **faster than f16 and q8_0 at 65K+**. At 256K, only turbo types fit in 32GB VRAM.
 
 ## Tips
 
