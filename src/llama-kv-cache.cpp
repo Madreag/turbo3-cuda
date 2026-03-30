@@ -177,7 +177,8 @@ llama_kv_cache::llama_kv_cache(
         //   1=q8_0 first4+last4, 2=q8_0 last8, 3=q8_0 last4,
         //   4=q8_0 first4, 5=q8_0 first2+last2,
         //   6=V-only q8_0 last8, 7=K-only q8_0 last8, 8=V-only q8_0 first2+last2,
-        //   9=q8_0 last2, 10=K-only q8_0 last4, 11=q8_0 last6
+        //   9=q8_0 last2, 10=K-only q8_0 last4, 11=q8_0 last6,
+        //   12=V-only q8_0 first4+last4 (TheTom boundary V wide — width > precision)
         ggml_type layer_type_k = type_k;
         ggml_type layer_type_v = type_v;
         {
@@ -209,6 +210,7 @@ llama_kv_cache::llama_kv_cache(
                     case  9: promote_k = promote_v = (il >= n_layer - 2); break;
                     case 10: promote_k = (il >= n_layer - 4); break;
                     case 11: promote_k = promote_v = (il >= n_layer - 6); break;
+                    case 12: promote_v = (il < 4 || il >= n_layer - 4); break;
                 }
             }
             if (promote_k) layer_type_k = GGML_TYPE_Q8_0;
