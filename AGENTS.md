@@ -1,0 +1,349 @@
+---
+description:
+alwaysApply: true
+---
+
+# CLAUDE.md — TurboQuant CUDA (Madreag/turbo3-cuda)
+
+## ⛔ BENCHMARKS: FOREGROUND BASH CALL — IT WAKES YOU UP WHEN DONE ⛔
+**Run llama-bench/llama-perplexity as a normal foreground Bash tool call (no `run_in_background`, no `timeout` parameter). The Bash tool BLOCKS and returns output when the command finishes — that automatically wakes you up. You do NOT need to poll or check. Just call Bash, wait, get results. ONE process at a time. NEVER background. Session 20 used `run_in_background` → 8 orphan processes × 22GB = 176GB → system crash → hard reboot. See Rule 11.**
+
+## Who You Are Working For
+
+Erol Germain (@erolgermain, GitHub: Madreag). Manufacturing Engineer. Direct communicator. Does NOT tolerate:
+- Skipping items
+- Deferring work to "later" or "next session"
+- Stopping to ask "want me to continue?"
+- Implementing things halfway
+- Moving to the next task before the current one is PROVEN with measurements
+- Compromises, fallbacks, or "good enough"
+
+When Erol says "figure it out" — that means investigate, debug, try multiple approaches, and solve the problem yourself. Do not give up. Do not suggest alternatives that avoid the hard work.
+
+## Project Overview
+
+CUDA implementation of [TurboQuant](https://arxiv.org/abs/2504.19874) (ICLR 2026) KV cache compression for llama.cpp, targeting NVIDIA RTX 5090 (SM120 Blackwell). Goal: be the **fastest and most complete** TurboQuant CUDA implementation for Blackwell GPUs.
+
+**Current state**: Sessions 17-19 complete. All 4 turbo types (1.5/2/3/4) have full CUDA with parallel SET_ROWS, native FA vec_dot, V dequant. All 36 K×V asymmetric combos work. Sinks fixed (graph-compatible). LUT scoring paths deleted in S18 review — need restoration with fixes in Session 20.
+
+### Repository Layout
+
+- **Active Repo**: `/home/erol/ai/turboquant/turboquant-kv-cache/`
+  - Forked from TheTom/llama-cpp-turboquant, branch `feature/turboquant-kv-cache`
+  - Includes signalnine's CUDA port + our Sessions 17-18 additions (turbo1.5, turbo4, LUT, trit LUT, LA modes, sinks)
+  - GitHub: `Madreag/turbo3-cuda` (default branch: `feature/turboquant-kv-cache`)
+
+- **Archive Repo** (reference only): `/home/erol/ai/turboquant/research/llama-cpp-turboquant/`
+  - Sessions 1-15 shadow cache architecture (OBSOLETE — do not use)
+  - `.trash/research/` — 45 cloned competitor repos + intel reports
+  - `.trash/sessions/` — session prompts 13-19
+
+- **Obsidian Vault** (knowledge base): `/mnt/c/vaults/forge/` (Windows: `C:\vaults\forge`)
+  - **SEARCH THIS FIRST** when you need context. 90+ markdown files covering:
+    - `03 Benchmarks/Benchmark Hub.md` — definitive performance numbers (Sessions 17-18 final)
+    - `03 Benchmarks/3090 Ti Overnight Test.md` — SM86 crash matrix, 340+ stability iterations
+    - `02 Architecture/Architecture Overview.md` — pre-rotate-queries design
+    - `02 Architecture/Dead Ends.md` — 15+ approaches that FAILED (do NOT repeat)
+    - `04 Competitors/` — 14 competitor profiles with code techniques
+    - `05 Research/` — K/V norm data, QJL ablation, signalnine comparison correction
+    - `07 Issues/` — 3 OPEN critical bugs + resolved bugs with root cause
+    - `10 Knowledge/` — CUDA specifics, hardware constraints, quantization theory
+    - `01 Sessions/` — all 18 session reports with what worked and what didn't
+
+- **Models**: `/home/erol/ai/turboquant/models/opus-v2-Q6_K.gguf` (27B dense), `Qwen3.5-35B-A3B-Q4_K_M.gguf` (MoE)
+- **Hardware**: RTX 5090 32GB (SM120), RTX 3090 Ti 24GB (SM86), RTX 4090M 16GB (SM89), Mac Mini M4 Pro 24GB (Metal)
+
+## ⚠️ ARCHITECTURE — Pre-Rotate-Queries (NOT Shadow Cache)
+
+```
+Encode (SET_ROWS):
+  Token → parallel 128-thread kernel per WHT group
+    → Warp __shfl_xor L2 norm reduce → shared memory WHT butterfly
+    → Quantize per thread → Pack qs (__shfl_sync) + signs (__ballot_sync)
+    → Norm correction → Write turbo blocks to KV cache
+
+Decode (Q->ne[1]==1):
+  Q → GGML_OP_TURBO_WHT (forward rotation, graph-level)
+  FA VEC kernel reads turbo blocks DIRECTLY (native dequant)
+  Output → GGML_OP_TURBO_WHT (inverse rotation)
+
+Prefill (Q->ne[1]>1):
+  launch_fattn auto-dequants turbo→fp16 (built-in need_f16_K/V path)
+  MMA/TILE kernel runs on fp16
+```
+
+## Current Performance (Session 24B, RTX 5090)
+
+| Type | bpv | Short | 32K | PPL ctx=512 | PPL ctx=2048 | Notes |
+|------|----:|------:|----:|:-----------:|:------------:|-------|
+| f16 | 16 | 59.52 | 54.11 | — | — | Ceiling |
+| q8_0 | 8.5 | 58.58 | 47.99 | 6.759 | 5.674 | Baseline |
+| turbo4 | 4.25 | **65.18** | **54.22** | 6.825 (+0.97%) | 5.694 | nthreads_KQ=8 + constexpr centroids (S24B) |
+| turbo3 | 3.25 | **65.04** | **54.89** | 6.852 (+1.38%) | **5.674 (=q8_0)** | __expf + constexpr centroids |
+| turbo2 | 2.5 | **65.24** | **53.57** | 7.080 (+4.75%) | 5.892 | constexpr centroids, long-ctx champion |
+| turbo1.5 | 2.0 | **63.99** | **48.15** | 7.312 (+8.18%) | 6.103 | nthreads_KQ=8 + constexpr (S24B) |
+
+**Q4_K_M (Session 24)**: turbo3=77.25 short, 58.08 32K. **PPL ctx=2048=7.716 (beats q8_0 7.730!)**
+**MoE (Qwen 3.5 35B-A3B, S20)**: turbo3=184, turbo1.5=174, turbo4=172, q8_0=191 tok/s
+**AmesianX (S24 comp test)**: We beat them on ALL types: turbo3 +15-35%, turbo4 +10-11%
+
+### Cross-GPU Stability (Sessions 20-21)
+- **3090 Ti (SM86)**: 103 iterations, 10 PPL checks, 0 failures, PPL bit-exact (7.5535)
+- **4090M (SM89)**: 125 iterations (25 S20 + 100 S21), 0 failures, PPL bit-exact (7.5912)
+- **turbo2 beats q8_0 at 32K on ALL 3 GPUs**
+- **SM89 sink bug**: TURBO_SINK_SIZE {1, 4, 16} segfault on SM89. Sizes {0, 2, 8} work. SM86 unaffected.
+
+### Supported Head Dimensions
+Only D∈{64, 128, 256}. VEC kernel requires `D % 64 == 0` (static_assert). D=80, D=96, D=112 fall back to non-FA mul_mat attention (slower but correct, no crash).
+
+## Session 19 Bugs — ALL FIXED
+
+| Bug | Fix | Commit |
+|-----|-----|--------|
+| Sinks crash SM86 | `__managed__` → `__device__` + `cudaGetSymbolAddress` + `cudaMemcpyAsync` | `01a3b42` |
+| Asymmetric K=turbo4/1.5 crash | 20 new VEC template instances for all K×V combos | `cad0533` |
+| K=turbo3/V=turbo4 = 6 tok/s | Same fix — missing template caused CPU fallback | `cad0533` |
+
+All 36 K×V combos verified working. Prefill (MMA/TILE) cross-type verified. SM86 verification pending.
+
+## CRITICAL: Code That Was Deleted and Needs Restoration
+
+Session 18 review deleted working code that should be brought back with fixes:
+
+| Code | Git SHA | Why Deleted | How To Restore |
+|------|---------|-------------|----------------|
+| **turbo3 LUT scoring loop** | `54d119831` | Bank conflicts -1.8% | `[D][9]` padding + q8_1 Q dequant in LUT construction |
+| **turbo4 LUT scoring loop** | `729f98db1` | q8_1 Q incompatible | q8_1 Q dequant in LUT construction (one-time cost) |
+| **turbo2 LUT scoring** | Never existed | Dead code from day 1 | Build same pattern as turbo3/4 |
+| **V sink in V accumulation** | `399549616` | `__managed__` = -14% at 32K | Use Session 19's `__device__` approach (no perf hit) |
+
+**Use `git show <SHA>` to retrieve deleted code. Don't rewrite from scratch.**
+
+## ABSOLUTE RULES
+
+### 1. NEVER skip an item. NEVER defer.
+
+### 2. MEASURE SPEED (short AND 32K) AND PPL after EVERY change.
+Not just PPL — **decode speed at short AND long context**. Session 18 caught a -14% regression at 32K that short-only testing missed. Run:
+```bash
+# ALL THREE of these after every change:
+./build/bin/llama-bench -m $MODEL -fa 1 -ctk turbo3 -ctv turbo3 -d 0 -ngl 99 -t 1 -r 3 -p 0 -n 128 -mmp 0
+./build/bin/llama-bench -m $MODEL -fa 1 -ctk turbo3 -ctv turbo3 -d 32768 -ngl 99 -t 1 -r 3 -p 0 -n 32 -mmp 0
+./build/bin/llama-perplexity -m $MODEL -f $WIKI -c 512 -ctk turbo3 -ctv turbo3 -fa on --chunks 8 -ngl 99 --no-mmap
+```
+
+### 3. PPL REJECT THRESHOLDS
+- ctx=512: turbo3 PPL > 6.89 → **REJECT**
+- ctx=2048: turbo3 PPL > 5.80 → **REJECT**
+
+### 4. SPEED REJECT THRESHOLDS
+- turbo3 short: < 55.0 tok/s → **INVESTIGATE** (baseline is 57.99)
+- turbo4 short: < 56.0 tok/s → **INVESTIGATE** (baseline is 59.06)
+- turbo1.5 short: < 54.0 tok/s → **INVESTIGATE** (baseline is 57.36)
+
+### 5. READ THE CODE before writing code.
+Session 18 failures all came from not reading existing code:
+- Sink ne0 mismatch: didn't read `sink_get_or_alloc` before modifying FA dispatch
+- turbo4 LUT with q8_1 Q: didn't check `K_is_unquantized` before writing LUT path
+- V sink perf regression: added `__managed__` reads to hottest loop without profiling
+
+**Before touching ANY kernel**: Read the function you're modifying AND the functions that call it.
+
+### 6. Q format and nthreads_KQ for turbo types.
+ALL turbo types use q8_1 Q path (since S20). `K_is_unquantized` is only true for f16/bf16.
+The `K_is_turbo` flag (S24B) controls nthreads_KQ for ALL 4 turbo types:
+- ALL turbo types: `K_is_turbo = true` → nthreads_KQ=8 (4 interleaved dots per warp)
+- Standard quants (q4_0, q8_0 etc.): nthreads_KQ=32
+LUT scoring (turbo3/turbo2 only) reads Q as float from global memory for one-time table construction.
+Check this BEFORE writing any type-specific FA code.
+
+### 7. Do NOT use `__managed__` memory in kernel-accessible paths.
+It breaks CUDA graph capture on SM86 (and possibly other architectures). Use:
+- `__constant__` memory with `cudaMemcpyToSymbol` (watch for TU issues)
+- Regular device memory with explicit `cudaMalloc` / `cudaMemcpy`
+- Kernel arguments passed through FA dispatch
+
+### 8. Template instances MUST exist for EVERY K×V combination.
+Missing template = SEGFAULT or CPU fallback. Check `ggml/src/ggml-cuda/template-instances/` before committing any new turbo type dispatch.
+
+### 9. ONE commit per logical change. Include BOTH speed AND PPL data.
+
+### 10. NEVER ask "want me to continue?" The answer is always yes.
+
+### 11. Benchmark execution rules (HARD RULES — violation = system crash).
+Session 20 spawned 8 background benchmark processes (8×22GB = 176GB) against 48GB RAM → swap death → hard reboot. NEVER AGAIN.
+- **FOREGROUND BASH CALL** — the Bash tool blocks and returns output when done. That WAKES YOU UP automatically. You do NOT need to poll, sleep, or check.
+- **NO `run_in_background`** — EVER. For any llama-bench or llama-perplexity command.
+- **NO `timeout` parameter** — EVER. Not on the Bash tool, not with shell timeout.
+- **ONE AT A TIME** — never parallel llama-bench or llama-perplexity
+- **LET IT FINISH** — do NOT kill benchmarks. They return results when done.
+- **ONE BASH CALL PER MESSAGE** — NEVER send multiple Bash calls in the same message. Not for benchmarks, not for builds, not for anything in this repo. One call, get result, then next call. Multiple Bash calls = parallel execution = stacked processes = system crash.
+- **Same rules for cmake builds** — foreground, one at a time, no background.
+- **BEFORE AND AFTER EVERY TEST**, verify process is dead and memory is free:
+  ```bash
+  pgrep -f "llama" && echo "PROCESS STILL RUNNING — KILL IT" || echo "Clean"
+  nvidia-smi --query-gpu=memory.used --format=csv,noheader
+  ```
+  If pgrep finds anything: STOP. Kill it. Verify again. Do NOT proceed until clean.
+
+## Build & Test Commands
+
+```bash
+cd /home/erol/ai/turboquant/turboquant-kv-cache
+/home/erol/miniconda3/envs/tq/bin/cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=120
+/home/erol/miniconda3/envs/tq/bin/cmake --build build -j$(nproc)
+
+MODEL=/home/erol/ai/turboquant/models/opus-v2-Q6_K.gguf
+WIKI=$(find /home/erol/ai/turboquant -name "wiki.test.raw" 2>/dev/null | head -1)
+
+# REGRESSION SUITE (run after EVERY change — short + 32K + PPL):
+./build/bin/llama-bench -m $MODEL -fa 1 -ctk turbo3 -ctv turbo3 -d 0 -ngl 99 -t 1 -r 3 -p 0 -n 128 -mmp 0
+./build/bin/llama-bench -m $MODEL -fa 1 -ctk turbo3 -ctv turbo3 -d 32768 -ngl 99 -t 1 -r 3 -p 0 -n 32 -mmp 0
+./build/bin/llama-bench -m $MODEL -fa 1 -ctk turbo4 -ctv turbo4 -d 0 -ngl 99 -t 1 -r 3 -p 0 -n 128 -mmp 0
+./build/bin/llama-bench -m $MODEL -fa 1 -ctk turbo1.5 -ctv turbo1.5 -d 0 -ngl 99 -t 1 -r 3 -p 0 -n 128 -mmp 0
+./build/bin/llama-perplexity -m $MODEL -f $WIKI -c 512 -ctk turbo3 -ctv turbo3 -fa on --chunks 8 -ngl 99 --no-mmap
+```
+
+## Key Files (This Repo — After Session 19)
+
+```
+ggml/src/ggml-cuda/set-rows.cu       — Parallel SET_ROWS: all 4 turbo types (128 threads, warp intrinsics, rsqrtf)
+ggml/src/ggml-cuda/turbo-quant.cuh   — Centroid constants, helpers, sign arrays, trit LUT (5×256)
+ggml/src/ggml-cuda/turbo-wht.cu      — GGML_OP_TURBO_WHT CUDA kernel
+ggml/src/ggml-cuda/turbo-sink.cu     — Attention sinks (__device__ + async, graph-compatible after S19)
+ggml/src/ggml-cuda/turbo-innerq.cu   — InnerQ per-channel equalization
+ggml/src/ggml-cuda/fattn-common.cuh  — FA vec_dot for all 4 types, V dequant, sparse V (LUT scoring MISSING)
+ggml/src/ggml-cuda/fattn-vec.cuh     — VEC FA kernel, sink dispatch, LUT table built but NOT read
+ggml/src/ggml-cuda/fattn.cu          — FA dispatch, type validation, all 36 K×V combos
+ggml/src/ggml-cuda/template-instances/ — 32 VEC template instances (all K×V combos, D=64/128/256)
+ggml/src/ggml-cuda/dequantize.cuh    — QR_TURBO4, QR_TURBO1_5 defined, all dequant functions
+ggml/src/ggml-cuda/convert.cu        — to_fp16, to_fp32, to_fp16_nc for all 4 turbo types
+ggml/src/ggml-turbo-quant.c          — CPU reference quantize/dequant (all 4 types)
+ggml/src/ggml-common.h               — Block structs for all 4 types
+src/llama-kv-cache.cpp               — Layer-adaptive modes 1-11, turbo type checks
+src/llama-graph.cpp                   — Graph-level WHT rotation (5 build_attn overloads, all have WHT)
+```
+
+## Lessons Learned (From Session 18 Failures)
+
+### `__managed__` memory kills SM86
+Session 17-18 used `__managed__` for sink state. Works on SM120 by luck. Crashes on SM86 because `__managed__` triggers implicit page faults during CUDA graph replay. NEVER use `__managed__` in any kernel-accessible path.
+
+### LUT scoring paths are dead code — need restoration with fixes
+Session 17 showed +7.2% from turbo3 LUT. Session 18 disabled it (bank conflicts) and deleted the scoring loop. Session 19 confirmed turbo2 LUT is ALSO dead code — table built in shared memory but nobody reads it. **All LUT scoring paths need to be rebuilt in Session 20** with:
+1. `[D][9]` padding (fixes bank conflicts — stride 9 coprime to 32 banks)
+2. q8_1 Q dequant in LUT construction (compatible with q8_1 Q path)
+3. New scoring branch in VEC kernel loop that reads `turbo_lut[elem][idx]`
+
+See vault: `10 Knowledge/CUDA/Shared Memory Bank Conflicts.md`
+
+### V sink was removed but can be restored
+Session 18 removed V sinks because `__managed__` reads in hot loop = -14% at 32K. Session 19 replaced `__managed__` with `__device__` + async copy — the perf hit reason is gone. **V sinks should be restored using Session 19's approach.** Code at `git show 399549616`.
+
+### Always verify type properties before writing type-specific code
+turbo4 and turbo1.5 use q8_1 Q format (`K_is_unquantized = false`). turbo3 and turbo2 use float Q (`K_is_unquantized = true`). The LUT construction reads Q as float — but q8_1 Q can be dequantized on the fly (one-time cost, D elements). This makes LUT compatible with ALL Q paths.
+
+## Environment Variables
+
+| Variable | Effect | Status |
+|----------|--------|--------|
+| `TURBO_LAYER_ADAPTIVE=N` | Per-layer KV type (modes 0-11) | Working |
+| `TURBO_INNERQ=N` | InnerQ calibration | Working |
+| `TURBO_SINK_SIZE=N` | Attention sinks (first N positions at fp16) | FIXED on all GPUs (S19 SM86, S22B SM89 alignment fix). 0% PPL benefit. V sinks = dead end (register pressure). |
+
+## Commit Message Format
+
+```
+<type>: <short description>
+
+<Detailed explanation>
+
+  Speed: turbo3=XX.XX, turbo4=XX.XX, turbo1.5=XX.XX tok/s
+  PPL: turbo3 ctx=512=X.XXXX, ctx=2048=X.XXXX
+```
+
+**NEVER add Co-Authored-By lines.**
+
+## Q Format Architecture (Updated Session 24B)
+
+ALL turbo types use q8_1 Q + nthreads_KQ=8. Centroids are `static constexpr` (register-allocated). LUT scoring uses Q from global memory (still float) for one-time table construction.
+
+| Type | Q Path | nthreads_KQ | LUT | Short | 32K | Key Optimization |
+|------|:------:|:-----------:|:---:|------:|----:|-----------------|
+| turbo3 | q8_1 | 8 | 8 centroids (8-wide) | **65.04** | **54.89** | q8_1 vec_dot + LUT + __expf + constexpr centroids |
+| turbo4 | q8_1 | 8 (S24B fix) | disabled | **65.18** | **54.22** | nthreads_KQ=8 (was 32) + constexpr. **AmesianX gap closed: +10-11%** |
+| turbo2 | q8_1 | 8 | 4 centroids (8-wide) | **65.24** | **53.57** | Long-context champion + constexpr |
+| turbo1.5 | q8_1 | 8 (S24B fix) | none | **63.99** | **48.15** | nthreads_KQ=8 (was 32) + constexpr |
+
+## What To Build Next — Session 22 (Priority Order)
+
+1. **Multi-model validation** — 5 models: Llama-3.2-1B (D=64), Phi-4-mini (D=128, 3:1 GQA), Llama-3.3-8B (D=128, 4:1 GQA), Gemma-3-12B (D=256), Phi-3.5-mini (D=96, expected graceful fallback). See `06 Models/Validation Target Models.md` in vault.
+2. **D=96 graceful fallback verification** — Phi-3.5-mini should fall back to non-FA attention, NOT crash.
+3. **README.md rewrite** — final numbers, usage examples, honest limitations
+4. **Discussion #20969 post** — headline: turbo3=q8_0 PPL at 4.6x compression, turbo2 beats q8_0 at 32K
+5. **FP4 Q precision test** — can Q survive E2M1 quantization? (16 levels, most Q values near 0)
+6. **PR to TheTom upstream**
+
+## Completed Optimizations (Sessions 17-24)
+
+| Session | What | Impact |
+|---------|------|--------|
+| 17 | signalnine base + LUT attention | turbo3 60.77 (+7.2%) |
+| 18 | turbo4, turbo1.5, trit LUT, review pass | 4 types complete |
+| 19 | Sinks fix, 36 K×V combos, prefill verified | All bugs fixed |
+| 20 | q8_1 turbo3/turbo2 vec_dot, LUT restored | turbo3 32K +7% |
+| 21 | `__launch_bounds__(128,3)`, turbo4 LUT removed | ALL types +7-13% at 32K |
+| 22 | Multi-model validation (5 models D=64/96/128/256) | Zero crashes, D=96 graceful fallback |
+| 22B | SM89 sink fix, L2 prefetch, 8-wide LUT turbo3/turbo2 | turbo3 short +1.8%, 32K +4.7%, turbo2 32K +3.0% |
+| 23 | Q4_K_M validation, LA=12 boundary V, fattn.cu D check, README | Q4_K_M+turbo1.5 131K=25.81, LA=12 74.8% gap recovery |
+| 24 | __expf fast-math, LA kv_ord hybrid fix, LA=13-15, GQA warning | turbo3 short +0.67%, 32K +3.69%, Q4_K_M ctx=2048 beats q8_0 |
+| 24B | nthreads_KQ=8 for turbo4/1.5, constexpr centroids | turbo4 short +10.7%, 32K +17.7%. AmesianX gap closed: +10-11% us |
+
+## Dead Ends (Don't Repeat)
+
+| What | Why It Failed | Session |
+|------|--------------|---------|
+| V sinks in V accumulation loop | Register pressure -12.7% at 32K (not __managed__) | 20 |
+| turbo4 16-centroid LUT | 8.7KB shmem net negative at all contexts | 21 |
+| V-specific 64×64 rotation | Inverse WHT hardcodes group_size from tensor ne[0], not from quantization | 20 |
+| nthreads_KQ=32 for turbo3 q8_1 | Kills warp-level ILP, -17% at 32K | 20 |
+| Sinks for PPL improvement | 0% across 2 models, 5 contexts, 3 sink sizes | 19-20 |
+| TURBO_SINK_SIZE on SM89 | Segfault at sizes {1,4,16}; {0,2,8} work. Host-side addressing bug in sink_get_or_alloc | 21 |
+| FP4 E2M1 for Q | 99.5% of Q values map to zero (σ=0.088, E2M1 min non-zero=0.5). No mixed fp16×E2M1 MMA | 22 |
+| Inner-loop V prefetch hints | RTX 5090 HW prefetcher already handles sequential pattern. No measurable benefit | 23 |
+| turbo1.5 sparse V threshold=1e-4 | PPL safe but no speed benefit at 32K or 131K | 23 |
+| elect_leader() PTX | VEC kernel warp-leader branches are outside hot loop, no serialization to eliminate | 24 |
+| Tawa producer-consumer warp split | VEC ncols=1 is bandwidth-limited, shared memory staging adds overhead, not compute-limited | 24 |
+| cp.async K loading | K blocks already loaded directly to registers, no staging benefit | 24 |
+
+## Obsidian Vault Maintenance
+
+The project knowledge base lives at `/mnt/c/vaults/forge/`. **Read `10 Knowledge/README.md` for CUDA/hardware reference docs before starting kernel work.**
+
+**After EVERY session**, update these vault files with your results:
+1. `00 Dashboard/Project Status.md` — Check off completed items, add new open work
+2. `03 Benchmarks/Benchmark Hub.md` — Add your final benchmark numbers
+3. `08 Plans/Roadmap.md` — Update session status (DONE/PLANNED), add next session items
+4. `01 Sessions/Session N.md` — Create or update your session's tracking note
+
+If you discover a bug, create an issue file in `07 Issues/`. If you make an architecture decision, document it in `02 Architecture/`.
+
+## Remember
+
+- **Sessions 17-24B COMPLETE** — all 4 turbo types optimized, 36 K×V combos, 4 GPUs validated
+- **ALL types beat q8_0 at short context**: turbo4=65.18, turbo3=65.04, turbo2=65.24, turbo1.5=63.99
+- **ALL types beat q8_0 at 32K**: turbo4=54.22, turbo3=54.89, turbo2=53.57, turbo1.5=48.15
+- **turbo3 = q8_0 PPL at ctx=2048** (5.674 = 5.674) at 4.6x compression
+- **Q4_K_M turbo3 = 77.25 tok/s** (beats vLLM INT4 68.3 on same GB202 die)
+- **Q4_K_M turbo3 PPL ctx=2048 = 7.716** (BEATS q8_0 7.730!)
+- **MoE: turbo3=184 tok/s** (+96% vs S18), turbo1.5=174
+- **AmesianX head-to-head**: we beat them on ALL types — turbo3 +16-35%, turbo4 +10-11%
+- **Cross-GPU stability**: 1,121+ iterations (356 SM86 + 425 SM89 + 340 SM120), 49+ PPL checks bit-exact, 0 failures
+- **D∈{64, 128, 256} only** — D=96 falls back to non-FA. VEC kernel: `static_assert(D % 64 == 0)`
+- **Vault**: `/mnt/c/vaults/forge/` — `06 Models/Validation Target Models.md` for multi-model specs, `09 Infrastructure/Test Machines.md` for GPU fleet
+- **Dump folder**: `/mnt/c/vaults/dump/` — incoming test results from 3090 Ti, 4090M, and M4 Pro
+- **MEASURE SHORT + 32K + PPL** after every change
+- **READ THE CODE** before writing code
+- **Search the Obsidian vault** for any context you need
+- **DO NOT STOP. DO NOT DEFER. DO NOT SKIP. FINISH THE WORK.**
+- **⛔ BENCHMARKS: Foreground Bash call ONLY — it blocks and WAKES YOU UP when done. NO run_in_background. NO timeouts. ONE at a time. See Rule 11. ⛔**
