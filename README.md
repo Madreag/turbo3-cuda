@@ -4,7 +4,7 @@ CUDA implementation of [TurboQuant](https://arxiv.org/abs/2504.19874) (ICLR 2026
 
 **The short version:** TurboQuant compresses the KV cache 2-8x while maintaining (or exceeding) uncompressed decode speed. At 32K context, turbo3 is **faster** than q8_0 while using **4.6x less memory**. At 256K context, turbo2 still generates 36+ tok/s on a consumer RTX 5090 — a context length where f16 KV would OOM.
 
-Built on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, native Flash Attention vec_dot, and MMA prefill. All 4 turbo types (turbo4/turbo3/turbo2/turbo1.5) with 36 asymmetric K/V combinations. Validated across 5 models, 3 GPUs, 1,121+ stability iterations with zero failures.
+Built on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, native Flash Attention vec_dot, and MMA prefill. All 4 turbo types (turbo4/turbo3/turbo2/turbo1.5) with 36 asymmetric K/V combinations. Validated across 5 models, 3 GPUs, 1,251+ stability iterations with zero failures.
 
 ## Performance (RTX 5090, Qwen 3.5 27B Q6_K)
 
@@ -127,38 +127,36 @@ The VEC Flash Attention kernel supports **D=64, D=128, D=256** (`D % 64 == 0` re
 
 ## Cross-GPU Validation
 
-Validated on 3 NVIDIA GPUs across 3 architecture generations, **1,121+ total stability iterations, zero failures**:
+Validated on 3 NVIDIA GPUs across 3 architecture generations, **1,251+ total stability iterations, zero failures**:
 
 | GPU | SM | VRAM | Stability | PPL Drift | turbo2 > q8_0 at 32K? |
 |-----|:--:|-----:|:---------:|:---------:|:---------------------:|
 | RTX 5090 | SM120 | 32 GB | 340+ iterations | None | Yes (56.02 vs 53.06) |
-| RTX 3090 Ti | SM86 | 24 GB | 356 iterations, 35 PPL checks | Bit-exact (7.5535) | Yes (72.13 vs 71.54) |
+| RTX 3090 Ti | SM86 | 24 GB | 486+ iterations, 48 PPL checks | Bit-exact (7.5535) | Yes (77.05 vs 73.06) |
 | RTX 4090M | SM89 | 16 GB | 425 iterations, 14+ PPL checks | Bit-exact (7.5912) | Yes (48.22 vs 45.3) |
 
 ### RTX 3090 Ti (SM86, 24 GB GDDR6X, Qwen 3.5 9B Q8_0)
 
-> **Note**: Measured pre-Session 25. The sparse V threshold optimization (S25) should improve 32K+ numbers by an estimated 5-15%. Retest pending.
-
 | Type | bpv | Short | 32K | 64K | PPL ctx=512 |
 |------|----:|------:|----:|----:|:-----------:|
-| f16 | 16 | 85.81 | OOM | OOM | — |
-| q8_0 | 8.5 | 85.24 | 71.54 | OOM | 8.525 |
-| turbo4 | 4.25 | 82.92 | 68.89 | 45.17 | 8.634 |
-| **turbo3** | 3.25 | 83.94 | 63.56 | 43.86 | 8.624 |
-| **turbo2** | 2.5 | **84.17** | **72.13** | **61.98** | 8.937 |
-| turbo1.5 | 2.0 | 82.66 | 64.32 | 52.25 | 9.402 |
+| f16 | 16 | 86.01 | OOM | OOM | — |
+| q8_0 | 8.5 | 85.52 | 73.06 | OOM | 8.525 |
+| turbo4 | 4.25 | 84.62 | 70.95 | 59.80 | 8.634 |
+| **turbo3** | 3.25 | **84.62** | **72.90** | **63.44** | 8.624 |
+| **turbo2** | 2.5 | **85.03** | **77.05** | **70.06** | 8.937 |
+| turbo1.5 | 2.0 | 84.19 | 64.41 | 51.75 | 9.402 |
 
-turbo2 at 64K = **61.98 tok/s** — runs where q8_0 OOMs. **356 stability iterations, PPL bit-exact across sessions.**
+turbo2 at 64K = **70.06 tok/s** — runs where q8_0 OOMs. turbo3 32K now **matches q8_0** (72.90 vs 73.06). **486+ stability iterations across 5 builds, PPL bit-exact across all sessions.**
 
-**Multi-Model (Session 22, 5 models):**
+**Multi-Model (Session 25, 5 models):**
 
 | Model | D | turbo3 | q8_0 | turbo4 | turbo1.5 |
 |-------|:-:|-------:|-----:|-------:|---------:|
-| Llama-3.2-1B | 64 | 511 | 509 | 508 | 510 |
-| Phi-3.5-mini | 96 | 190* | 190 | 191 | 190 |
-| Phi-4-mini | 128 | 179 | 194 | 173 | 172 |
-| Llama-3.3-8B | 128 | 110 | 115 | 108 | 107 |
-| Gemma-3-12B | 256 | 65 | 69 | 62 | 61 |
+| Llama-3.2-1B | 64 | 513 | 510 | 515 | 514 |
+| Phi-3.5-mini | 96 | 189* | 190 | 189 | 190 |
+| Phi-4-mini | 128 | 183 | 197 | 182 | 180 |
+| Llama-3.3-8B | 128 | 112 | 117 | 111 | 110 |
+| Gemma-3-12B | 256 | 66 | 70 | 66 | 65 |
 
 \*D=96: graceful non-FA fallback.
 
