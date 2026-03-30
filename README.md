@@ -16,9 +16,11 @@ Based on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, na
 | **turbo1.5** | 2.00 | **8.0x** | 58.74 (98.7% f16) | **45.06** | 7.312 (+8.18%) | 6.103 |
 
 **Headlines:**
+- **Q4_K_M + turbo3 = 77.25 tok/s** — beats vLLM INT4 (68.3) on the same GB202 die by +13%
 - **turbo3 matches q8_0 perplexity at ctx=2048** (5.674 = 5.674) at 4.6x compression
-- **turbo2 beats q8_0 decode speed at 32K** (51.29 vs 47.99) at 6.4x compression
-- **MoE (Qwen 3.5 35B-A3B)**: turbo3 = **184 tok/s** (+96% vs signalnine), turbo1.5 = 174, turbo4 = 172
+- **turbo2 beats q8_0 decode speed at 32K** (52.82 vs 47.99) at 6.4x compression
+- **751+ stability iterations across 3 GPUs, zero failures**
+- **MoE (Qwen 3.5 35B-A3B)**: turbo3 = **184 tok/s** (+96% vs signalnine)
 - **131K context**: turbo3 = 24.43 tok/s (+68% vs Session 18)
 
 ## Quality (Perplexity)
