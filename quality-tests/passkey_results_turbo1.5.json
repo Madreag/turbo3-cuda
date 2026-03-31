@@ -1,0 +1,968 @@
+{
+  "label": "turbo1.5",
+  "contexts": [
+    2048,
+    4096,
+    8192,
+    16384,
+    32768,
+    65536,
+    131072
+  ],
+  "depths": [
+    10.0,
+    25.0,
+    50.0,
+    75.0,
+    90.0
+  ],
+  "reps": 3,
+  "overall_accuracy": 0.0,
+  "results": [
+    {
+      "context": 2048,
+      "depth": 10.0,
+      "rep": 0,
+      "passkey": "94495",
+      "response": "",
+      "correct": false,
+      "elapsed": 3.8
+    },
+    {
+      "context": 2048,
+      "depth": 10.0,
+      "rep": 1,
+      "passkey": "99199",
+      "response": "",
+      "correct": false,
+      "elapsed": 3.8
+    },
+    {
+      "context": 2048,
+      "depth": 10.0,
+      "rep": 2,
+      "passkey": "63525",
+      "response": "",
+      "correct": false,
+      "elapsed": 5.7
+    },
+    {
+      "context": 2048,
+      "depth": 25.0,
+      "rep": 0,
+      "passkey": "43913",
+      "response": "",
+      "correct": false,
+      "elapsed": 3.9
+    },
+    {
+      "context": 2048,
+      "depth": 25.0,
+      "rep": 1,
+      "passkey": "31377",
+      "response": "",
+      "correct": false,
+      "elapsed": 3.7
+    },
+    {
+      "context": 2048,
+      "depth": 25.0,
+      "rep": 2,
+      "passkey": "93411",
+      "response": "",
+      "correct": false,
+      "elapsed": 3.8
+    },
+    {
+      "context": 2048,
+      "depth": 50.0,
+      "rep": 0,
+      "passkey": "63284",
+      "response": "The capital of France is Paris.\n\nThe capital of France is Paris.\n\nThe capital of France is Paris.\n\nThe capital of France is Paris.\n\nThe capital of France is Paris.\n\nThe capital of France is Paris.\n\nTh",
+      "correct": false,
+      "elapsed": 3.7
+    },
+    {
+      "context": 2048,
+      "depth": 50.0,
+      "rep": 1,
+      "passkey": "20677",
+      "response": "",
+      "correct": false,
+      "elapsed": 3.9
+    },
+    {
+      "context": 2048,
+      "depth": 50.0,
+      "rep": 2,
+      "passkey": "52619",
+      "response": "",
+      "correct": false,
+      "elapsed": 3.9
+    },
+    {
+      "context": 2048,
+      "depth": 75.0,
+      "rep": 0,
+      "passkey": "69172",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.0
+    },
+    {
+      "context": 2048,
+      "depth": 75.0,
+      "rep": 1,
+      "passkey": "62517",
+      "response": "",
+      "correct": false,
+      "elapsed": 5.9
+    },
+    {
+      "context": 2048,
+      "depth": 75.0,
+      "rep": 2,
+      "passkey": "39087",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.0
+    },
+    {
+      "context": 2048,
+      "depth": 90.0,
+      "rep": 0,
+      "passkey": "43018",
+      "response": "",
+      "correct": false,
+      "elapsed": 3.9
+    },
+    {
+      "context": 2048,
+      "depth": 90.0,
+      "rep": 1,
+      "passkey": "21097",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.2
+    },
+    {
+      "context": 2048,
+      "depth": 90.0,
+      "rep": 2,
+      "passkey": "64121",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.0
+    },
+    {
+      "context": 4096,
+      "depth": 10.0,
+      "rep": 0,
+      "passkey": "86895",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.2
+    },
+    {
+      "context": 4096,
+      "depth": 10.0,
+      "rep": 1,
+      "passkey": "46666",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.2
+    },
+    {
+      "context": 4096,
+      "depth": 10.0,
+      "rep": 2,
+      "passkey": "97118",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.3
+    },
+    {
+      "context": 4096,
+      "depth": 25.0,
+      "rep": 0,
+      "passkey": "53593",
+      "response": "The text provided by the user contains a lot of information, but it is not clear what the main point is. The text is a bit confusing and it is difficult to understand what the author is trying to say.",
+      "correct": false,
+      "elapsed": 6.1
+    },
+    {
+      "context": 4096,
+      "depth": 25.0,
+      "rep": 1,
+      "passkey": "99065",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.1
+    },
+    {
+      "context": 4096,
+      "depth": 25.0,
+      "rep": 2,
+      "passkey": "40790",
+      "response": "",
+      "correct": false,
+      "elapsed": 3.9
+    },
+    {
+      "context": 4096,
+      "depth": 50.0,
+      "rep": 0,
+      "passkey": "82552",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.2
+    },
+    {
+      "context": 4096,
+      "depth": 50.0,
+      "rep": 1,
+      "passkey": "69284",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.2
+    },
+    {
+      "context": 4096,
+      "depth": 50.0,
+      "rep": 2,
+      "passkey": "36994",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.3
+    },
+    {
+      "context": 4096,
+      "depth": 75.0,
+      "rep": 0,
+      "passkey": "76936",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.2
+    },
+    {
+      "context": 4096,
+      "depth": 75.0,
+      "rep": 1,
+      "passkey": "16663",
+      "response": "",
+      "correct": false,
+      "elapsed": 6.1
+    },
+    {
+      "context": 4096,
+      "depth": 75.0,
+      "rep": 2,
+      "passkey": "62275",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.5
+    },
+    {
+      "context": 4096,
+      "depth": 90.0,
+      "rep": 0,
+      "passkey": "13536",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.6
+    },
+    {
+      "context": 4096,
+      "depth": 90.0,
+      "rep": 1,
+      "passkey": "35319",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.3
+    },
+    {
+      "context": 4096,
+      "depth": 90.0,
+      "rep": 2,
+      "passkey": "38338",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.2
+    },
+    {
+      "context": 8192,
+      "depth": 10.0,
+      "rep": 0,
+      "passkey": "61346",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.6
+    },
+    {
+      "context": 8192,
+      "depth": 10.0,
+      "rep": 1,
+      "passkey": "84318",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.7
+    },
+    {
+      "context": 8192,
+      "depth": 10.0,
+      "rep": 2,
+      "passkey": "41598",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.7
+    },
+    {
+      "context": 8192,
+      "depth": 25.0,
+      "rep": 0,
+      "passkey": "44739",
+      "response": "",
+      "correct": false,
+      "elapsed": 6.0
+    },
+    {
+      "context": 8192,
+      "depth": 25.0,
+      "rep": 1,
+      "passkey": "66237",
+      "response": "The text you provided appears to be a mix of various topics, including literature, literature, and literature. However, I cannot provide a response to your request as it contains sensitive information",
+      "correct": false,
+      "elapsed": 4.9
+    },
+    {
+      "context": 8192,
+      "depth": 25.0,
+      "rep": 2,
+      "passkey": "15410",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.8
+    },
+    {
+      "context": 8192,
+      "depth": 50.0,
+      "rep": 0,
+      "passkey": "51408",
+      "response": "The user's query contains a request for information about the capital of France. The correct answer is that the capital of France is Paris.\n\nThe capital of France is Paris.\n\nThe capital of France is P",
+      "correct": false,
+      "elapsed": 4.8
+    },
+    {
+      "context": 8192,
+      "depth": 50.0,
+      "rep": 1,
+      "passkey": "72975",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.8
+    },
+    {
+      "context": 8192,
+      "depth": 50.0,
+      "rep": 2,
+      "passkey": "12363",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.9
+    },
+    {
+      "context": 8192,
+      "depth": 75.0,
+      "rep": 0,
+      "passkey": "33932",
+      "response": "",
+      "correct": false,
+      "elapsed": 6.3
+    },
+    {
+      "context": 8192,
+      "depth": 75.0,
+      "rep": 1,
+      "passkey": "73061",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.9
+    },
+    {
+      "context": 8192,
+      "depth": 75.0,
+      "rep": 2,
+      "passkey": "39241",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.8
+    },
+    {
+      "context": 8192,
+      "depth": 90.0,
+      "rep": 0,
+      "passkey": "74965",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.8
+    },
+    {
+      "context": 8192,
+      "depth": 90.0,
+      "rep": 1,
+      "passkey": "55123",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.9
+    },
+    {
+      "context": 8192,
+      "depth": 90.0,
+      "rep": 2,
+      "passkey": "57223",
+      "response": "",
+      "correct": false,
+      "elapsed": 4.9
+    },
+    {
+      "context": 16384,
+      "depth": 10.0,
+      "rep": 0,
+      "passkey": "22893",
+      "response": "",
+      "correct": false,
+      "elapsed": 5.9
+    },
+    {
+      "context": 16384,
+      "depth": 10.0,
+      "rep": 1,
+      "passkey": "82834",
+      "response": "",
+      "correct": false,
+      "elapsed": 7.4
+    },
+    {
+      "context": 16384,
+      "depth": 10.0,
+      "rep": 2,
+      "passkey": "72989",
+      "response": "",
+      "correct": false,
+      "elapsed": 5.9
+    },
+    {
+      "context": 16384,
+      "depth": 25.0,
+      "rep": 0,
+      "passkey": "44658",
+      "response": "",
+      "correct": false,
+      "elapsed": 6.4
+    },
+    {
+      "context": 16384,
+      "depth": 25.0,
+      "rep": 1,
+      "passkey": "78794",
+      "response": "",
+      "correct": false,
+      "elapsed": 6.4
+    },
+    {
+      "context": 16384,
+      "depth": 25.0,
+      "rep": 2,
+      "passkey": "70277",
+      "response": "",
+      "correct": false,
+      "elapsed": 6.4
+    },
+    {
+      "context": 16384,
+      "depth": 50.0,
+      "rep": 0,
+      "passkey": "55602",
+      "response": "",
+      "correct": false,
+      "elapsed": 7.9
+    },
+    {
+      "context": 16384,
+      "depth": 50.0,
+      "rep": 1,
+      "passkey": "33056",
+      "response": "I cannot provide the information you are looking for. I cannot provide the information you are looking for. I am an AI assistant and I cannot provide you with the information you are looking for. I am",
+      "correct": false,
+      "elapsed": 6.3
+    },
+    {
+      "context": 16384,
+      "depth": 50.0,
+      "rep": 2,
+      "passkey": "32462",
+      "response": "",
+      "correct": false,
+      "elapsed": 6.4
+    },
+    {
+      "context": 16384,
+      "depth": 75.0,
+      "rep": 0,
+      "passkey": "82562",
+      "response": "",
+      "correct": false,
+      "elapsed": 6.4
+    },
+    {
+      "context": 16384,
+      "depth": 75.0,
+      "rep": 1,
+      "passkey": "78506",
+      "response": "The correct answer is: **D. A, B, C, D",
+      "correct": false,
+      "elapsed": 6.4
+    },
+    {
+      "context": 16384,
+      "depth": 75.0,
+      "rep": 2,
+      "passkey": "64498",
+      "response": "",
+      "correct": false,
+      "elapsed": 8.0
+    },
+    {
+      "context": 16384,
+      "depth": 90.0,
+      "rep": 0,
+      "passkey": "29871",
+      "response": "",
+      "correct": false,
+      "elapsed": 6.3
+    },
+    {
+      "context": 16384,
+      "depth": 90.0,
+      "rep": 1,
+      "passkey": "27865",
+      "response": "",
+      "correct": false,
+      "elapsed": 6.4
+    },
+    {
+      "context": 16384,
+      "depth": 90.0,
+      "rep": 2,
+      "passkey": "52701",
+      "response": "",
+      "correct": false,
+      "elapsed": 6.4
+    },
+    {
+      "context": 32768,
+      "depth": 10.0,
+      "rep": 0,
+      "passkey": "99827",
+      "response": "",
+      "correct": false,
+      "elapsed": 8.6
+    },
+    {
+      "context": 32768,
+      "depth": 10.0,
+      "rep": 1,
+      "passkey": "66219",
+      "response": "",
+      "correct": false,
+      "elapsed": 11.1
+    },
+    {
+      "context": 32768,
+      "depth": 10.0,
+      "rep": 2,
+      "passkey": "74728",
+      "response": "",
+      "correct": false,
+      "elapsed": 9.8
+    },
+    {
+      "context": 32768,
+      "depth": 25.0,
+      "rep": 0,
+      "passkey": "77589",
+      "response": "",
+      "correct": false,
+      "elapsed": 10.4
+    },
+    {
+      "context": 32768,
+      "depth": 25.0,
+      "rep": 1,
+      "passkey": "55286",
+      "response": "",
+      "correct": false,
+      "elapsed": 12.4
+    },
+    {
+      "context": 32768,
+      "depth": 25.0,
+      "rep": 2,
+      "passkey": "80385",
+      "response": "",
+      "correct": false,
+      "elapsed": 11.2
+    },
+    {
+      "context": 32768,
+      "depth": 50.0,
+      "rep": 0,
+      "passkey": "71477",
+      "response": "",
+      "correct": false,
+      "elapsed": 11.1
+    },
+    {
+      "context": 32768,
+      "depth": 50.0,
+      "rep": 1,
+      "passkey": "86049",
+      "response": "The correct answer is **D**.\n\n**Explanation:**\nThe question asks for the correct answer based on the provided information. Based on the context of the question, the correct answer is likely to be rela",
+      "correct": false,
+      "elapsed": 12.2
+    },
+    {
+      "context": 32768,
+      "depth": 50.0,
+      "rep": 2,
+      "passkey": "80846",
+      "response": "I cannot provide the information you are requesting. I cannot provide information on how to access or access restricted information, nor can I provide information that could be used to bypass security",
+      "correct": false,
+      "elapsed": 10.7
+    },
+    {
+      "context": 32768,
+      "depth": 75.0,
+      "rep": 0,
+      "passkey": "63939",
+      "response": "",
+      "correct": false,
+      "elapsed": 10.6
+    },
+    {
+      "context": 32768,
+      "depth": 75.0,
+      "rep": 1,
+      "passkey": "41182",
+      "response": "",
+      "correct": false,
+      "elapsed": 12.2
+    },
+    {
+      "context": 32768,
+      "depth": 75.0,
+      "rep": 2,
+      "passkey": "64771",
+      "response": "",
+      "correct": false,
+      "elapsed": 10.5
+    },
+    {
+      "context": 32768,
+      "depth": 90.0,
+      "rep": 0,
+      "passkey": "24152",
+      "response": "",
+      "correct": false,
+      "elapsed": 10.6
+    },
+    {
+      "context": 32768,
+      "depth": 90.0,
+      "rep": 1,
+      "passkey": "25221",
+      "response": "",
+      "correct": false,
+      "elapsed": 12.2
+    },
+    {
+      "context": 32768,
+      "depth": 90.0,
+      "rep": 2,
+      "passkey": "18827",
+      "response": "",
+      "correct": false,
+      "elapsed": 10.6
+    },
+    {
+      "context": 65536,
+      "depth": 10.0,
+      "rep": 0,
+      "passkey": "40230",
+      "response": "",
+      "correct": false,
+      "elapsed": 18.4
+    },
+    {
+      "context": 65536,
+      "depth": 10.0,
+      "rep": 1,
+      "passkey": "92911",
+      "response": "",
+      "correct": false,
+      "elapsed": 18.4
+    },
+    {
+      "context": 65536,
+      "depth": 10.0,
+      "rep": 2,
+      "passkey": "98162",
+      "response": "",
+      "correct": false,
+      "elapsed": 20.4
+    },
+    {
+      "context": 65536,
+      "depth": 25.0,
+      "rep": 0,
+      "passkey": "14941",
+      "response": "The correct answer is **C**.\n\n**Explanation:**\nThe question asks for the capital city of France. The capital of France is Paris. The capital of France is Paris. Therefore, the correct answer is C.\n\n**",
+      "correct": false,
+      "elapsed": 18.7
+    },
+    {
+      "context": 65536,
+      "depth": 25.0,
+      "rep": 1,
+      "passkey": "21821",
+      "response": "The correct answer is **C**.\n\n**Explanation:**\nThe question asks for the capital city of France. The capital of France is Paris. The capital of France is Paris. Therefore, the correct answer is Paris.",
+      "correct": false,
+      "elapsed": 20.2
+    },
+    {
+      "context": 65536,
+      "depth": 25.0,
+      "rep": 2,
+      "passkey": "59508",
+      "response": "",
+      "correct": false,
+      "elapsed": 16.8
+    },
+    {
+      "context": 65536,
+      "depth": 50.0,
+      "rep": 0,
+      "passkey": "44974",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 65536,
+      "depth": 50.0,
+      "rep": 1,
+      "passkey": "33488",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 65536,
+      "depth": 50.0,
+      "rep": 2,
+      "passkey": "49898",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 65536,
+      "depth": 75.0,
+      "rep": 0,
+      "passkey": "30981",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 65536,
+      "depth": 75.0,
+      "rep": 1,
+      "passkey": "86114",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 65536,
+      "depth": 75.0,
+      "rep": 2,
+      "passkey": "54898",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 65536,
+      "depth": 90.0,
+      "rep": 0,
+      "passkey": "62505",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 65536,
+      "depth": 90.0,
+      "rep": 1,
+      "passkey": "12834",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 65536,
+      "depth": 90.0,
+      "rep": 2,
+      "passkey": "88911",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 131072,
+      "depth": 10.0,
+      "rep": 0,
+      "passkey": "88058",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 131072,
+      "depth": 10.0,
+      "rep": 1,
+      "passkey": "36173",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 131072,
+      "depth": 10.0,
+      "rep": 2,
+      "passkey": "25172",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 131072,
+      "depth": 25.0,
+      "rep": 0,
+      "passkey": "47275",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 131072,
+      "depth": 25.0,
+      "rep": 1,
+      "passkey": "38355",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 131072,
+      "depth": 25.0,
+      "rep": 2,
+      "passkey": "30513",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 131072,
+      "depth": 50.0,
+      "rep": 0,
+      "passkey": "23629",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 131072,
+      "depth": 50.0,
+      "rep": 1,
+      "passkey": "58307",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 131072,
+      "depth": 50.0,
+      "rep": 2,
+      "passkey": "18257",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 131072,
+      "depth": 75.0,
+      "rep": 0,
+      "passkey": "69226",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 131072,
+      "depth": 75.0,
+      "rep": 1,
+      "passkey": "28610",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 131072,
+      "depth": 75.0,
+      "rep": 2,
+      "passkey": "31728",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 131072,
+      "depth": 90.0,
+      "rep": 0,
+      "passkey": "57212",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 131072,
+      "depth": 90.0,
+      "rep": 1,
+      "passkey": "26635",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    },
+    {
+      "context": 131072,
+      "depth": 90.0,
+      "rep": 2,
+      "passkey": "67916",
+      "response": "ERROR: server not running",
+      "correct": false,
+      "elapsed": 0
+    }
+  ]
+}

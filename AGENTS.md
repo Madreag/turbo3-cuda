@@ -255,8 +255,11 @@ S25 raised sparse V skip threshold from 1e-6 to type-specific values. **S27B con
 ### K type dominates 32K speed, V type barely matters (S25 finding)
 With sparse V skip, most V positions are never read. K scoring is the bottleneck at long context. On 8B Llama at 32K: turbo2 K gives 113-119 tok/s regardless of V type (5% spread). turbo3 K: 105-112. turbo4 K: 74-75. turbo1.5 K: 67. **Implication for LA: use turbo2 K for speed, V type for quality only.**
 
+### 2-bit quantization PPL grows with context (S27 finding)
+S27 50-chunk wikitext-103 validation showed turbo2/turbo1.5 PPL delta grows with context length (+12%/+24% at 32K vs q8_0). Control test proved this is **inherent to 2-bit quantization** (not threshold-caused): PPL is bit-identical at 1e-2 and 1e-6 thresholds. turbo3/turbo4 stay healthy (< 3% delta at 32K). This is a fundamental limitation of low-bpv types at long context.
+
 ### VEC kernel at optimization ceiling (168 regs, 98.4% utilization)
-S25 tested 33 micro-optimizations (compiler flags, code restructuring, LUT changes, launch bounds). ALL failed due to register pressure at 168/170. Adding even 1 register causes spills → -2% to -4%. The LUT is essential for BOTH performance AND register pressure (without LUT: 255 regs → massive spilling). The only successful approach was changing CONSTANTS (thresholds), not code STRUCTURE.
+S25 tested 33 micro-optimizations + S27 tested 4 more (context-adaptive threshold, turbo1.5 LUT, asymmetric K/V, sparse K). ALL failed due to register pressure at 168/170. Adding even 1 register causes spills → -2% to -4%. The LUT is essential for BOTH performance AND register pressure (without LUT: 255 regs → massive spilling). The only successful approach was changing CONSTANTS (thresholds), not code STRUCTURE.
 
 ## Environment Variables
 
@@ -316,7 +319,7 @@ ALL turbo types use q8_1 Q + nthreads_KQ=8. Centroids are `static constexpr` (re
 | 25 | Sparse V threshold 5e-3/1e-2, 43 iterations autoresearch | turbo3 32K +5-11%, turbo2 +13%, 8B +28%. K type dominates 32K speed. |
 | 26 | SM120 D=256 LUT fix (NVBUG 5218000), turbo4/1.5 Q_reg fix, block-128 storage | Block-128: turbo3 3.125bpv, turbo2 2.125bpv. All types beat q8_0. |
 | 27 | Norm correction verified, 50-chunk wikitext-103, skip rate measurement, quality gate | PPL delta grows with ctx for turbo2/1.5 (inherent to 2-bit quant). |
-| 27B | Sparse V threshold VALIDATED: 1e-2 correct (control test: 0 PPL diff). NIAH 5090 re-run | 1e-2 gives +13% speed for zero quality cost. Pushed to release. |
+| 27B | Sparse V threshold VALIDATED + 4 optimization attempts (all dead). NIAH 5090. | 1e-2 proven correct. Context-adaptive, turbo1.5 LUT, sparse K all dead at 168 reg ceiling. |
 
 ## Dead Ends (Don't Repeat)
 
@@ -343,6 +346,10 @@ ALL turbo types use q8_1 Q + nthreads_KQ=8. Centroids are `static constexpr` (re
 | nthreads_KQ=16 | -7.2% short, -6.9% 32K. Only 2 interleaved dots/warp vs 4 | 25 |
 | Any code restructuring | -2% to -7%. 168 regs = 98.4% utilization, any change causes spills | 25 |
 | ptxas flags (opt-level=4, expensive-opts, ftz) | Mixed: help 32K +1.5-2%, hurt short -1-2%. Cannot resolve with global flags | 25 |
+| Context-adaptive sparse V threshold | Non-constexpr threshold adds 1 register → spill. -1% at 32K for zero PPL benefit | 27 |
+| turbo1.5 3-entry LUT scoring | Zero improvement. Trit multiply already trivial; LUT trades one lookup for another | 27 |
+| K=turbo2/V=turbo3 asymmetric config | 55 tok/s 32K with +6.95% PPL delta. Worse than pure turbo3 (53.7 tok/s, +2.84%) | 27 |
+| Sparse K (norm early exit) | -1.5% at 32K. Branch + global read cost > rare skip benefit. Most K norms are non-trivial | 27 |
 
 ## Obsidian Vault Maintenance
 
