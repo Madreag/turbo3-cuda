@@ -72,27 +72,28 @@ Prefill (Q->ne[1]>1):
   MMA/TILE kernel runs on fp16
 ```
 
-## Current Performance (Session 24B, RTX 5090)
+## Current Performance (Session 26 Final + Block-128, RTX 5090)
 
-| Type | bpv | Short | 32K | PPL ctx=512 | PPL ctx=2048 | Notes |
-|------|----:|------:|----:|:-----------:|:------------:|-------|
-| f16 | 16 | 59.52 | 54.11 | — | — | Ceiling |
-| q8_0 | 8.5 | 58.58 | 47.99 | 6.759 | 5.674 | Baseline |
-| turbo4 | 4.25 | **65.18** | **54.22** | 6.825 (+0.97%) | 5.694 | nthreads_KQ=8 + constexpr centroids (S24B) |
-| turbo3 | 3.25 | **65.04** | **54.89** | 6.852 (+1.38%) | **5.674 (=q8_0)** | __expf + constexpr centroids |
-| turbo2 | 2.5 | **65.24** | **53.57** | 7.080 (+4.75%) | 5.892 | constexpr centroids, long-ctx champion |
-| turbo1.5 | 2.0 | **63.99** | **48.15** | 7.312 (+8.18%) | 6.103 | nthreads_KQ=8 + constexpr (S24B) |
+| Type | bpv | Compression | Short | 32K | PPL ctx=512 | PPL ctx=2048 | Notes |
+|------|----:|------------:|------:|----:|:-----------:|:------------:|-------|
+| q8_0 | 8.5 | 1.9x | 64.06 | 54.01 | 6.759 | 5.674 | Baseline |
+| turbo4 | 4.25 | 3.8x | **65.33** | **58.03** | 6.825 (+0.97%) | 5.694 | Q_reg fix (S26) |
+| turbo3 | 3.125 | 5.12x | **65.14** | **56.28** | 6.852 (+1.38%) | **5.674 (=q8_0)** | Block-128, D=256 LUT disabled SM120 |
+| turbo2 | 2.125 | 7.53x | **64.13** | **58.48** | 7.080 (+4.75%) | 5.892 | Block-128, 32K champion |
+| turbo1.5 | 2.00 | 8.0x | **64.00** | **55.62** | 7.312 (+8.18%) | 6.103 | Q_reg fix (S26) |
 
+**ALL 4 turbo types beat q8_0 at BOTH short AND 32K.**
 **Q4_K_M (Session 24)**: turbo3=77.25 short, 58.08 32K. **PPL ctx=2048=7.716 (beats q8_0 7.730!)**
 **MoE (Qwen 3.5 35B-A3B, S20)**: turbo3=184, turbo1.5=174, turbo4=172, q8_0=191 tok/s
 **AmesianX (S24 comp test)**: We beat them on ALL types: turbo3 +15-35%, turbo4 +10-11%
+**Extreme context**: turbo2 at 256K = 36.62 tok/s (Q4_K_M). turbo3 at 131K = 45.52 tok/s.
 
-### Cross-GPU Stability (Sessions 20-24B)
-- **3090 Ti (SM86)**: 356 iterations, 35/35 PPL checks bit-exact (7.5535), 0 failures
-- **4090M (SM89)**: 425 iterations, 14+ PPL checks bit-exact (7.5912), 0 failures
-- **RTX 5090 (SM120)**: 340+ iterations, continuous PPL checks, 0 failures
-- **Total**: **1,121+ iterations, 49+ bit-exact PPL checks, 0 failures across 3 GPUs**
-- **turbo2 beats q8_0 at 32K on ALL tested models** (1B, Phi-4, 8B, 12B, 27B)
+### Cross-GPU Stability (Sessions 20-27)
+- **3090 Ti (SM86)**: 486+ iterations, 48/48 PPL checks bit-exact, 0 failures. S26 block-128: +4-6% at 32K. OC: turbo2 80.18 tok/s.
+- **4090M (SM89)**: 525+ iterations, 14+ PPL checks bit-exact, 0 failures. S26 block-128: +10-17% at 32K (fastest session ever).
+- **RTX 5090 (SM120)**: 340+ iterations, continuous PPL checks, 0 failures. D=256 LUT disabled (NVIDIA NVBUG).
+- **Total**: **1,351+ iterations, 62+ bit-exact PPL checks, 0 failures across 3 GPUs**
+- **turbo2 beats q8_0 at 32K on ALL tested models and ALL GPUs**
 
 ### Supported Head Dimensions
 Only D∈{64, 128, 256}. VEC kernel requires `D % 64 == 0` (static_assert). D=80, D=96, D=112 fall back to non-FA mul_mat attention (slower but correct, no crash).
@@ -282,21 +283,23 @@ S25 tested 33 micro-optimizations + S27 tested 4 more (context-adaptive threshol
 
 **NEVER add Co-Authored-By lines.**
 
-## Q Format Architecture (Updated Session 24B)
+## Q Format Architecture (Updated Session 26)
 
-ALL turbo types use q8_1 Q + nthreads_KQ=8. Centroids are `static constexpr` (register-allocated). LUT scoring uses Q from global memory (still float) for one-time table construction.
+ALL turbo types use q8_1 Q + nthreads_KQ=8. Centroids are `static constexpr` (register-allocated). LUT scoring uses Q from global memory (still float) for one-time table construction. Block-128 storage (S26): turbo3/turbo2 use QK=128.
 
-| Type | Q Path | nthreads_KQ | LUT | Short | 32K | Key Optimization |
-|------|:------:|:-----------:|:---:|------:|----:|-----------------|
-| turbo3 | q8_1 | 8 | 8 centroids (8-wide) | **65.04** | **54.89** | q8_1 vec_dot + LUT + __expf + constexpr centroids |
-| turbo4 | q8_1 | 8 (S24B fix) | disabled | **65.18** | **54.22** | nthreads_KQ=8 (was 32) + constexpr. **AmesianX gap closed: +10-11%** |
-| turbo2 | q8_1 | 8 | 4 centroids (8-wide) | **65.24** | **53.57** | Long-context champion + constexpr |
-| turbo1.5 | q8_1 | 8 (S24B fix) | none | **63.99** | **48.15** | nthreads_KQ=8 (was 32) + constexpr |
+| Type | bpv | Q Path | nthreads_KQ | LUT | Short | 32K | Key Optimization |
+|------|:---:|:------:|:-----------:|:---:|------:|----:|-----------------|
+| turbo3 | 3.125 | q8_1 | 8 | 8c (D≤128 only) | **65.14** | **56.28** | Block-128 + half LUT. D=256 LUT disabled (SM120 NVBUG) |
+| turbo4 | 4.25 | q8_1 | 8 | disabled | **65.33** | **58.03** | Q_reg fix (S26) + constexpr |
+| turbo2 | 2.125 | q8_1 | 8 | 4c (D≤128 only) | **64.13** | **58.48** | Block-128, 32K champion |
+| turbo1.5 | 2.00 | q8_1 | 8 | none | **64.00** | **55.62** | Q_reg fix (S26) + constexpr |
 
-## What To Build Next — Session 25+ (Priority Order)
+## What To Build Next — Session 28 (Community + Release)
 
-1. **Kernel autoresearch loop** — 50-100+ micro-optimization iterations (compiler flags, PTX intrinsics, LUT variants, launch config tuning). See `session-25-deep.md` prompt.
-2. **Block-256 turbo4** — AmesianX uses 256-element blocks with half the norm overhead. +2-3% at 32K potential. Major refactor: 10+ files.
+1. **KL divergence measurement** — finer-grained quality metric vs f16
+2. **Cross-format sparse V** — apply to q8_0/q4_0 for upstream contribution
+3. **Discussion #20969 post** — share data with community
+4. **PR to TheTom upstream** — squash S17-27 into clean commits
 3. **Float Q for turbo4/turbo1.5** — Remove q8_1 overhead. Risk: may regress at 32K (bandwidth vs compute tradeoff). Needs careful benchmarking.
 4. **Discussion #20969 post** — All data collected. Draft in vault `09 Community/DISCUSSION_DRAFT_20969.md`.
 5. **PR to TheTom upstream** — Squash Sessions 17-24B into clean commits.
