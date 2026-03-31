@@ -1,289 +1,287 @@
-# Session 28 — COMMUNITY: KL Divergence, Cross-Format Sparse V, Upstream PR Prep
+# Session 28 — RELEASE: Clean Repo, Standardized Benchmarks, Community Post, PR
 
 ## READ FIRST (MANDATORY)
 
-1. **Read `AGENTS.md`** — follow ALL rules exactly.
+1. **Read `AGENTS.md`** — follow ALL rules.
 2. **Read this entire prompt** before starting any work.
 3. Create branch **`session/28-community`** from `release/cuda-optimized`.
-4. Vault: `/mnt/c/vaults/forge/`. GPU: RTX 5090 32GB (SM120). CUDA 12.8. WSL2.
+4. GPU: RTX 5090 32GB (SM120). CUDA 12.8. WSL2.
 
 ---
 
-## CONTEXT — WHERE WE ARE AFTER S26+S27
+## CONTEXT
 
-### Sessions 26-27 Delivered
-- **S26**: SM120 D=256 bug fixed (LUT disabled at D=256), turbo4/turbo1.5 Q_reg fix, block-128 storage (turbo3 5.12x, turbo2 7.53x), all 4 types beat q8_0 at both short and 32K
-- **S27**: 50-chunk wikitext-103 PPL (all types × 4 contexts), skip rate data (3 thresholds), NIAH on 5090, quality gate script, threshold validated (1e-2 = bit-identical PPL to 1e-6 for turbo2/turbo1.5, +13% free speed)
-- **S27 key findings**: 2-bit PPL delta is inherent to quantization (not threshold), VEC kernel at absolute ceiling (37 failed optimization attempts across S25+S27), 1e-2 threshold correct
+Sessions 25-27 are complete. All bugs fixed, block-128 shipped, quality validated, 37 kernel optimizations attempted (all dead — 168-reg ceiling confirmed). The code is stable and release-ready.
 
-### Current Performance (RTX 5090, 27B Q6_K, block-128)
-
-| Type | bpv | Compression | Short | 32K | PPL 512 |
-|------|:---:|:-----------:|:-----:|:---:|:-------:|
-| q8_0 | 8.5 | 1.9x | 64.06 | 54.01 | 6.759 |
-| turbo4 | 4.25 | 3.8x | 65.33 | 58.03 | 6.825 |
-| turbo3 | 3.125 | 5.12x | 65.14 | 56.28 | 6.852 |
-| turbo2 | 2.125 | 7.53x | 64.13 | 58.48 | 7.080 |
-| turbo1.5 | 2.00 | 8.0x | 64.00 | 55.62 | 7.312 |
-
-### S27 Quality Data
-
-**50-chunk wikitext-103 PPL (vs q8_0)**:
-| Type | ctx=512 | ctx=2048 | ctx=8192 | ctx=32K |
-|------|:-------:|:--------:|:--------:|:------:|
-| turbo4 | +0.77% | +0.53% | +1.22% | +2.35% |
-| turbo3 | +0.77% | +1.39% | +1.81% | +2.84% |
-| turbo2 | +3.37% | +4.77% | +8.06% | +11.93% |
-| turbo1.5 | +6.34% | +9.72% | +13.42% | +23.88% |
-
-**NIAH (5090)**: q8_0=85%, turbo3=70%, turbo2=75%, turbo1.5=35%
-**NIAH (3090 Ti)**: q8_0=84.8%, turbo3=86.4%, turbo2=78.8%
-
-### Cross-GPU S26 Validation
-- **3090 Ti (SM86)**: Block-128 = +4-6% at 32K. Zero regressions. All 5 types generate. turbo2 OC = 80.18 tok/s.
-- **4090M (SM89)**: Block-128 = +10-17% at 32K. Fastest session ever on SM89.
-- **5090 (SM120)**: All types beat q8_0 at both short and 32K.
-
-### What Competitors Are Doing
-- **signalnine's CUDA port** just landed publicly — 46.7 tok/s on RTX 4090 (98% of f16). Our optimized fork is significantly faster.
-- **TheTom** has comprehensive Metal implementation with KLD, NIAH, configuration recommendations, 70B stress test
-- Community interest is high (193 upvotes on r/LocalLLaMA)
-
-### What This Session Does
-Close the remaining gaps vs TheTom and prepare for public community engagement:
-1. KL divergence metrics (finer-grained quality measure)
-2. Cross-format sparse V (q8_0/q4_0 — upstream contribution story)
-3. Discussion #20969 post (share our data)
-4. Upstream PR preparation
-5. README parity with TheTom
+**Now we need to**:
+1. Clean the release branch (remove all dev files)
+2. Run TheTom's standardized benchmark script on OUR build and HIS latest build (apples-to-apples)
+3. Get standardized data from 3090 Ti and 4090M machines
+4. Post to Discussion #20969 with the data
+5. Prepare the upstream PR
 
 ---
 
-## TASK 1: KL Divergence Measurement
+## TASK 1: Clean the Release Branch (FIRST — before anything else)
 
-### Why
-PPL is a single number. KLD shows how the full token probability distribution shifts from the f16 reference. TheTom's data:
-- q8_0: KLD 0.001549, 98.43% same top-p
-- turbo3: KLD 0.016145, 94.31% same top-p
-- turbo4: KLD 0.009633, 95.98% same top-p
+The release branch has dev files that shouldn't be public. Remove them ALL.
 
-### Implementation
-Create `quality-tests/kl_divergence.py`:
-
-1. Start llama-server with f16 KV (baseline)
-2. For 100 wikitext-2 prompts (256 tokens each), request logprobs via `/v1/completions` with `logprobs: 10`
-3. Restart server with each turbo type
-4. Request same logprobs
-5. Compute: KLD, top-p agreement %, delta-p RMS
-
-**Important**: Use `max_tokens: 1` per prompt (we only need the next-token distribution, not generation). This avoids the Qwen 3.5 thinking model issue entirely.
+### Files to Remove from Git Tracking
 
 ```bash
-curl -s http://localhost:8090/v1/completions -H "Content-Type: application/json" -d '{
-  "prompt": "The capital of France is",
-  "max_tokens": 1,
-  "temperature": 0,
-  "logprobs": 10
-}'
+git checkout release/cuda-optimized
+
+# Session prompts
+git rm session-26-blast.md session-26-part2-bugfix.md session-27-quality.md session-27b-threshold.md session-28-community.md
+
+# Quality test results (raw data — keep scripts, remove results)
+git rm quality-tests/niah_results_*.json
+git rm quality-tests/passkey_results_*.json
+git rm quality-tests/skip_rate_*.json
+
+# Dev files
+git rm AGENTS.md
+
+git commit -m "chore: clean release branch — remove session prompts, test results, dev files"
 ```
 
-### Output
+### Files to KEEP on Release
+- `README.md` — the public face
+- `quality-tests/niah_test.py` — useful for users to run their own tests
+- `quality-tests/passkey_retrieval.py` — same
+- `quality-tests/quality-gate.sh` — same
+- `quality-tests/measure_skip_rate.py` — same
+- `quality-tests/run_quality_suite.sh` — same
+- All source code in `ggml/`, `src/`, `common/`, etc.
+
+### Verify .gitignore Blocks Re-addition
+Check that `.gitignore` has:
 ```
-| Type | Mean KLD | Delta-p RMS | Same top-p % |
-|------|----------|-------------|-------------|
-| q8_0 | | | |
-| turbo4 | | | |
-| turbo3 | | | |
-| turbo2 | | | |
-| turbo1.5 | | | |
+/[Ss]ession*
+/SESSION*
+/AGENTS.md
+/CLAUDE.md
+```
+
+### After Cleaning
+```bash
+git push myfork release/cuda-optimized
 ```
 
 ---
 
-## TASK 2: Cross-Format Sparse V Validation
+## TASK 2: Run TheTom's Standardized Benchmark Script
 
 ### Why
-TheTom validated sparse V on q8_0 and q4_0 — it's format-agnostic, not TurboQuant-specific. If we confirm on CUDA, sparse V becomes an **upstream llama.cpp contribution** independent of TurboQuant. Much bigger story.
+TheTom's community uses `turbo-quick-bench.sh` as the standard. Running it on our build gives directly comparable data. Running it on HIS latest build gives an apples-to-apples comparison.
 
-### Current Code
-```cuda
-constexpr bool V_is_low_bpv = (type_V == GGML_TYPE_TURBO2_0 || type_V == GGML_TYPE_TURBO1_5);
-constexpr float sparse_v_threshold_f = V_is_low_bpv ? 1e-2f : 5e-3f;
+### Step A: Run on Our Build
+
+```bash
+# Copy TheTom's benchmark script to our repo
+cp /home/erol/ai/turboquant/research/llama-cpp-turboquant/.trash/research/repos/TheTom-turboquant_plus/scripts/turbo-quick-bench.sh quality-tests/
+
+# Adapt paths for our build
+# The script expects: turbo-quick-bench.sh <model.gguf> [llama_dir]
+# Our llama_dir is the repo root, build is at build/bin/
+
+# Run on 27B Q6_K
+bash quality-tests/turbo-quick-bench.sh --no-ref \
+  /home/erol/ai/turboquant/models/opus-v2-Q6_K.gguf \
+  /home/erol/ai/turboquant/turboquant-kv-cache
+
+# Run on 9B Q8_0
+bash quality-tests/turbo-quick-bench.sh --no-ref \
+  /home/erol/ai/turboquant/models/Qwen3.5-9B-Q8_0.gguf \
+  /home/erol/ai/turboquant/turboquant-kv-cache
 ```
 
-Non-turbo types effectively get threshold=0 (the constexpr evaluates to 5e-3 but the sparse V check is inside the turbo-specific code path).
+**Note**: The script expects `build-turbo/bin/` — you may need to edit it to use `build/bin/` or create a symlink.
 
-### Change
-Apply a conservative threshold (1e-6) to ALL V types by moving the sparse V check outside the turbo-specific block:
+### Step B: Clone and Build TheTom's Latest, Run Same Script
 
-**IMPORTANT**: This is a constexpr change — do NOT make it runtime (S27 proved non-constexpr causes register spill at 168 regs). Keep it as:
-```cuda
-constexpr float sparse_v_threshold_f = V_is_low_bpv ? 1e-2f : 5e-3f;
-// Apply to ALL types, not just turbo
+```bash
+cd /home/erol/ai/turboquant
+git clone https://github.com/TheTom/llama-cpp-turboquant.git thetom-latest
+cd thetom-latest
+git checkout feature/turboquant-kv-cache
+
+cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=120
+cmake --build build -j$(nproc)
+
+# Run same benchmark on same models
+bash scripts/turbo-quick-bench.sh --no-ref \
+  /home/erol/ai/turboquant/models/opus-v2-Q6_K.gguf \
+  /home/erol/ai/turboquant/thetom-latest
 ```
 
-The sparse V check itself may need to be moved outside the `if constexpr (type_K is turbo)` block to apply to q8_0/f16 V types too.
+### Step C: Side-by-Side Comparison Table
 
-### Testing
-1. q8_0 KV: speed at short + 32K BEFORE
-2. Apply change
-3. q8_0 KV: speed at short + 32K AFTER — expect +3-5% at 32K
-4. PPL for q8_0 — must be bit-exact
-5. If confirmed: huge upstream story
+| Metric | Madreag (ours) | TheTom (latest) | Delta |
+|--------|:-:|:-:|:-:|
+| turbo3 PPL ctx=512 | | | |
+| turbo3 decode tg128 | | | |
+| turbo3 NIAH 3/3 | | | |
+| turbo4 PPL ctx=512 | | | |
+| turbo4 decode tg128 | | | |
+
+This is the data that goes in the Discussion post.
 
 ---
 
-## TASK 3: Discussion #20969 Post
+## TASK 3: Prepare 3090 Ti and 4090M Benchmark Prompts
 
-### Content (updated with S26+S27 data)
-1. **Headline**: ALL 4 turbo types beat q8_0 at both short and 32K on SM120. turbo2 at 256K = 36.62 tok/s.
-2. **Performance table**: S26 final numbers with block-128 bpv
-3. **Quality**: 50-chunk wikitext-103 PPL table (S27), KLD data (this session)
-4. **NIAH**: turbo3 86.4% beats q8_0 84.8% on 3090 Ti (sparse V denoising)
-5. **Cross-GPU**: 3 GPUs, 1,351+ iterations, zero failures. 3090 Ti OC data.
-6. **Block-128**: 5.12x turbo3, 7.53x turbo2. HyperionMS2040 SET_ROWS fix.
-7. **SM120 D=256 bug**: NVIDIA NVBUG 5218000/5288270 documented. Workaround in place.
-8. **Configuration recommendations**: reference TheTom's guide, add our CUDA-specific data
-9. **Honest limitations**: 2-bit types degrade at long context (inherent, not threshold). D=256 LUT disabled on SM120.
+Create updated prompts in `/mnt/c/vaults/dump/` for remote machines to run TheTom's benchmark script.
 
-### Attribution (per TheTom's corrections)
-- **TheTom**: Metal implementation, turbo4 resurrection (7 bugs), asymmetric K/V discovery, turbo3 norm correction, block-128 storage research, sparse V concept, quality validation
-- **signalnine**: Original CUDA port (PR #3 to TheTom's repo), InnerQ equalization
-- **spiritbuun**: turbo4 norm correction (separate fork), inverse FWHT prefill
-- **HyperionMS2040**: Block-128 SET_ROWS fix (commit `7cb6edb`)
+### 3090 Ti Prompt (`/mnt/c/vaults/dump/3090ti_s28_bench.md`)
 
-### Tone
-Technical, data-driven, honest about limitations. Show numbers, not claims. Invite testing. Link to repo.
+```markdown
+# 3090 Ti — TheTom Standardized Benchmark
+
+Clone BOTH repos, build both, run turbo-quick-bench.sh on same model.
+
+## Our build:
+git clone https://github.com/Madreag/turbo3-cuda.git madreag-build
+cd madreag-build && git checkout release/cuda-optimized
+cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=86
+cmake --build build -j$(nproc)
+
+## TheTom's build:
+git clone https://github.com/TheTom/llama-cpp-turboquant.git thetom-build
+cd thetom-build && git checkout feature/turboquant-kv-cache
+cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=86
+cmake --build build -j$(nproc)
+
+## Run on 9B Q8_0:
+bash scripts/turbo-quick-bench.sh --no-ref $MODEL madreag-build
+bash scripts/turbo-quick-bench.sh --no-ref $MODEL thetom-build
+
+Upload results to /mnt/c/vaults/dump/3090ti_s28_comparison.md
+```
+
+Same for 4090M with SM89.
+
+---
+
+## TASK 4: KL Divergence Measurement
+
+Same as before — create `quality-tests/kl_divergence.py`, measure all types vs f16. Use `max_tokens: 1` to avoid thinking model issues. This data goes in the Discussion post.
+
+---
+
+## TASK 5: Cross-Format Sparse V
+
+Apply sparse V to q8_0/q4_0 types. Must stay constexpr (S27 proved non-constexpr spills registers). Measure q8_0 speed at 32K before/after. If +3-5% with bit-exact PPL, this is an upstream llama.cpp contribution.
+
+---
+
+## TASK 6: Write Discussion #20969 Post
+
+### Data Sources for the Post
+1. **Speed**: S26 final table (all types, short + 32K) + TheTom comparison from Task 2
+2. **Quality**: S27 wikitext-103 PPL table + KLD from Task 4
+3. **NIAH**: 3090 Ti data (turbo3 86.4% beats q8_0) + 5090 data
+4. **Cross-GPU**: 3090 Ti stock + OC, 4090M, 5090 (from dump folder)
+5. **Compression**: Block-128 bpv (turbo3 5.12x, turbo2 7.53x)
+6. **TheTom comparison**: Apples-to-apples from Task 2
+
+### Structure
+1. Headline numbers
+2. Performance table (standardized via TheTom's bench script)
+3. Quality table (PPL + KLD)
+4. NIAH matrices
+5. Cross-GPU data
+6. What optimizations we did (brief, link to repo for details)
+7. Honest limitations (2-bit degradation at long ctx, SM120 D=256 LUT disabled)
+8. Configuration recommendations (reference TheTom's guide)
+9. Attribution (TheTom, signalnine, spiritbuun, HyperionMS2040)
+10. Link to repo + invite testing
 
 ### Save To
-`/mnt/c/vaults/forge/09 Community/discussion_20969_final.md` — Erol reviews and posts manually.
+`/mnt/c/vaults/forge/09 Community/discussion_20969_final.md`
 
 ---
 
-## TASK 4: Upstream PR Preparation
+## TASK 7: Prepare Upstream PR
 
-### PR to TheTom/llama-cpp-turboquant
+### What Goes in the PR to TheTom/llama-cpp-turboquant
 
-**Include**:
-1. Sparse V skip (type-adaptive thresholds: 5e-3 turbo3/4, 1e-2 turbo2/1.5)
-2. Half-precision LUT (turbo3/turbo2, D≤128 only)
-3. Block-128 storage (QK_TURBO3=128, QK_TURBO2=128) + HyperionMS2040 SET_ROWS fix
-4. nthreads_KQ=8 for all turbo types
+**Include** (squashed into logical commits):
+1. Sparse V type-adaptive thresholds (5e-3/1e-2)
+2. Half-precision LUT (D≤128)
+3. Block-128 storage + SET_ROWS fix (credit HyperionMS2040)
+4. nthreads_KQ=8 all types
 5. constexpr centroids
-6. turbo4/turbo1.5 vec_dot Q_reg fix (use q8_1 Q correctly)
-7. D=256 LUT disable on SM120 (NVIDIA codegen workaround)
+6. turbo4/turbo1.5 vec_dot Q_reg fix
+7. D=256 LUT disable on SM120
 8. L2 prefetch hints
-9. `__expf` fast-math softmax
+9. `__expf` softmax
+10. `__launch_bounds__(128, 3)`
+11. 8-wide LUT scoring
 
-**Do NOT include**:
-- Dead turbo4 LUT code removal (NVCC-specific codegen hack)
-- Session/test files, vault references
-- AGENTS.md, CLAUDE.md
+**Do NOT include**: session files, vault, AGENTS.md, dead code removal hack, quality test JSON results
 
-**Format**: One squashed commit per logical feature. Each includes speed + PPL data. PR description references Discussion #20969.
+### PR Description
+Title: `feat: CUDA optimizations — all types beat q8_0 at 32K, block-128 5.12x compression`
+
+Body: link to Discussion #20969 post, summary table, attribution, test methodology.
 
 ### Save To
-`/mnt/c/vaults/forge/09 Community/upstream_pr_draft.md` — Erol reviews and submits.
+`/mnt/c/vaults/forge/09 Community/upstream_pr_draft.md`
 
 ---
 
-## TASK 5: README Parity with TheTom
+## TASK 8: Update README for Release
 
-### What TheTom Has That We Don't
-- KL divergence data → add from Task 1
-- NIAH depth×context matrices → add from S27 5090 data + 3090 Ti dump data
-- Community hardware section → add 3090 Ti (stock + OC), 4090M data from dump folder
-- Prefill context scaling → we have pp512 data, need pp4096/pp8192/pp32K
-- Configuration recommendations by model type → reference TheTom's guide + our data
-- Real-world server benchmark → would need to run a long-document test
+### Add
+- KLD section (Task 4 data)
+- NIAH depth×context matrices (existing data — format for README)
+- Community hardware: 3090 Ti (stock + OC), 4090M (from dump folder)
+- Configuration recommendations (reference TheTom's guide)
 
-### What We Have That He Doesn't
-- ALL types beat q8_0 at both short AND 32K (he's at ~90% of q8_0)
-- 256K context data (36.62 tok/s turbo2)
-- 3-GPU cross-validation (1,351+ iterations)
-- Full extreme context table (32K through 256K, all types, Q4_K_M)
-- 50-chunk wikitext-103 PPL across 4 context lengths
-- SM120 NVIDIA bug investigation and workaround documentation
-- Contributions section with full attribution
-
-### Priority
-1. KLD section (new data from this session)
-2. NIAH section (existing data — just format it)
-3. Community hardware section (dump folder data)
-4. Configuration recommendations
+### Remove/Clean
+- Any references to session numbers in the main text (keep in Contributions section commits)
+- Any stale numbers (verify all match S26 final)
 
 ---
 
-## TASK 6: Update Documentation and Vault
+## TASK 9: Update Vault and Push
 
-### AGENTS.md
-- Add S28 results (KLD, cross-format sparse V, post/PR status)
-- Mark project as "release-ready"
-
-### Vault
 - `01 Sessions/Session 28.md`
-- `03 Benchmarks/Benchmark Hub.md` — KLD data
+- `03 Benchmarks/Benchmark Hub.md` — KLD data, TheTom comparison
 - `09 Community/discussion_20969_final.md`
 - `09 Community/upstream_pr_draft.md`
 - `00 Dashboard/Project Status.md`
 - `08 Plans/Roadmap.md` — S28 DONE
+- Push to `release/cuda-optimized`
 
 ---
 
-## THETOM'S REFERENCE REPO
-```
-/home/erol/ai/turboquant/research/llama-cpp-turboquant/.trash/research/repos/TheTom-turboquant_plus/
-```
-| File | Relevance |
-|------|-----------|
-| `docs/kl-divergence-results.md` | KLD methodology and reference numbers |
-| `docs/sparse-v-upstream-validation.md` | Cross-format sparse V on q8_0/q4_0 |
-| `docs/upstream-pr-plan.md` | His PR checklist |
-| `docs/turboquant-recommendations.md` | Config recommendations by model |
+## EXECUTION ORDER
 
----
+1. **Clean release branch** (Task 1) — 15 min
+2. **Run TheTom's bench on our build** (Task 2A) — 15 min
+3. **Clone + build TheTom's latest, run bench** (Task 2B) — 30 min
+4. **Write 3090 Ti / 4090M prompts** (Task 3) — 15 min
+5. **KL divergence** (Task 4) — 3-4 hours
+6. **Cross-format sparse V** (Task 5) — 2 hours
+7. **Discussion post draft** (Task 6) — 2 hours
+8. **PR draft** (Task 7) — 2 hours
+9. **README update** (Task 8) — 1 hour
+10. **Vault + push** (Task 9) — 30 min
 
-## MODELS
-
-| Model | Path | Use For |
-|-------|------|---------|
-| Qwen 3.5 27B Q6_K | `models/opus-v2-Q6_K.gguf` | KLD, PPL, speed |
-| MoE 35B-A3B Q4_K_M | `models/Qwen3.5-35B-A3B-Q4_K_M.gguf` | MoE KLD |
-| Qwen 3.5 9B Q8_0 | `models/Qwen3.5-9B-Q8_0.gguf` | Generation tests |
-
----
-
-## WHAT NOT TO DO
-- Do NOT change VEC kernel code structure (37 failed attempts, ceiling confirmed)
-- Do NOT make thresholds non-constexpr (causes register spill, S27 Dead End #1)
-- Do NOT run benchmarks in background (Rule 11)
-- Do NOT post to Discussion #20969 directly — save drafts for Erol to review
-- Do NOT create PRs directly — save descriptions for Erol to submit
-- Do NOT use max_tokens < 200 with Qwen 3.5 for generation (thinking model)
-- For KLD measurement, use max_tokens=1 (next-token logprobs only — avoids thinking issue)
+**Total: ~12-14 hours**
 
 ---
 
 ## SUCCESS CRITERIA
 
-- [ ] KL divergence measured for all types vs f16
-- [ ] Cross-format sparse V validated on q8_0 (speed + PPL)
-- [ ] Discussion #20969 post drafted and saved
-- [ ] Upstream PR description drafted and saved
-- [ ] README matches or exceeds TheTom's coverage
-- [ ] All docs and vault updated
-- [ ] Pushed to release/cuda-optimized
-
----
-
-## ESTIMATED EFFORT
-
-| Task | Time |
-|------|------|
-| KL divergence implementation + measurement | 3-4 hours |
-| Cross-format sparse V | 2 hours |
-| Discussion post draft | 2 hours |
-| Upstream PR description | 2-3 hours |
-| README parity | 2 hours |
-| Documentation | 1 hour |
-| **Total** | **~12-14 hours** |
+- [ ] Release branch clean (no session prompts, test results JSON, AGENTS.md)
+- [ ] TheTom's bench script run on our build + his build (comparison table)
+- [ ] 3090 Ti + 4090M prompts written and placed in dump folder
+- [ ] KLD measured for all types
+- [ ] Cross-format sparse V tested on q8_0
+- [ ] Discussion #20969 post drafted (Erol reviews before posting)
+- [ ] Upstream PR drafted (Erol reviews before submitting)
+- [ ] README fully updated for release
+- [ ] Vault updated, release/cuda-optimized pushed
