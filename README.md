@@ -132,20 +132,20 @@ Validated on 3 NVIDIA GPUs across 3 architecture generations, **1,351+ total sta
 | GPU | SM | VRAM | Stability | PPL Drift | turbo2 > q8_0 at 32K? |
 |-----|:--:|-----:|:---------:|:---------:|:---------------------:|
 | RTX 5090 | SM120 | 32 GB | 340+ iterations | None | Yes (58.48 vs 54.01) |
-| RTX 3090 Ti | SM86 | 24 GB | 486+ iterations, 48 PPL checks | Bit-exact | Yes (78.52 vs 77.12) |
+| RTX 3090 Ti (OC) | SM86 | 24 GB | 486+ iterations, 48 PPL checks | Bit-exact | Yes (80.18 vs 77.60) |
 | RTX 4090M | SM89 | 16 GB | 425+ iterations, 14+ PPL checks | Bit-exact | Yes (55.15 vs 55.13) |
 
-### RTX 3090 Ti (SM86, 24 GB GDDR6X, Qwen 3.5 9B Q8_0)
+### RTX 3090 Ti (SM86, 24 GB GDDR6X, OC +2200 mem, Qwen 3.5 9B Q8_0)
 
 | Type | bpv | Short | 32K | 64K | PPL ctx=512 |
 |------|----:|------:|----:|----:|:-----------:|
-| q8_0 | 8.5 | 91.18 | 77.12 | OOM | 8.525 |
-| turbo4 | 4.25 | 89.83 | 74.61 | — | 8.634 |
-| **turbo3** | **3.125** | **89.78** | **72.26** | **61.09** | 8.624 |
-| **turbo2** | **2.125** | **90.05** | **78.52** | **69.75** | 8.747 |
-| turbo1.5 | 2.00 | 89.91 | 72.39 | 61.12 | 9.402 |
+| q8_0 | 8.5 | 91.18 | 77.60 | OOM | 8.525 |
+| turbo4 | 4.25 | 89.83 | 74.80 | — | 8.634 |
+| **turbo3** | **3.125** | **89.78** | **72.10** | **61.09** | 8.624 |
+| **turbo2** | **2.125** | **90.05** | **80.18** | **69.75** | 8.747 |
+| turbo1.5 | 2.00 | 89.91 | 72.26 | 61.12 | 9.402 |
 
-turbo2 beats q8_0 at 32K (78.52 vs 77.12) and is the 64K champion at 69.75 tok/s. K=turbo3/V=q8_0 PPL (8.515) beats pure q8_0 (8.525) — K compression is free. OC (+2200 mem) pushes turbo2 32K to **80.18 tok/s**.
+turbo2 at 32K = **80.18 tok/s** — beats q8_0 (77.60) by 3.3% at 7.5x compression. turbo2 64K = **69.75 tok/s** where q8_0 OOMs. K=turbo3/V=q8_0 PPL (8.515) beats pure q8_0 (8.525) — K compression is free. OC: +100 core, +2200 mem (golden sample), 516W.
 
 **NIAH** (single needle, 30 tests): q8_0=90%, turbo2=83%, turbo3=80%, turbo1.5=67%.
 
