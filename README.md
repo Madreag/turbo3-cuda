@@ -2,7 +2,7 @@
 
 CUDA implementation of [TurboQuant](https://arxiv.org/abs/2504.19874) (ICLR 2026) KV cache compression for llama.cpp, targeting NVIDIA GPUs (SM86+).
 
-**The short version:** TurboQuant compresses the KV cache 4-8x while being **faster** than uncompressed. At 32K context, ALL 4 turbo types beat q8_0 — turbo2 by **9.8%** at 7.5x compression. At 256K context, turbo2 still generates 36+ tok/s on a consumer RTX 5090 — a context length where f16 KV would OOM.
+**The short version:** TurboQuant compresses the KV cache 4-8x while being **faster** than uncompressed. At 32K context, ALL 4 turbo types beat q8_0 — turbo2 by **8.3%** at 7.5x compression. At 256K context, turbo2 still generates 36+ tok/s on a consumer RTX 5090 — a context length where f16 KV would OOM.
 
 Built on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, native Flash Attention vec_dot, and MMA prefill. All 4 turbo types (turbo4/turbo3/turbo2/turbo1.5) with 36 asymmetric K/V combinations. Validated across 5 models, 3 GPUs, 1,351+ stability iterations with zero failures.
 
@@ -78,7 +78,7 @@ PPL impact: Q4_K_M + turbo3 = 7.127 (+1.39% vs q8_0 = 7.030). Safe on 27B+ model
 | **Best quality** | Q6_K weights + turbo4 KV | `-m model-Q6_K.gguf -ctk turbo4 -ctv turbo4 -fa` |
 | **Quality-optimal asymmetric** | Q6_K weights + K=turbo4/V=q8_0 | `-m model-Q6_K.gguf -ctk turbo4 -ctv q8_0 -fa` |
 | **Maximum compression** | Q4_K_M weights + turbo1.5 KV | `-m model-Q4_K_M.gguf -ctk turbo1.5 -ctv turbo1.5 -fa` |
-| **Boundary V protection** | turbo2 V + q8_0 boundary layers | `TURBO_LAYER_ADAPTIVE=12 -ctk turbo3 -ctv turbo2 -fa` |
+| **Boundary V protection** | turbo2 V (auto-enabled) | `-m model.gguf -ctk turbo3 -ctv turbo2 -fa` (Boundary V activates automatically) |
 
 ## Quick Start
 
@@ -104,7 +104,7 @@ cmake --build build -j$(nproc)
 
 **Notes:**
 - `-fa` enables Flash Attention (required for native turbo decode)
-- Use `-mmp 0` on WSL2 to disable mmap (avoids GPU stalls from page cache)
+- Use `--no-mmap` on WSL2 to disable mmap (avoids GPU stalls from page cache)
 - Adjust `-DCMAKE_CUDA_ARCHITECTURES` for your GPU: `86` (3090 Ti), `89` (4090), `120` (5090)
 
 ## Multi-Model Validation
@@ -131,36 +131,23 @@ Validated on 3 NVIDIA GPUs across 3 architecture generations, **1,351+ total sta
 
 | GPU | SM | VRAM | Stability | PPL Drift | turbo2 > q8_0 at 32K? |
 |-----|:--:|-----:|:---------:|:---------:|:---------------------:|
-| RTX 5090 | SM120 | 32 GB | 340+ iterations | None | Yes (56.02 vs 53.06) |
-| RTX 3090 Ti | SM86 | 24 GB | 486+ iterations, 48 PPL checks | Bit-exact (7.5535) | Yes (77.05 vs 73.06) |
-| RTX 4090M | SM89 | 16 GB | 425 iterations, 14+ PPL checks | Bit-exact (7.5912) | Yes (48.22 vs 45.3) |
+| RTX 5090 | SM120 | 32 GB | 340+ iterations | None | Yes (58.48 vs 54.01) |
+| RTX 3090 Ti | SM86 | 24 GB | 486+ iterations, 48 PPL checks | Bit-exact | Yes (78.52 vs 77.12) |
+| RTX 4090M | SM89 | 16 GB | 425+ iterations, 14+ PPL checks | Bit-exact | Yes (55.15 vs 55.13) |
 
 ### RTX 3090 Ti (SM86, 24 GB GDDR6X, Qwen 3.5 9B Q8_0)
 
 | Type | bpv | Short | 32K | 64K | PPL ctx=512 |
 |------|----:|------:|----:|----:|:-----------:|
-| f16 | 16 | 86.01 | OOM | OOM | — |
-| q8_0 | 8.5 | 85.52 | 73.06 | OOM | 8.525 |
-| turbo4 | 4.25 | 84.62 | 70.95 | 59.80 | 8.634 |
-| **turbo3** | 3.50 | **84.62** | **72.90** | **63.44** | 8.624 |
-| **turbo2** | 2.5 | **85.03** | **77.05** | **70.06** | 8.937 |
-| turbo1.5 | 2.0 | 84.19 | 64.41 | 51.75 | 9.402 |
+| q8_0 | 8.5 | 91.18 | 77.12 | OOM | 8.525 |
+| turbo4 | 4.25 | 89.83 | 74.61 | — | 8.634 |
+| **turbo3** | **3.125** | **89.78** | **72.26** | **61.09** | 8.624 |
+| **turbo2** | **2.125** | **90.05** | **78.52** | **69.75** | 8.747 |
+| turbo1.5 | 2.00 | 89.91 | 72.39 | 61.12 | 9.402 |
 
-turbo2 at 64K = **70.06 tok/s** — runs where q8_0 OOMs. turbo3 32K now **matches q8_0** (72.90 vs 73.06). **486+ stability iterations across 5 builds, PPL bit-exact across all sessions.**
+turbo2 beats q8_0 at 32K (78.52 vs 77.12) and is the 64K champion at 69.75 tok/s. K=turbo3/V=q8_0 PPL (8.515) beats pure q8_0 (8.525) — K compression is free. OC (+2200 mem) pushes turbo2 32K to **80.18 tok/s**.
 
-**Note**: turbo1.5 did not benefit from the Session 25 sparse V optimization — at 1.58 bits per value, V vectors are ternary and have no sparse structure to exploit. turbo3 gained +15% at 32K, turbo2 gained +13%, but turbo1.5 was flat (+0.1% at 32K, -1.0% at 64K). For long-context turbo1.5 use cases, consider asymmetric `-ctk turbo1.5 -ctv turbo2` instead.
-
-**Multi-Model (Session 25, 5 models):**
-
-| Model | D | turbo2 | turbo3 | q8_0 | turbo4 | turbo1.5 |
-|-------|:-:|-------:|-------:|-----:|-------:|---------:|
-| Llama-3.2-1B | 64 | 506 | 513 | 510 | 515 | 514 |
-| Phi-3.5-mini | 96 | 190* | 189* | 190 | 189 | 190 |
-| Phi-4-mini | 128 | 186 | 183 | 197 | 182 | 180 |
-| Llama-3.3-8B | 128 | 112 | 112 | 117 | 111 | 110 |
-| Gemma-3-12B | 256 | 67 | 66 | 70 | 66 | 65 |
-
-\*D=96: graceful non-FA fallback.
+**NIAH** (single needle, 30 tests): q8_0=90%, turbo2=83%, turbo3=80%, turbo1.5=67%.
 
 ### RTX 4090M Laptop (SM89, 16 GB GDDR6, Qwen 3.5 9B Q8_0)
 
@@ -181,7 +168,7 @@ turbo2 at 32K **matches q8_0** (55.15 vs 55.13) on a 16GB laptop GPU. Max contex
 | Phi-4-mini | 3.84B | 128 | 119.79 | 89.12 | **+34%** |
 | Llama-3.3-8B | 8.03B | 128 | 117.02 | 103.35 | **+13%** |
 | Gemma-3-12B | 12.2B | 256 | 82.87 | 77.73 | **+7%** |
-| Qwen 27B | 26.9B | 256 | 56.02 | 53.06 | **+6%** |
+| Qwen 27B | 26.9B | 256 | 58.48 | 54.01 | **+8%** |
 
 turbo2 advantage scales with bandwidth-boundedness: smaller models benefit more.
 
@@ -242,7 +229,7 @@ V type dominates PPL (columns vary more than rows). K compression is nearly free
 
 - **Best quality-per-bit**: `K=turbo4/V=q8_0` asymmetric config actually **beats pure q8_0 PPL** (6.155 vs 6.162 at ctx=2048 on 9B) while using less memory.
 - **Layer-adaptive mode 2**: `TURBO_LAYER_ADAPTIVE=2` closes 40% of the turbo3-to-q8_0 PPL gap at zero performance cost.
-- **Boundary V protection**: `TURBO_LAYER_ADAPTIVE=12` with turbo2 V recovers 75% of the turbo2-to-turbo3 quality gap by protecting first4+last4 layers with q8_0 V (only 12.5% extra V memory).
+- **Boundary V protection**: Auto-enabled when using `-ctv turbo2` (mode 12). Protects first4+last4 layers with q8_0-V, recovers 37-91% of the turbo2-to-turbo3 quality gap. Opt-out: `TURBO_LAYER_ADAPTIVE=0`.
 - **Q4_K_M stacking**: Safe on 27B+ models (PPL +1.39%). For small Q4_K_M models (<10B), use `-ctk q8_0 -ctv turbo3` to avoid catastrophic PPL from double quantization noise in K.
 
 ## Limitations
