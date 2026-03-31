@@ -395,49 +395,46 @@ static __device__ __forceinline__ float vec_dot_fattn_vec_KQ_turbo2_0(
 // TurboQuant4 FA vec_dot and V dequant
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Turbo4 KQ dot product: dequantize K from turbo4 blocks, dot with q8_1 Q.
+// Processes 4 consecutive elements per iteration (matching int32 Q packing).
+// Each qs byte holds 2 nibble-packed 4-bit indices.
 template <int D, int nthreads>
 static __device__ __forceinline__ float vec_dot_fattn_vec_KQ_turbo4_0(
     const char * __restrict__ K_c, const void * __restrict__ Q_v, const int * __restrict__ Q_q8, const void * __restrict__ Q_ds_v) {
 
     const block_turbo4_0 * K_turbo = (const block_turbo4_0 *) K_c;
-    GGML_UNUSED(Q_q8);
-    GGML_UNUSED(Q_ds_v);
+    GGML_UNUSED(Q_v);
 
-    constexpr int cpy_nb = ggml_cuda_get_max_cpy_bytes();
-    constexpr int cpy_ne = cpy_nb / 4;
-
+    const float2 * Q_ds = (const float2 *) Q_ds_v;
     float sum = 0.0f;
 
 #pragma unroll
-    for (int k_KQ_0 = 0; k_KQ_0 < D/2; k_KQ_0 += nthreads*cpy_ne) {
-#pragma unroll
-        for (int k_KQ_1 = 0; k_KQ_1 < cpy_ne; ++k_KQ_1) {
-            const int k_KQ = k_KQ_0 + (threadIdx.x % nthreads)*cpy_ne + k_KQ_1;
+    for (int k_KQ_0 = 0; k_KQ_0 < int(D/sizeof(int)); k_KQ_0 += nthreads) {
+        const int k_KQ = k_KQ_0 + (nthreads == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads);
 
-            const int elem0 = k_KQ * 2;
-            const int ib    = elem0 / QK_TURBO4;
-            const int j0    = elem0 % QK_TURBO4;
+        // 4 consecutive elements from turbo4 K
+        const int elem0 = k_KQ * 4;
+        const int ib    = elem0 / QK_TURBO4;
+        const int j0    = elem0 % QK_TURBO4;   // always 4-aligned (elem0 = k_KQ*4)
 
-            const float norm = __half2float(K_turbo[ib].norm);
+        const float norm = __half2float(K_turbo[ib].norm);
 
-            // 4-bit nibble extract: 2 indices per byte
-            const uint8_t byte0 = K_turbo[ib].qs[j0 / 2];
-            const uint8_t byte1 = K_turbo[ib].qs[(j0 + 1) / 2];
-            const uint8_t idx0 = (byte0 >> ((j0 % 2) * 4)) & 0xF;
-            const uint8_t idx1 = (byte1 >> (((j0 + 1) % 2) * 4)) & 0xF;
+        // 4-bit nibble extract: 2 indices per byte, 4 elements = 2 bytes
+        const uint8_t qs0 = K_turbo[ib].qs[j0 / 2];
+        const uint8_t qs1 = K_turbo[ib].qs[j0 / 2 + 1];
+        const float k0 = TURBO_CENTROIDS_4BIT[(qs0 >> 0) & 0xF] * norm;
+        const float k1 = TURBO_CENTROIDS_4BIT[(qs0 >> 4) & 0xF] * norm;
+        const float k2 = TURBO_CENTROIDS_4BIT[(qs1 >> 0) & 0xF] * norm;
+        const float k3 = TURBO_CENTROIDS_4BIT[(qs1 >> 4) & 0xF] * norm;
 
-            float2 kv;
-            kv.x = TURBO_CENTROIDS_4BIT[idx0] * norm;
-            kv.y = TURBO_CENTROIDS_4BIT[idx1] * norm;
+        // 4 q8_1 Q values (packed int8 + scale)
+        const int   q_word = Q_q8[k_KQ_0/nthreads];
+        const float Q_d    = Q_ds[k_KQ_0/nthreads].x;
 
-#ifdef V_DOT2_F32_F16_AVAILABLE
-            const half2 qv = ((const half2 *) Q_v)[k_KQ_0/nthreads + k_KQ_1];
-            ggml_cuda_mad(sum, make_float2(kv.x, kv.y), __half22float2(qv));
-#else
-            const float2 qv = ((const float2 *) Q_v)[k_KQ_0/nthreads + k_KQ_1];
-            sum += kv.x * qv.x + kv.y * qv.y;
-#endif // V_DOT2_F32_F16_AVAILABLE
-        }
+        sum += (k0 * float((int8_t)((q_word >>  0) & 0xFF)) +
+                k1 * float((int8_t)((q_word >>  8) & 0xFF)) +
+                k2 * float((int8_t)((q_word >> 16) & 0xFF)) +
+                k3 * float((int8_t)((q_word >> 24) & 0xFF))) * Q_d;
     }
 
     return sum;
@@ -504,42 +501,44 @@ static __device__ __forceinline__ void dequantize_V_turbo4_0(const void * __rest
 // TurboQuant1.5 FA vec_dot and V dequant
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Turbo1.5 KQ dot product: dequantize K from turbo1.5 blocks, dot with q8_1 Q.
+// Processes 4 consecutive elements per iteration (matching int32 Q packing).
+// Ternary values: trit ∈ {-1, 0, +1} → value = trit * C * norm where C = 0.107632.
 template <int D, int nthreads>
 static __device__ __forceinline__ float vec_dot_fattn_vec_KQ_turbo1_5(
     const char * __restrict__ K_c, const void * __restrict__ Q_v, const int * __restrict__ Q_q8, const void * __restrict__ Q_ds_v) {
 
     const block_turbo1_5 * K_turbo = (const block_turbo1_5 *) K_c;
-    GGML_UNUSED(Q_q8);
-    GGML_UNUSED(Q_ds_v);
+    GGML_UNUSED(Q_v);
 
-    constexpr int cpy_nb = ggml_cuda_get_max_cpy_bytes();
-    constexpr int cpy_ne = cpy_nb / 4;
-
+    const float2 * Q_ds = (const float2 *) Q_ds_v;
     float sum = 0.0f;
 
 #pragma unroll
-    for (int k_KQ_0 = 0; k_KQ_0 < D/2; k_KQ_0 += nthreads*cpy_ne) {
-#pragma unroll
-        for (int k_KQ_1 = 0; k_KQ_1 < cpy_ne; ++k_KQ_1) {
-            const int k_KQ = k_KQ_0 + (threadIdx.x % nthreads)*cpy_ne + k_KQ_1;
-            const int elem0 = k_KQ * 2;
-            const int ib    = elem0 / QK_TURBO1_5;
-            const int j0    = elem0 % QK_TURBO1_5;
+    for (int k_KQ_0 = 0; k_KQ_0 < int(D/sizeof(int)); k_KQ_0 += nthreads) {
+        const int k_KQ = k_KQ_0 + (nthreads == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads);
 
-            const float norm = __half2float(K_turbo[ib].norm);
+        // 4 consecutive elements from turbo1.5 K
+        const int elem0 = k_KQ * 4;
+        const int ib    = elem0 / QK_TURBO1_5;
+        const int j0    = elem0 % QK_TURBO1_5;
 
-            float2 kv;
-            kv.x = turbo1_5_dequant_element(&K_turbo[ib], j0,     norm);
-            kv.y = turbo1_5_dequant_element(&K_turbo[ib], j0 + 1, norm);
+        const float norm = __half2float(K_turbo[ib].norm);
 
-#ifdef V_DOT2_F32_F16_AVAILABLE
-            const half2 qv = ((const half2 *) Q_v)[k_KQ_0/nthreads + k_KQ_1];
-            ggml_cuda_mad(sum, make_float2(kv.x, kv.y), __half22float2(qv));
-#else
-            const float2 qv = ((const float2 *) Q_v)[k_KQ_0/nthreads + k_KQ_1];
-            sum += kv.x * qv.x + kv.y * qv.y;
-#endif // V_DOT2_F32_F16_AVAILABLE
-        }
+        // Dequantize 4 consecutive trits
+        const float k0 = turbo1_5_dequant_element(&K_turbo[ib], j0,     norm);
+        const float k1 = turbo1_5_dequant_element(&K_turbo[ib], j0 + 1, norm);
+        const float k2 = turbo1_5_dequant_element(&K_turbo[ib], j0 + 2, norm);
+        const float k3 = turbo1_5_dequant_element(&K_turbo[ib], j0 + 3, norm);
+
+        // 4 q8_1 Q values (packed int8 + scale)
+        const int   q_word = Q_q8[k_KQ_0/nthreads];
+        const float Q_d    = Q_ds[k_KQ_0/nthreads].x;
+
+        sum += (k0 * float((int8_t)((q_word >>  0) & 0xFF)) +
+                k1 * float((int8_t)((q_word >>  8) & 0xFF)) +
+                k2 * float((int8_t)((q_word >> 16) & 0xFF)) +
+                k3 * float((int8_t)((q_word >> 24) & 0xFF))) * Q_d;
     }
 
     return sum;
