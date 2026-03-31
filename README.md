@@ -30,7 +30,7 @@ Key takeaways from this table:
 | turbo2 at 256K tokens (Q4_K_M) | **36.62 tok/s** — consumer GPU, 8x cheaper KV than f16 |
 | 8B Llama-3.3 turbo3 at 32K | **105.64 tok/s** (+28% from sparse V skip) |
 | MoE (Qwen 3.5 35B-A3B) turbo3 | **195 tok/s** (+107% vs signalnine's original) |
-| NIAH retrieval (3090 Ti) | turbo3 **86.4%** beats q8_0 84.8% — sparse V denoising effect |
+| NIAH retrieval (3 GPUs) | q8_0/turbo3/turbo2 all **85-90%** — turbo matches q8_0 accuracy |
 | Stability across 3 GPUs | **1,351+ iterations, 0 failures, PPL bit-exact** |
 
 ## Quality (Perplexity)
