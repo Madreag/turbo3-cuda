@@ -1,0 +1,8 @@
+{
+  "type": "turbo4",
+  "vs": "f16",
+  "kld_mean": 0.00648486642849674,
+  "top1_agreement_pct": 99.0,
+  "delta_p_rms": 0.048830327838350555,
+  "n_prompts": 100
+}
