@@ -4,7 +4,7 @@ CUDA implementation of [TurboQuant](https://arxiv.org/abs/2504.19874) (ICLR 2026
 
 **The short version:** TurboQuant compresses the KV cache 4-8x while being **faster** than uncompressed. At 32K context, ALL 4 turbo types beat q8_0 — turbo2 by **9.8%** at 7.5x compression. At 256K context, turbo2 still generates 36+ tok/s on a consumer RTX 5090 — a context length where f16 KV would OOM.
 
-Built on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, native Flash Attention vec_dot, and MMA prefill. All 4 turbo types (turbo4/turbo3/turbo2/turbo1.5) with 36 asymmetric K/V combinations. Validated across 5 models, 3 GPUs, 1,251+ stability iterations with zero failures.
+Built on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, native Flash Attention vec_dot, and MMA prefill. All 4 turbo types (turbo4/turbo3/turbo2/turbo1.5) with 36 asymmetric K/V combinations. Validated across 5 models, 3 GPUs, 1,351+ stability iterations with zero failures.
 
 ## Performance (RTX 5090, Qwen 3.5 27B Q6_K)
 
@@ -31,7 +31,7 @@ Key takeaways from this table:
 | 8B Llama-3.3 turbo3 at 32K | **105.64 tok/s** (+28% from sparse V skip) |
 | MoE (Qwen 3.5 35B-A3B) turbo3 | **195 tok/s** (+107% vs signalnine's original) |
 | NIAH retrieval (3090 Ti) | turbo3 **86.4%** beats q8_0 84.8% — sparse V denoising effect |
-| Stability across 3 GPUs | **1,251+ iterations, 0 failures, PPL bit-exact** |
+| Stability across 3 GPUs | **1,351+ iterations, 0 failures, PPL bit-exact** |
 
 ## Quality (Perplexity)
 
@@ -127,7 +127,7 @@ The VEC Flash Attention kernel supports **D=64, D=128, D=256** (`D % 64 == 0` re
 
 ## Cross-GPU Validation
 
-Validated on 3 NVIDIA GPUs across 3 architecture generations, **1,251+ total stability iterations, zero failures**:
+Validated on 3 NVIDIA GPUs across 3 architecture generations, **1,351+ total stability iterations, zero failures**:
 
 | GPU | SM | VRAM | Stability | PPL Drift | turbo2 > q8_0 at 32K? |
 |-----|:--:|-----:|:---------:|:---------:|:---------------------:|
@@ -213,6 +213,48 @@ turbo2 and turbo3 are **faster than f16 and q8_0 at 65K+**. At 256K, only turbo 
 - **V sinks**: Dead end — register pressure causes -12.7% speed regression at 32K.
 - **FP4 tensor core acceleration**: Not viable. Q values are too small for E2M1 (99.5% map to zero), and no mixed fp16×E2M1 MMA instruction exists on SM120.
 - **Known Gemma 3 issues**: Gibberish after context shift and slow quantized KV cache are upstream llama.cpp bugs, not TurboQuant-specific.
+
+## Acknowledgments and Contributions
+
+### This Fork (Madreag)
+
+CUDA kernel optimizations, cross-GPU validation, and quality testing by [@Madreag](https://github.com/Madreag):
+
+**Kernel Optimizations:**
+- 8-wide LUT scoring for turbo3/turbo2 — 2 qs bytes per iteration, +4.7% at 32K
+- Half-precision shared memory LUT (float→half) — halves shmem bandwidth, +2.45% at 32K
+- `__expf` fast-math softmax — all 5 sites in VEC kernel, +3.69% at 32K, PPL bit-exact
+- `nthreads_KQ=8` for all turbo types — 4 interleaved dots/warp, up to +17.7% at 32K
+- `static constexpr __device__` centroid arrays — register-allocated, 0 latency
+- L2 prefetch hints in VEC decode loop — +2.9% at 32K
+- `__launch_bounds__(128, 3)` occupancy fix — 2→3 blocks/SM, +7-13% at 32K
+- Sparse V threshold escalation (1e-6→5e-3/1e-2) — type-adaptive, +5-28% at 32K, PPL bit-exact
+- D=256 LUT disable for SM120 — workaround for NVIDIA codegen bug (NVBUG 5218000/5288270)
+- Block-128 CUDA validation — turbo3 5.12x compression, turbo2 7.53x
+
+**Architecture & Features:**
+- All 4 turbo types ported to CUDA (turbo4, turbo3, turbo2, turbo1.5)
+- 36 asymmetric K×V combinations with full VEC template instances
+- 15 layer-adaptive modes (KV ordinal-based, hybrid architecture compatible)
+- Graph-compatible attention sinks (`__device__` + `cudaMemcpyAsync`)
+- D=64/128/256 FA dispatch with graceful D=96 fallback
+
+**Validation:**
+- 1,351+ stability iterations across 3 NVIDIA GPUs (SM86/SM89/SM120), zero failures
+- 5-model architecture sweep (D=64/96/128/256, GQA 1:1 to 4:1)
+- NIAH quality testing: turbo3 86.4% beats q8_0 84.8% — sparse V denoising effect
+- Extreme context: turbo2 at 256K = 36.62 tok/s on consumer RTX 5090
+
+### Upstream Contributors
+
+- **[TheTom](https://github.com/TheTom)** — Metal implementation, turbo4 resurrection (7 bugs fixed), asymmetric K/V discovery, turbo3 norm correction, block-128 storage research, sparse V concept, quality validation methodology
+- **[signalnine](https://github.com/signalnine)** — Original CUDA port of TurboQuant for llama.cpp (PR #3 to TheTom's repo), InnerQ per-channel equalization
+- **[spiritbuun](https://github.com/spiritbuun)** — turbo4 norm correction (separate CUDA fork), inverse FWHT prefill optimization
+- **[HyperionMS2040](https://github.com/HyperionMS2040)** — Block-128 SET_ROWS warp-to-block mapping fix (`7cb6edb`), validated PPL-identical on SM86
+
+### Paper
+
+[TurboQuant: Online Vector Quantization for KV Cache Compression](https://arxiv.org/abs/2504.19874) — Google Research, ICLR 2026.
 
 ---
 
