@@ -164,17 +164,15 @@ turbo2 at 64K = **70.06 tok/s** — runs where q8_0 OOMs. turbo3 32K now **match
 
 ### RTX 4090M Laptop (SM89, 16 GB GDDR6, Qwen 3.5 9B Q8_0)
 
-> **Note**: Measured pre-Session 25. Retest with S25 sparse V optimizations pending.
+| Type | bpv | Short | 32K | PPL ctx=512 |
+|------|----:|------:|----:|:-----------:|
+| q8_0 | 8.5 | 58.88 | 55.13 | 9.374 |
+| turbo4 | 4.25 | 58.83 | 52.80 | 9.535 |
+| **turbo3** | **3.125** | 52.84 | **51.52** | 9.683 |
+| **turbo2** | **2.125** | **57.68** | **55.15** | 9.584 |
+| turbo1.5 | 2.00 | 56.87 | 51.36 | 10.394 |
 
-| Type | bpv | Short | 32K | 65K (Q4_K_M) | PPL ctx=512 |
-|------|----:|------:|----:|----:|:-----------:|
-| q8_0 | 8.5 | ~54 | 45.3 | — | 8.477 |
-| turbo4 | 4.25 | ~53 | 44.48 | — | 8.598 |
-| **turbo3** | 3.50 | ~53 | 43.24 | 46.89 | 8.586 |
-| **turbo2** | 2.5 | ~53 | **47.77** | **55.81** | 8.898 |
-| turbo1.5 | 2.0 | ~52 | 44.13 | 46.71 | 9.211 |
-
-turbo2 at 65K on Q4_K_M = **55.81 tok/s** on a laptop GPU. Best config for 16 GB: Q4_K_M weights + turbo2 KV.
+turbo2 at 32K **matches q8_0** (55.15 vs 55.13) on a 16GB laptop GPU. Max context capped at 32K (65K crashes WSL2 OOM). NIAH: q8_0/turbo3/turbo2 all 90%, turbo1.5 35%.
 
 ### 32K Context — turbo2 Beats q8_0 on ALL Models (RTX 5090)
 
@@ -197,6 +195,48 @@ turbo2 advantage scales with bandwidth-boundedness: smaller models benefit more.
 | 256K | OOM | OOM | OOM | 29.84 | **36.62** | 17.53 |
 
 turbo2 and turbo3 are **faster than f16 and q8_0 at 65K+**. At 256K, only turbo types fit in 32GB VRAM.
+
+## KL Divergence vs f16 (RTX 5090, 27B Q6_K, 100 prompts)
+
+| Type | KL Divergence | Top-1 Agreement | Delta-p RMS |
+|------|:------------:|:---------------:|:-----------:|
+| q8_0 | 0.000408 | 100.0% | 0.0153 |
+| turbo4 | 0.006485 | 99.0% | 0.0488 |
+| turbo3 | 0.012495 | 93.0% | 0.0664 |
+| turbo2 | 0.032700 | 91.0% | 0.1146 |
+| turbo1.5 | 0.062681 | 88.0% | 0.1502 |
+
+## Prefill Context Scaling (RTX 5090, 27B Q6_K, tok/s)
+
+| Context | q8_0 | turbo4 | turbo3 | turbo2 | turbo1.5 |
+|---------|:----:|:------:|:------:|:------:|:--------:|
+| pp512 | 3,512 | 3,548 | 3,547 | 3,649 | 3,577 |
+| pp4096 | 3,457 | 3,494 | 3,495 | 3,452 | 3,467 |
+| pp8192 | 3,390 | 3,390 | 3,414 | 3,394 | 3,394 |
+| pp16384 | 3,347 | 3,304 | 3,304 | 3,304 | 3,304 |
+| pp32768 | 2,839 | 2,815 | 2,801 | 2,805 | 2,808 |
+
+Prefill auto-dequants turbo→fp16 and uses MMA/TILE kernels. All types track q8_0 with negligible overhead.
+
+## Sparse V Skip — Zero Quality Cost, Free Speed
+
+| Metric | Sparse V ON | Sparse V OFF | Delta |
+|--------|:-----------:|:------------:|:-----:|
+| turbo3 PPL ctx=512 | 6.7251 | 6.7251 | **0.000** |
+| turbo3 32K tok/s | ~53.7 | 51.34 | **+4.6% speed** |
+
+Sparse V skips V dequantization for attention positions with negligible weight. Proven zero quality impact. Type-adaptive thresholds: 5e-3 for turbo3/turbo4, 1e-2 for turbo2/turbo1.5.
+
+## Asymmetric K/V Quality Matrix (PPL ctx=512, 27B Q6_K)
+
+| K \ V | q8_0 | turbo4 | turbo3 | turbo2 |
+|-------|:----:|:------:|:------:|:------:|
+| q8_0 | 6.640 | 6.694 | 6.689 | 6.863 |
+| turbo4 | 6.658 | 6.710 | 6.709 | 6.882 |
+| turbo3 | 6.670 | 6.726 | 6.725 | 6.885 |
+| turbo2 | 6.817 | 6.869 | 6.843 | 7.040 |
+
+V type dominates PPL (columns vary more than rows). K compression is nearly free — K=turbo3/V=q8_0 is almost identical to q8_0/q8_0.
 
 ## Tips
 
