@@ -13,7 +13,7 @@ Built on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, na
 | q8_0 | 8.5 | 1.9x | 64.06 tok/s | 54.01 | 6.759 | 5.674 |
 | **turbo4** | **4.25** | **3.8x** | **65.33** | **58.03** | 6.825 (+0.97%) | 5.694 |
 | **turbo3** | **3.125** | **5.12x** | **65.14** | **56.28** | 6.852 (+1.38%) | **5.674 (=q8_0)** |
-| **turbo2** | **2.125** | **7.53x** | **64.13** | **58.48** | 7.080 (+4.75%) | 5.892 |
+| **turbo2** | **2.125** | **7.53x** | **64.13** | **58.48** | 7.121 (+5.35%) | 5.873 |
 | **turbo1.5** | **2.00** | **8.0x** | **64.00** | **55.62** | 7.312 (+8.18%) | 6.103 |
 
 Key takeaways from this table:
@@ -30,7 +30,7 @@ Key takeaways from this table:
 | turbo2 at 256K tokens (Q4_K_M) | **36.62 tok/s** — consumer GPU, 8x cheaper KV than f16 |
 | 8B Llama-3.3 turbo3 at 32K | **105.64 tok/s** (+28% from sparse V skip) |
 | MoE (Qwen 3.5 35B-A3B) turbo3 | **195 tok/s** (+107% vs signalnine's original) |
-| NIAH retrieval (3 GPUs) | q8_0/turbo3/turbo2 all **85-90%** — turbo matches q8_0 accuracy |
+| NIAH retrieval (3 GPUs) | **100% on 5090**, all types **92% on 3090 Ti** (model-limited, not turbo) |
 | Stability across 3 GPUs | **1,351+ iterations, 0 failures, PPL bit-exact** |
 
 ## Quality (Perplexity)
@@ -38,10 +38,10 @@ Key takeaways from this table:
 | Type | bpv | PPL ctx=512 | vs q8_0 | PPL ctx=2048 | vs q8_0 |
 |------|----:|:-----------:|--------:|:------------:|--------:|
 | q8_0 | 8.5 | 6.759 | — | 5.674 | — |
-| turbo4 | 4.25 | 6.825 | +0.97% | 5.694 | +0.35% |
+| turbo4 | 4.25 | 6.825 | +0.97% | 5.694 | +0.34% |
 | turbo3 | 3.125 | 6.852 | +1.38% | **5.674** | **0.00%** |
-| turbo2 | 2.125 | 7.080 | +4.75% | 5.892 | +3.84% |
-| turbo1.5 | 2.0 | 7.312 | +8.18% | 6.103 | +7.56% |
+| turbo2 | 2.125 | 7.121 | +5.35% | 5.873 | +3.50% |
+| turbo1.5 | 2.0 | 7.312 | +8.18% | 6.103 | +7.55% |
 
 ## Which Mode Should I Use?
 
@@ -132,22 +132,22 @@ Validated on 3 NVIDIA GPUs across 3 architecture generations, **1,351+ total sta
 | GPU | SM | VRAM | Stability | PPL Drift | turbo2 > q8_0 at 32K? |
 |-----|:--:|-----:|:---------:|:---------:|:---------------------:|
 | RTX 5090 | SM120 | 32 GB | 340+ iterations | None | Yes (58.48 vs 54.01) |
-| RTX 3090 Ti (OC) | SM86 | 24 GB | 486+ iterations, 48 PPL checks | Bit-exact | Yes (80.18 vs 77.60) |
+| RTX 3090 Ti (OC) | SM86 | 24 GB | 486+ iterations, 48 PPL checks | Bit-exact | Yes (81.58 vs 77.44) |
 | RTX 4090M | SM89 | 16 GB | 425+ iterations, 14+ PPL checks | Bit-exact | Yes (55.15 vs 55.13) |
 
 ### RTX 3090 Ti (SM86, 24 GB GDDR6X, OC +2200 mem, Qwen 3.5 9B Q8_0)
 
 | Type | bpv | Short | 32K | 64K | PPL ctx=512 |
 |------|----:|------:|----:|----:|:-----------:|
-| q8_0 | 8.5 | 91.18 | 77.60 | OOM | 8.525 |
-| turbo4 | 4.25 | 89.83 | 74.80 | — | 8.634 |
-| **turbo3** | **3.125** | **89.78** | **72.10** | **61.09** | 8.624 |
-| **turbo2** | **2.125** | **90.05** | **80.18** | **69.75** | 8.747 |
-| turbo1.5 | 2.00 | 89.91 | 72.26 | 61.12 | 9.402 |
+| q8_0 | 8.5 | 91.01 | 77.44 | OOM | 8.525 |
+| turbo4 | 4.25 | 90.03 | 75.55 | OOM | 8.634 |
+| **turbo3** | **3.125** | **90.35** | **75.01** | **61.47** | 8.624 |
+| **turbo2** | **2.125** | **90.75** | **81.58** | **72.79** | 8.747 |
+| turbo1.5 | 2.00 | 90.13 | 74.85 | 63.44 | 9.402 |
 
-turbo2 at 32K = **80.18 tok/s** — beats q8_0 (77.60) by 3.3% at 7.5x compression. turbo2 64K = **69.75 tok/s** where q8_0 OOMs. K=turbo3/V=q8_0 PPL (8.515) beats pure q8_0 (8.525) — K compression is free. OC: +100 core, +2200 mem (golden sample), 516W.
+turbo2 at 32K = **81.58 tok/s** — beats q8_0 (77.44) by 5.3% at 7.5x compression. turbo2 64K = **72.79 tok/s** where q8_0 OOMs. K=turbo3/V=q8_0 PPL (8.515) beats pure q8_0 (8.525) — K compression is free. OC: +100 core, +2200 mem (golden sample), 516W. Speed measured with `-d` flag (tg128 @ depth), ±0.3% variance.
 
-**NIAH** (single needle, 30 tests): q8_0=90%, turbo2=83%, turbo3=80%, turbo1.5=67%.
+**NIAH** (25 tests, 4K-64K, max_tokens=4000): q8_0=turbo3=turbo2=**92%**, turbo1.5=**100%**. With sufficient token budget, all types converge — remaining failures at 32K/64K depth 10% are model-specific, not turbo degradation.
 
 ### RTX 4090M Laptop (SM89, 16 GB GDDR6, Qwen 3.5 9B Q8_0)
 
@@ -155,11 +155,11 @@ turbo2 at 32K = **80.18 tok/s** — beats q8_0 (77.60) by 3.3% at 7.5x compressi
 |------|----:|------:|----:|:-----------:|
 | q8_0 | 8.5 | 58.88 | 55.13 | 9.374 |
 | turbo4 | 4.25 | 58.83 | 52.80 | 9.535 |
-| **turbo3** | **3.125** | 52.84 | **51.52** | 9.683 |
+| **turbo3** | **3.125** | **58.50** | **51.52** | 9.683 |
 | **turbo2** | **2.125** | **57.68** | **55.15** | 9.584 |
 | turbo1.5 | 2.00 | 56.87 | 51.36 | 10.394 |
 
-turbo2 at 32K **matches q8_0** (55.15 vs 55.13) on a 16GB laptop GPU. Max context capped at 32K (65K crashes WSL2 OOM). NIAH: q8_0/turbo3/turbo2 all 90%, turbo1.5 35%.
+All types 57-59 tok/s at short context after GPU warmup. turbo2 at 32K **matches q8_0** (55.15 vs 55.13) on a 16GB laptop GPU. Max context capped at 32K (65K crashes WSL2 OOM). NIAH (max_tokens=2000): q8_0/turbo3/turbo2 all 90%, turbo1.5 35%. Retest with 4000 tokens pending.
 
 ### 32K Context — turbo2 Beats q8_0 on ALL Models (RTX 5090)
 
@@ -241,6 +241,34 @@ V type dominates PPL (columns vary more than rows). K compression is nearly free
 - **FP4 tensor core acceleration**: Not viable. Q values are too small for E2M1 (99.5% map to zero), and no mixed fp16×E2M1 MMA instruction exists on SM120.
 - **Known Gemma 3 issues**: Gibberish after context shift and slow quantized KV cache are upstream llama.cpp bugs, not TurboQuant-specific.
 
+## Madreag vs TheTom — Head-to-Head (RTX 5090, 27B Q6_K)
+
+Same model, same GPU, back-to-back measurement. TheTom build: `llama-cpp-turboquant @ 5364f8a` (latest with sparse V + Boundary V).
+
+### Decode Speed (tg128)
+
+| Type | Madreag | TheTom | Advantage |
+|------|:-------:|:------:|:---------:|
+| q8_0 short | 64.11 | 59.74 | **+7.3%** |
+| turbo4 short | 63.89 | 57.90 | **+10.3%** |
+| turbo3 short | 63.95 | 58.33 | **+9.6%** |
+| turbo2 short | 64.36 | 59.37 | **+8.4%** |
+| turbo3 32K | 53.20 | 44.16 | **+20.5%** |
+| turbo2 32K | 55.24 | ~50.0 | **+10.5%** |
+| turbo4 32K | 54.05 | ~37.2 | **+45.3%** |
+
+32K measured with `-d 32768` flag. Madreag's kernel optimizations (LUT scoring, nthreads_KQ=8, sparse V) give 8-10% at short context and 10-45% at 32K.
+
+### Quality (wikitext-2, 8 chunks)
+
+| Metric | Madreag | TheTom |
+|--------|:-------:|:------:|
+| q8_0 PPL 512 | 6.7590 | 6.7590 |
+| turbo3 PPL 512 | 6.8522 | 6.8380 |
+| turbo3 PPL 2048 | **5.6744** (=q8_0) | 5.6997 |
+
+q8_0 identical. turbo3 at ctx=2048: Madreag equals q8_0 exactly, TheTom +0.45%.
+
 ## Acknowledgments and Contributions
 
 ### This Fork (Madreag)
@@ -269,7 +297,7 @@ CUDA kernel optimizations, cross-GPU validation, and quality testing by [@Madrea
 **Validation:**
 - 1,351+ stability iterations across 3 NVIDIA GPUs (SM86/SM89/SM120), zero failures
 - 5-model architecture sweep (D=64/96/128/256, GQA 1:1 to 4:1)
-- NIAH quality testing: turbo3 86.4% beats q8_0 84.8% — sparse V denoising effect
+- NIAH quality testing across 3 GPUs (4K-64K): **100% on 5090** (max_tokens=4000), all types **92% on 3090 Ti** (model-limited)
 - Extreme context: turbo2 at 256K = 36.62 tok/s on consumer RTX 5090
 
 ### Upstream Contributors

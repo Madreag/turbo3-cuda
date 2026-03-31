@@ -135,6 +135,7 @@ def main():
     parser.add_argument("--essays-dir", default=None, help="Path to Paul Graham essays")
     parser.add_argument("--output", default=None, help="Output JSON file")
     parser.add_argument("--label", default="turbo3", help="Label for this test run")
+    parser.add_argument("--max-tokens", type=int, default=2000, help="Max tokens for generation")
     args = parser.parse_args()
 
     base_url = f"http://{args.host}:{args.port}"
@@ -180,7 +181,7 @@ def main():
                 )
 
                 start = time.time()
-                response = query_server(base_url, prompt)
+                response = query_server(base_url, prompt, max_tokens=args.max_tokens)
                 elapsed = time.time() - start
 
                 correct = evaluate_response(response)
