@@ -239,11 +239,97 @@ Any threshold changes in this session should be re-validated on the 3090 Ti and 
 
 ---
 
+## TASK 8: Re-run NIAH on 5090 (All Types)
+
+The S25 NIAH data from the 5090 is INVALID (collected before D=256 fix and Q_reg fix). Now that both bugs are fixed, we need fresh 5090 NIAH data for ALL types — especially turbo1.5 which was 0/66 before the fix.
+
+```bash
+for TYPE in q8_0 turbo3 turbo2 turbo1.5; do
+  echo "=== NIAH $TYPE ==="
+  ./build/bin/llama-server -m /home/erol/ai/turboquant/models/Qwen3.5-9B-Q8_0.gguf \
+    -ctk $TYPE -ctv $TYPE -fa on -ngl 99 -c 65536 --port 8090 --no-mmap --log-disable &
+  sleep 30
+  python3 quality-tests/niah_test.py --port 8090 --label ${TYPE}_5090 \
+    --contexts "4096,8192,16384,32768" --depths "10,25,50,75,90" --reps 1
+  pkill -f "llama-server.*8090"; sleep 20
+done
+```
+
+**Remember**: Qwen 3.5 is a thinking model. The NIAH scripts must use `max_tokens: 500`.
+
+Expected: turbo3 should match or beat q8_0 (as seen on 3090 Ti). turbo1.5 should now produce real results.
+
+---
+
+## TASK 9: turbo4 Long-Context PPL Check
+
+The wikitext-103 table shows turbo4 at +2.35% at 32K (threshold 5e-3). Check if this grows at 64K/131K or if turbo4 is stable. Run turbo4 at 1e-6 as well to see if the 5e-3 threshold contributes.
+
+```bash
+MODEL=/home/erol/ai/turboquant/models/opus-v2-Q6_K.gguf
+WIKI103=/home/erol/ai/turboquant/wikitext-103-raw-v1/wiki.test.raw
+
+# turbo4 at current threshold (5e-3) — only 9 chunks fit at 32K
+./build/bin/llama-perplexity -m $MODEL -f $WIKI103 -c 32768 -ctk turbo4 -ctv turbo4 -fa on --chunks 50 -ngl 99 --no-mmap
+```
+
+Then with 1e-6 (same temp change as Task 1), check if turbo4 PPL delta at 32K drops.
+
+---
+
+## TASK 10: Asymmetric Threshold Test — K=turbo2 Speed with Better V Quality
+
+S25 found that **K type determines 32K speed, V type barely matters** (5-7% spread). The sparse V threshold only affects the V accumulation loop — K scoring has no threshold.
+
+**Idea**: Use turbo2 K (fastest K scoring) with turbo3 V at 5e-3 threshold (proven quality). This gives turbo2-level speed with turbo3-level V quality.
+
+```bash
+# K=turbo2, V=turbo3 — asymmetric speed+quality combo
+./build/bin/llama-bench -m $MODEL -fa 1 -ctk turbo2 -ctv turbo3 -d 32768 -ngl 99 -t 1 -r 1 -p 0 -n 32 -mmp 0 > /dev/null 2>&1
+./build/bin/llama-bench -m $MODEL -fa 1 -ctk turbo2 -ctv turbo3 -d 32768 -ngl 99 -t 1 -r 5 -p 0 -n 32 -mmp 0
+
+# Also PPL
+./build/bin/llama-perplexity -m $MODEL -f $WIKI103 -c 512 -ctk turbo2 -ctv turbo3 -fa on --chunks 50 -ngl 99 --no-mmap
+./build/bin/llama-perplexity -m $MODEL -f $WIKI103 -c 32768 -ctk turbo2 -ctv turbo3 -fa on --chunks 50 -ngl 99 --no-mmap
+```
+
+If K=turbo2/V=turbo3 gives turbo2-level speed with < 3% PPL delta at 32K, this becomes the new "long-context champion" recommended config.
+
+---
+
+## TASK 11: Check `/mnt/c/vaults/dump/` for Incoming Data
+
+The 3090 Ti and 4090M are running quality tests (passkey + NIAH) with the S26 build. Results will appear in the dump folder. Check:
+
+```bash
+ls -la /mnt/c/vaults/dump/*quality* /mnt/c/vaults/dump/*passkey* /mnt/c/vaults/dump/*niah* 2>/dev/null
+```
+
+If results arrive during this session, analyze them and add to the vault.
+
+---
+
+## TASK 12: Push to Release Branch
+
+**The current release branch has the 1e-2 threshold for turbo2/turbo1.5** which is now known to cause +12-24% PPL degradation at 32K. Once the optimal threshold is found, merge and push immediately:
+
+```bash
+git checkout release/cuda-optimized
+git merge session/27-quality
+git push myfork release/cuda-optimized
+git checkout session/27-quality
+```
+
+This is urgent — anyone using the release branch with turbo2 at long context is getting degraded quality.
+
+---
+
 ## MODELS
 
 | Model | Path | Use For |
 |-------|------|---------|
-| Qwen 3.5 27B Q6_K | `models/opus-v2-Q6_K.gguf` | PPL, speed |
+| Qwen 3.5 27B Q6_K | `models/opus-v2-Q6_K.gguf` | PPL, speed benchmarks |
+| Qwen 3.5 9B Q8_0 | `models/Qwen3.5-9B-Q8_0.gguf` | NIAH, generation tests |
 | Wikitext-103 raw | `wikitext-103-raw-v1/wiki.test.raw` | 50-chunk PPL validation |
 
 ---
@@ -257,16 +343,21 @@ The S25 sparse V optimization gave us huge speed gains:
 
 But S27 revealed that turbo2/turbo1.5 pay a **hidden quality tax at long context** that our short-context PPL tests didn't catch. The threshold that's optimal for turbo3 (5e-3) may be too aggressive for lower-bpv types that carry less information per V position.
 
-The goal of this session is to find the right threshold for each type — maximizing speed while keeping quality degradation under 5% at 32K.
+The goal of this session is to find the right threshold for each type — maximizing speed while keeping quality degradation under 5% at 32K. Additionally, the asymmetric K=turbo2/V=turbo3 config may give us the best of both worlds.
 
 ---
 
 ## SUCCESS CRITERIA
 
 - [ ] Control test done: turbo2/turbo1.5 at 1e-6 threshold, PPL at 512 and 32K
-- [ ] Root cause confirmed (threshold vs inherent)
+- [ ] Root cause confirmed (threshold vs inherent quantization)
 - [ ] If threshold: optimal value found for turbo2 and turbo1.5
 - [ ] Speed impact measured for the new threshold
-- [ ] Wikitext-103 re-validated with new thresholds
+- [ ] Wikitext-103 re-validated with new thresholds (turbo2/turbo1.5 delta < 5% at 32K)
+- [ ] turbo4 long-context PPL checked
+- [ ] K=turbo2/V=turbo3 asymmetric combo tested (speed + PPL at 32K)
+- [ ] NIAH re-run on 5090 (all types including fixed turbo1.5)
+- [ ] Dump folder checked for 3090 Ti / 4090M quality results
 - [ ] Quality gate passes
+- [ ] Pushed to release/cuda-optimized (threshold fix is urgent)
 - [ ] Docs and vault updated
