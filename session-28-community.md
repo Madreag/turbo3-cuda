@@ -135,7 +135,7 @@ The post should include:
 5. **Cross-GPU validation**: 1,121+ iterations across SM86/89/120
 6. **Key optimizations**: sparse V skip, LUT scoring, block-128 storage
 7. **Configuration recommendations**: which mode for which use case
-8. **Acknowledgments**: TheTom (Metal implementation, block-128 research, quality validation), signalnine (CUDA port base), spiritbuun (norm correction)
+8. **Acknowledgments**: TheTom (Metal implementation, turbo4 resurrection, asymmetric K/V discovery, turbo3 norm correction, block-128 research, quality validation), signalnine (CUDA port — PR #3 to TheTom's repo), spiritbuun (turbo4 norm correction, separate CUDA fork), HyperionMS2040 (block-128 SET_ROWS fix)
 
 ### Tone
 Technical but accessible. Show data, not claims. Link to the repo. Invite testing.

@@ -31,7 +31,7 @@ TheTom's Metal implementation (`turboquant_plus`) has several features we lack. 
 ## TASK 1: Norm Correction (spiritbuun) — THE BIG QUALITY WIN
 
 ### Background
-TheTom reports that applying norm correction gives **-1.17% PPL on CUDA** (turbo3 PPL BETTER than q8_0). This is ported from spiritbuun's implementation. We don't have it.
+Norm correction is a shared effort: **spiritbuun** implemented it for turbo4, **TheTom** independently implemented it for turbo3 (different repos). TheTom reports **-1.17% PPL on CUDA** with norm correction applied. We don't have it.
 
 ### What Norm Correction Does
 After quantizing a 128-element rotation group to centroids, the reconstructed vector has a slightly different L2 norm than the original:
@@ -77,10 +77,11 @@ corrected = grp_norm / recon_norm
 5. Run full regression suite (speed should be unchanged — SET_ROWS is not in the decode path)
 6. Commit with PPL data
 
-### Reference
-- TheTom's docs: `docs/quality-benchmarks.md` in the turboquant_plus repo
-- spiritbuun's approach: search for "norm correction" in TheTom's repo
-- The corrected norm is already stored in the `norm` field of the block struct — no struct changes needed
+### Reference & Attribution
+- **TheTom**: norm correction for turbo3 (his repo `docs/quality-benchmarks.md`)
+- **spiritbuun**: norm correction for turbo4 (separate CUDA fork)
+- The corrected norm is stored in the existing `norm` field — no struct changes needed
+- HyperionMS2040's block-128 SET_ROWS fix (S26 commit) may already include norm correction — check first
 
 ---
 
