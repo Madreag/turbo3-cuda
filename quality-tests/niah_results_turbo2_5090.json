@@ -1,0 +1,182 @@
+{
+  "label": "turbo2_5090",
+  "needle": "The best thing to do in San Francisco is eat a sandwich and sit in Dolores Park on a sunny day.",
+  "question": "What is the best thing to do in San Francisco?",
+  "contexts": [
+    4096,
+    8192,
+    16384,
+    32768
+  ],
+  "depths": [
+    10.0,
+    25.0,
+    50.0,
+    75.0,
+    90.0
+  ],
+  "reps": 1,
+  "overall_accuracy": 75.0,
+  "results": [
+    {
+      "context": 4096,
+      "depth": 10.0,
+      "rep": 0,
+      "response": "Eat a sandwich and sit in Dolores Park on a sunny day.",
+      "correct": true,
+      "elapsed": 4.2
+    },
+    {
+      "context": 4096,
+      "depth": 25.0,
+      "rep": 0,
+      "response": "Based on the text, the best thing to do in San Francisco is **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 3.3
+    },
+    {
+      "context": 4096,
+      "depth": 50.0,
+      "rep": 0,
+      "response": "Eat a sandwich and sit in Dolores Park on a sunny day.",
+      "correct": true,
+      "elapsed": 4.4
+    },
+    {
+      "context": 4096,
+      "depth": 75.0,
+      "rep": 0,
+      "response": "Eat a sandwich and sit in Dolores Park on a sunny day.",
+      "correct": true,
+      "elapsed": 4.9
+    },
+    {
+      "context": 4096,
+      "depth": 90.0,
+      "rep": 0,
+      "response": "Based on the text, the best thing to do in San Francisco is **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 3.8
+    },
+    {
+      "context": 8192,
+      "depth": 10.0,
+      "rep": 0,
+      "response": "Based on the text, the best thing to do in San Francisco is **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 4.7
+    },
+    {
+      "context": 8192,
+      "depth": 25.0,
+      "rep": 0,
+      "response": "Based on the text, the best thing to do in San Francisco is **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 4.0
+    },
+    {
+      "context": 8192,
+      "depth": 50.0,
+      "rep": 0,
+      "response": "Based on the text, the best thing to do in San Francisco is **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 8.4
+    },
+    {
+      "context": 8192,
+      "depth": 75.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 8.0
+    },
+    {
+      "context": 8192,
+      "depth": 90.0,
+      "rep": 0,
+      "response": "Based on the text, the best thing to do in San Francisco is **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 4.5
+    },
+    {
+      "context": 16384,
+      "depth": 10.0,
+      "rep": 0,
+      "response": "Based on the text, the best thing to do in San Francisco is **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 7.8
+    },
+    {
+      "context": 16384,
+      "depth": 25.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 11.9
+    },
+    {
+      "context": 16384,
+      "depth": 50.0,
+      "rep": 0,
+      "response": "Based on the text, the best thing to do in San Francisco is to **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 9.2
+    },
+    {
+      "context": 16384,
+      "depth": 75.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 9.4
+    },
+    {
+      "context": 16384,
+      "depth": 90.0,
+      "rep": 0,
+      "response": "According to the text, the best thing to do in San Francisco is to **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 6.5
+    },
+    {
+      "context": 32768,
+      "depth": 10.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 16.6
+    },
+    {
+      "context": 32768,
+      "depth": 25.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 12.8
+    },
+    {
+      "context": 32768,
+      "depth": 50.0,
+      "rep": 0,
+      "response": "Based on the text, the best thing to do in San Francisco is to **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 14.5
+    },
+    {
+      "context": 32768,
+      "depth": 75.0,
+      "rep": 0,
+      "response": "Based on the text provided, the best thing to do in San Francisco is to **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 7.7
+    },
+    {
+      "context": 32768,
+      "depth": 90.0,
+      "rep": 0,
+      "response": "Based on the text, the best thing to do in San Francisco is **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 9.9
+    }
+  ]
+}

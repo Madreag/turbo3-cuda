@@ -1,0 +1,264 @@
+{
+  "label": "q8_0",
+  "needle": "The best thing to do in San Francisco is eat a sandwich and sit in Dolores Park on a sunny day.",
+  "question": "What is the best thing to do in San Francisco?",
+  "contexts": [
+    4096,
+    8192,
+    16384,
+    32768,
+    65536,
+    131072
+  ],
+  "depths": [
+    10.0,
+    25.0,
+    50.0,
+    75.0,
+    90.0
+  ],
+  "reps": 1,
+  "overall_accuracy": 16.666666666666664,
+  "results": [
+    {
+      "context": 4096,
+      "depth": 10.0,
+      "rep": 0,
+      "response": "Based on the text, the best thing to do in San Francisco is eat a sandwich and sit in Dolores Park on a sunny day.",
+      "correct": true,
+      "elapsed": 2.9
+    },
+    {
+      "context": 4096,
+      "depth": 25.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 3.8
+    },
+    {
+      "context": 4096,
+      "depth": 50.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 3.9
+    },
+    {
+      "context": 4096,
+      "depth": 75.0,
+      "rep": 0,
+      "response": "Based on the text, the best thing to do in San Francisco is **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 3.0
+    },
+    {
+      "context": 4096,
+      "depth": 90.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 3.8
+    },
+    {
+      "context": 8192,
+      "depth": 10.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 4.2
+    },
+    {
+      "context": 8192,
+      "depth": 25.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 4.4
+    },
+    {
+      "context": 8192,
+      "depth": 50.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 4.3
+    },
+    {
+      "context": 8192,
+      "depth": 75.0,
+      "rep": 0,
+      "response": "According to the text, the best thing to do in San",
+      "correct": false,
+      "elapsed": 5.8
+    },
+    {
+      "context": 8192,
+      "depth": 90.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 4.1
+    },
+    {
+      "context": 16384,
+      "depth": 10.0,
+      "rep": 0,
+      "response": "Based on the text, the best thing to do in San Francisco is **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 5.2
+    },
+    {
+      "context": 16384,
+      "depth": 25.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 5.5
+    },
+    {
+      "context": 16384,
+      "depth": 50.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 7.5
+    },
+    {
+      "context": 16384,
+      "depth": 75.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 5.5
+    },
+    {
+      "context": 16384,
+      "depth": 90.0,
+      "rep": 0,
+      "response": "ERROR: 400 Client Error: Bad Request for url: http://localhost:8090/v1/chat/completions",
+      "correct": false,
+      "elapsed": 0.0
+    },
+    {
+      "context": 32768,
+      "depth": 10.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 13.3
+    },
+    {
+      "context": 32768,
+      "depth": 25.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 8.9
+    },
+    {
+      "context": 32768,
+      "depth": 50.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 11.9
+    },
+    {
+      "context": 32768,
+      "depth": 75.0,
+      "rep": 0,
+      "response": "ERROR: 400 Client Error: Bad Request for url: http://localhost:8090/v1/chat/completions",
+      "correct": false,
+      "elapsed": 0.0
+    },
+    {
+      "context": 32768,
+      "depth": 90.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 9.7
+    },
+    {
+      "context": 65536,
+      "depth": 10.0,
+      "rep": 0,
+      "response": "ERROR: 400 Client Error: Bad Request for url: http://localhost:8090/v1/chat/completions",
+      "correct": false,
+      "elapsed": 0.1
+    },
+    {
+      "context": 65536,
+      "depth": 25.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 15.2
+    },
+    {
+      "context": 65536,
+      "depth": 50.0,
+      "rep": 0,
+      "response": "According to the text, the best thing to do in San Francisco is **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 24.6
+    },
+    {
+      "context": 65536,
+      "depth": 75.0,
+      "rep": 0,
+      "response": "ERROR: 400 Client Error: Bad Request for url: http://localhost:8090/v1/chat/completions",
+      "correct": false,
+      "elapsed": 0.1
+    },
+    {
+      "context": 65536,
+      "depth": 90.0,
+      "rep": 0,
+      "response": "Based on the text, the best thing to do in San Francisco is **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 11.9
+    },
+    {
+      "context": 131072,
+      "depth": 10.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 31.7
+    },
+    {
+      "context": 131072,
+      "depth": 25.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 42.2
+    },
+    {
+      "context": 131072,
+      "depth": 50.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 26.3
+    },
+    {
+      "context": 131072,
+      "depth": 75.0,
+      "rep": 0,
+      "response": "ERROR: 400 Client Error: Bad Request for url: http://localhost:8090/v1/chat/completions",
+      "correct": false,
+      "elapsed": 0.4
+    },
+    {
+      "context": 131072,
+      "depth": 90.0,
+      "rep": 0,
+      "response": "ERROR: 400 Client Error: Bad Request for url: http://localhost:8090/v1/chat/completions",
+      "correct": false,
+      "elapsed": 0.2
+    }
+  ]
+}

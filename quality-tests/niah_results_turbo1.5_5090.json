@@ -1,0 +1,182 @@
+{
+  "label": "turbo1.5_5090",
+  "needle": "The best thing to do in San Francisco is eat a sandwich and sit in Dolores Park on a sunny day.",
+  "question": "What is the best thing to do in San Francisco?",
+  "contexts": [
+    4096,
+    8192,
+    16384,
+    32768
+  ],
+  "depths": [
+    10.0,
+    25.0,
+    50.0,
+    75.0,
+    90.0
+  ],
+  "reps": 1,
+  "overall_accuracy": 35.0,
+  "results": [
+    {
+      "context": 4096,
+      "depth": 10.0,
+      "rep": 0,
+      "response": "The best thing to do in San Francisco is eat a sandwich and sit in Dolores Park on a sunny day.",
+      "correct": true,
+      "elapsed": 5.8
+    },
+    {
+      "context": 4096,
+      "depth": 25.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 7.6
+    },
+    {
+      "context": 4096,
+      "depth": 50.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 7.6
+    },
+    {
+      "context": 4096,
+      "depth": 75.0,
+      "rep": 0,
+      "response": "According to the text, the best thing to do in San Francisco is eat a sandwich and sit in Dolores Park on a sunny day.",
+      "correct": true,
+      "elapsed": 4.1
+    },
+    {
+      "context": 4096,
+      "depth": 90.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 7.4
+    },
+    {
+      "context": 8192,
+      "depth": 10.0,
+      "rep": 0,
+      "response": "According to the text, the best thing to do in San Francisco is **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 8.5
+    },
+    {
+      "context": 8192,
+      "depth": 25.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 8.4
+    },
+    {
+      "context": 8192,
+      "depth": 50.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 8.2
+    },
+    {
+      "context": 8192,
+      "depth": 75.0,
+      "rep": 0,
+      "response": "According to the text, the best thing to do in San Francisco is **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 6.4
+    },
+    {
+      "context": 8192,
+      "depth": 90.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 10.6
+    },
+    {
+      "context": 16384,
+      "depth": 10.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 9.9
+    },
+    {
+      "context": 16384,
+      "depth": 25.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 9.8
+    },
+    {
+      "context": 16384,
+      "depth": 50.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 11.9
+    },
+    {
+      "context": 16384,
+      "depth": 75.0,
+      "rep": 0,
+      "response": "Based on the text, the best thing to do in San Francisco is **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 8.2
+    },
+    {
+      "context": 16384,
+      "depth": 90.0,
+      "rep": 0,
+      "response": "Based on the text, the best thing to do in San Francisco is **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 5.7
+    },
+    {
+      "context": 32768,
+      "depth": 10.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 14.5
+    },
+    {
+      "context": 32768,
+      "depth": 25.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 16.6
+    },
+    {
+      "context": 32768,
+      "depth": 50.0,
+      "rep": 0,
+      "response": "Based on the text, the best thing to do in San Francisco is **eat a sandwich and sit in Dolores Park on a sunny day**.",
+      "correct": true,
+      "elapsed": 8.2
+    },
+    {
+      "context": 32768,
+      "depth": 75.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 12.3
+    },
+    {
+      "context": 32768,
+      "depth": 90.0,
+      "rep": 0,
+      "response": "",
+      "correct": false,
+      "elapsed": 13.6
+    }
+  ]
+}

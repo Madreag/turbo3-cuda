@@ -1,0 +1,826 @@
+[
+  {
+    "context_length": 512,
+    "threshold": 0.01,
+    "overall_skip_rate": 0.9839085170200893,
+    "total_positions": 229376,
+    "total_skipped": 225685,
+    "n_layers": 28,
+    "per_layer": [
+      {
+        "layer": 0,
+        "skip_rate": 0.984375,
+        "min_head_skip": 0.955078125,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.990234375
+      },
+      {
+        "layer": 1,
+        "skip_rate": 0.9739990234375,
+        "min_head_skip": 0.90625,
+        "max_head_skip": 0.99609375,
+        "median_head_skip": 0.974609375
+      },
+      {
+        "layer": 2,
+        "skip_rate": 0.972412109375,
+        "min_head_skip": 0.921875,
+        "max_head_skip": 0.990234375,
+        "median_head_skip": 0.9765625
+      },
+      {
+        "layer": 3,
+        "skip_rate": 0.9869384765625,
+        "min_head_skip": 0.947265625,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.9921875
+      },
+      {
+        "layer": 4,
+        "skip_rate": 0.9822998046875,
+        "min_head_skip": 0.943359375,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.9921875
+      },
+      {
+        "layer": 5,
+        "skip_rate": 0.98486328125,
+        "min_head_skip": 0.962890625,
+        "max_head_skip": 0.99609375,
+        "median_head_skip": 0.986328125
+      },
+      {
+        "layer": 6,
+        "skip_rate": 0.97021484375,
+        "min_head_skip": 0.904296875,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.98828125
+      },
+      {
+        "layer": 7,
+        "skip_rate": 0.9825439453125,
+        "min_head_skip": 0.958984375,
+        "max_head_skip": 0.994140625,
+        "median_head_skip": 0.986328125
+      },
+      {
+        "layer": 8,
+        "skip_rate": 0.983642578125,
+        "min_head_skip": 0.908203125,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.994140625
+      },
+      {
+        "layer": 9,
+        "skip_rate": 0.986083984375,
+        "min_head_skip": 0.962890625,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.98828125
+      },
+      {
+        "layer": 10,
+        "skip_rate": 0.9808349609375,
+        "min_head_skip": 0.953125,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.984375
+      },
+      {
+        "layer": 11,
+        "skip_rate": 0.9820556640625,
+        "min_head_skip": 0.953125,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.982421875
+      },
+      {
+        "layer": 12,
+        "skip_rate": 0.98828125,
+        "min_head_skip": 0.966796875,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.990234375
+      },
+      {
+        "layer": 13,
+        "skip_rate": 0.9774169921875,
+        "min_head_skip": 0.953125,
+        "max_head_skip": 0.9921875,
+        "median_head_skip": 0.98046875
+      },
+      {
+        "layer": 14,
+        "skip_rate": 0.9783935546875,
+        "min_head_skip": 0.90625,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.984375
+      },
+      {
+        "layer": 15,
+        "skip_rate": 0.9898681640625,
+        "min_head_skip": 0.98046875,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.990234375
+      },
+      {
+        "layer": 16,
+        "skip_rate": 0.9791259765625,
+        "min_head_skip": 0.943359375,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.982421875
+      },
+      {
+        "layer": 17,
+        "skip_rate": 0.985595703125,
+        "min_head_skip": 0.970703125,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.986328125
+      },
+      {
+        "layer": 18,
+        "skip_rate": 0.9805908203125,
+        "min_head_skip": 0.9140625,
+        "max_head_skip": 0.99609375,
+        "median_head_skip": 0.986328125
+      },
+      {
+        "layer": 19,
+        "skip_rate": 0.979736328125,
+        "min_head_skip": 0.921875,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.98046875
+      },
+      {
+        "layer": 20,
+        "skip_rate": 0.987060546875,
+        "min_head_skip": 0.95703125,
+        "max_head_skip": 0.99609375,
+        "median_head_skip": 0.9921875
+      },
+      {
+        "layer": 21,
+        "skip_rate": 0.9893798828125,
+        "min_head_skip": 0.955078125,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.9921875
+      },
+      {
+        "layer": 22,
+        "skip_rate": 0.990478515625,
+        "min_head_skip": 0.974609375,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.9921875
+      },
+      {
+        "layer": 23,
+        "skip_rate": 0.98974609375,
+        "min_head_skip": 0.9453125,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.99609375
+      },
+      {
+        "layer": 24,
+        "skip_rate": 0.988037109375,
+        "min_head_skip": 0.962890625,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.9921875
+      },
+      {
+        "layer": 25,
+        "skip_rate": 0.9873046875,
+        "min_head_skip": 0.931640625,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.994140625
+      },
+      {
+        "layer": 26,
+        "skip_rate": 0.993896484375,
+        "min_head_skip": 0.98046875,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.994140625
+      },
+      {
+        "layer": 27,
+        "skip_rate": 0.9942626953125,
+        "min_head_skip": 0.990234375,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.994140625
+      }
+    ]
+  },
+  {
+    "context_length": 2048,
+    "threshold": 0.01,
+    "overall_skip_rate": 0.9966114589146206,
+    "total_positions": 917504,
+    "total_skipped": 914395,
+    "n_layers": 28,
+    "per_layer": [
+      {
+        "layer": 0,
+        "skip_rate": 0.9970703125,
+        "min_head_skip": 0.990234375,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.99853515625
+      },
+      {
+        "layer": 1,
+        "skip_rate": 0.996307373046875,
+        "min_head_skip": 0.990234375,
+        "max_head_skip": 1.0,
+        "median_head_skip": 0.9970703125
+      },
+      {
+        "layer": 2,
+        "skip_rate": 0.993621826171875,
+        "min_head_skip": 0.9853515625,
+        "max_head_skip": 0.998046875,
+        "median_head_skip": 0.99462890625
+      },
+      {
+        "layer": 3,
+        "skip_rate": 0.997283935546875,
+        "min_head_skip": 0.9853515625,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.99853515625
+      },
+      {
+        "layer": 4,
+        "skip_rate": 0.9951171875,
+        "min_head_skip": 0.98583984375,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.99658203125
+      },
+      {
+        "layer": 5,
+        "skip_rate": 0.995361328125,
+        "min_head_skip": 0.98974609375,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.99609375
+      },
+      {
+        "layer": 6,
+        "skip_rate": 0.995941162109375,
+        "min_head_skip": 0.98828125,
+        "max_head_skip": 0.9990234375,
+        "median_head_skip": 0.99658203125
+      },
+      {
+        "layer": 7,
+        "skip_rate": 0.99652099609375,
+        "min_head_skip": 0.99267578125,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.99609375
+      },
+      {
+        "layer": 8,
+        "skip_rate": 0.996490478515625,
+        "min_head_skip": 0.990234375,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.9970703125
+      },
+      {
+        "layer": 9,
+        "skip_rate": 0.996612548828125,
+        "min_head_skip": 0.9921875,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.9970703125
+      },
+      {
+        "layer": 10,
+        "skip_rate": 0.995697021484375,
+        "min_head_skip": 0.9921875,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.9951171875
+      },
+      {
+        "layer": 11,
+        "skip_rate": 0.996337890625,
+        "min_head_skip": 0.98974609375,
+        "max_head_skip": 0.9990234375,
+        "median_head_skip": 0.99658203125
+      },
+      {
+        "layer": 12,
+        "skip_rate": 0.996002197265625,
+        "min_head_skip": 0.99169921875,
+        "max_head_skip": 0.9990234375,
+        "median_head_skip": 0.99609375
+      },
+      {
+        "layer": 13,
+        "skip_rate": 0.996246337890625,
+        "min_head_skip": 0.9921875,
+        "max_head_skip": 0.9990234375,
+        "median_head_skip": 0.99560546875
+      },
+      {
+        "layer": 14,
+        "skip_rate": 0.996612548828125,
+        "min_head_skip": 0.98974609375,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.9970703125
+      },
+      {
+        "layer": 15,
+        "skip_rate": 0.996917724609375,
+        "min_head_skip": 0.99365234375,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.99658203125
+      },
+      {
+        "layer": 16,
+        "skip_rate": 0.995147705078125,
+        "min_head_skip": 0.99169921875,
+        "max_head_skip": 0.99853515625,
+        "median_head_skip": 0.9951171875
+      },
+      {
+        "layer": 17,
+        "skip_rate": 0.99676513671875,
+        "min_head_skip": 0.9921875,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.9970703125
+      },
+      {
+        "layer": 18,
+        "skip_rate": 0.996307373046875,
+        "min_head_skip": 0.99267578125,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.99560546875
+      },
+      {
+        "layer": 19,
+        "skip_rate": 0.996002197265625,
+        "min_head_skip": 0.99169921875,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.99560546875
+      },
+      {
+        "layer": 20,
+        "skip_rate": 0.997222900390625,
+        "min_head_skip": 0.99267578125,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.9970703125
+      },
+      {
+        "layer": 21,
+        "skip_rate": 0.9970703125,
+        "min_head_skip": 0.98681640625,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.99853515625
+      },
+      {
+        "layer": 22,
+        "skip_rate": 0.997161865234375,
+        "min_head_skip": 0.994140625,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.99755859375
+      },
+      {
+        "layer": 23,
+        "skip_rate": 0.9979248046875,
+        "min_head_skip": 0.99267578125,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.998046875
+      },
+      {
+        "layer": 24,
+        "skip_rate": 0.99810791015625,
+        "min_head_skip": 0.994140625,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.99853515625
+      },
+      {
+        "layer": 25,
+        "skip_rate": 0.99835205078125,
+        "min_head_skip": 0.99462890625,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.99853515625
+      },
+      {
+        "layer": 26,
+        "skip_rate": 0.99810791015625,
+        "min_head_skip": 0.9951171875,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.99853515625
+      },
+      {
+        "layer": 27,
+        "skip_rate": 0.998809814453125,
+        "min_head_skip": 0.99755859375,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.99853515625
+      }
+    ]
+  },
+  {
+    "context_length": 4096,
+    "threshold": 0.01,
+    "overall_skip_rate": 0.9985591343470982,
+    "total_positions": 1835008,
+    "total_skipped": 1832364,
+    "n_layers": 28,
+    "per_layer": [
+      {
+        "layer": 0,
+        "skip_rate": 0.99847412109375,
+        "min_head_skip": 0.995849609375,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.9990234375
+      },
+      {
+        "layer": 1,
+        "skip_rate": 0.99835205078125,
+        "min_head_skip": 0.995361328125,
+        "max_head_skip": 1.0,
+        "median_head_skip": 0.998291015625
+      },
+      {
+        "layer": 2,
+        "skip_rate": 0.9975738525390625,
+        "min_head_skip": 0.9921875,
+        "max_head_skip": 1.0,
+        "median_head_skip": 0.997802734375
+      },
+      {
+        "layer": 3,
+        "skip_rate": 0.9990081787109375,
+        "min_head_skip": 0.99658203125,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.999267578125
+      },
+      {
+        "layer": 4,
+        "skip_rate": 0.997894287109375,
+        "min_head_skip": 0.994140625,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.997802734375
+      },
+      {
+        "layer": 5,
+        "skip_rate": 0.99835205078125,
+        "min_head_skip": 0.99658203125,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.998291015625
+      },
+      {
+        "layer": 6,
+        "skip_rate": 0.99853515625,
+        "min_head_skip": 0.99609375,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.998291015625
+      },
+      {
+        "layer": 7,
+        "skip_rate": 0.99847412109375,
+        "min_head_skip": 0.99658203125,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.998291015625
+      },
+      {
+        "layer": 8,
+        "skip_rate": 0.9989166259765625,
+        "min_head_skip": 0.995849609375,
+        "max_head_skip": 1.0,
+        "median_head_skip": 0.99951171875
+      },
+      {
+        "layer": 9,
+        "skip_rate": 0.9987030029296875,
+        "min_head_skip": 0.996826171875,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.9990234375
+      },
+      {
+        "layer": 10,
+        "skip_rate": 0.9980010986328125,
+        "min_head_skip": 0.995361328125,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.997802734375
+      },
+      {
+        "layer": 11,
+        "skip_rate": 0.998626708984375,
+        "min_head_skip": 0.9970703125,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.99853515625
+      },
+      {
+        "layer": 12,
+        "skip_rate": 0.998199462890625,
+        "min_head_skip": 0.99609375,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.99853515625
+      },
+      {
+        "layer": 13,
+        "skip_rate": 0.998504638671875,
+        "min_head_skip": 0.996337890625,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.998291015625
+      },
+      {
+        "layer": 14,
+        "skip_rate": 0.9986419677734375,
+        "min_head_skip": 0.995361328125,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.998779296875
+      },
+      {
+        "layer": 15,
+        "skip_rate": 0.998565673828125,
+        "min_head_skip": 0.997314453125,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.99853515625
+      },
+      {
+        "layer": 16,
+        "skip_rate": 0.99774169921875,
+        "min_head_skip": 0.9951171875,
+        "max_head_skip": 0.99951171875,
+        "median_head_skip": 0.997802734375
+      },
+      {
+        "layer": 17,
+        "skip_rate": 0.9984130859375,
+        "min_head_skip": 0.99658203125,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.998291015625
+      },
+      {
+        "layer": 18,
+        "skip_rate": 0.998291015625,
+        "min_head_skip": 0.99609375,
+        "max_head_skip": 1.0,
+        "median_head_skip": 0.998291015625
+      },
+      {
+        "layer": 19,
+        "skip_rate": 0.99822998046875,
+        "min_head_skip": 0.995849609375,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.998046875
+      },
+      {
+        "layer": 20,
+        "skip_rate": 0.998748779296875,
+        "min_head_skip": 0.99560546875,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.9990234375
+      },
+      {
+        "layer": 21,
+        "skip_rate": 0.9986572265625,
+        "min_head_skip": 0.99560546875,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.9990234375
+      },
+      {
+        "layer": 22,
+        "skip_rate": 0.998626708984375,
+        "min_head_skip": 0.996826171875,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.9990234375
+      },
+      {
+        "layer": 23,
+        "skip_rate": 0.99920654296875,
+        "min_head_skip": 0.997802734375,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.999267578125
+      },
+      {
+        "layer": 24,
+        "skip_rate": 0.9992218017578125,
+        "min_head_skip": 0.998291015625,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.999267578125
+      },
+      {
+        "layer": 25,
+        "skip_rate": 0.9991912841796875,
+        "min_head_skip": 0.99755859375,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.999267578125
+      },
+      {
+        "layer": 26,
+        "skip_rate": 0.9991912841796875,
+        "min_head_skip": 0.998291015625,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.9990234375
+      },
+      {
+        "layer": 27,
+        "skip_rate": 0.9993133544921875,
+        "min_head_skip": 0.99853515625,
+        "max_head_skip": 0.999755859375,
+        "median_head_skip": 0.999267578125
+      }
+    ]
+  },
+  {
+    "context_length": 5001,
+    "threshold": 0.01,
+    "overall_skip_rate": 0.999098394606793,
+    "total_positions": 2240448,
+    "total_skipped": 2238428,
+    "n_layers": 28,
+    "per_layer": [
+      {
+        "layer": 0,
+        "skip_rate": 0.9977129697799683,
+        "min_head_skip": 0.9952009320259094,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.9972005486488342
+      },
+      {
+        "layer": 1,
+        "skip_rate": 0.9984378218650818,
+        "min_head_skip": 0.9952009320259094,
+        "max_head_skip": 1.0,
+        "median_head_skip": 0.9984003305435181
+      },
+      {
+        "layer": 2,
+        "skip_rate": 0.9984127879142761,
+        "min_head_skip": 0.9948010444641113,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.999200165271759
+      },
+      {
+        "layer": 3,
+        "skip_rate": 0.9994626045227051,
+        "min_head_skip": 0.9982003569602966,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.9996000528335571
+      },
+      {
+        "layer": 4,
+        "skip_rate": 0.9992501139640808,
+        "min_head_skip": 0.9962007403373718,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.9996000528335571
+      },
+      {
+        "layer": 5,
+        "skip_rate": 0.9989752173423767,
+        "min_head_skip": 0.9970005750656128,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.9996000528335571
+      },
+      {
+        "layer": 6,
+        "skip_rate": 0.9993751049041748,
+        "min_head_skip": 0.9978004097938538,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.9996000528335571
+      },
+      {
+        "layer": 7,
+        "skip_rate": 0.9992751479148865,
+        "min_head_skip": 0.9976004958152771,
+        "max_head_skip": 0.9996000528335571,
+        "median_head_skip": 0.9994001388549805
+      },
+      {
+        "layer": 8,
+        "skip_rate": 0.9994251132011414,
+        "min_head_skip": 0.9986002445220947,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.9996000528335571
+      },
+      {
+        "layer": 9,
+        "skip_rate": 0.9991251826286316,
+        "min_head_skip": 0.9976004958152771,
+        "max_head_skip": 0.9996000528335571,
+        "median_head_skip": 0.999200165271759
+      },
+      {
+        "layer": 10,
+        "skip_rate": 0.9994001388549805,
+        "min_head_skip": 0.9988002181053162,
+        "max_head_skip": 0.9996000528335571,
+        "median_head_skip": 0.9996000528335571
+      },
+      {
+        "layer": 11,
+        "skip_rate": 0.9990001916885376,
+        "min_head_skip": 0.9968006610870361,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.999200165271759
+      },
+      {
+        "layer": 12,
+        "skip_rate": 0.9991001486778259,
+        "min_head_skip": 0.9974005222320557,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.9990001916885376
+      },
+      {
+        "layer": 13,
+        "skip_rate": 0.9990876913070679,
+        "min_head_skip": 0.9978004097938538,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.999200165271759
+      },
+      {
+        "layer": 14,
+        "skip_rate": 0.9991001486778259,
+        "min_head_skip": 0.9972005486488342,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.9994001388549805
+      },
+      {
+        "layer": 15,
+        "skip_rate": 0.9990127086639404,
+        "min_head_skip": 0.9958008527755737,
+        "max_head_skip": 0.9996000528335571,
+        "median_head_skip": 0.999200165271759
+      },
+      {
+        "layer": 16,
+        "skip_rate": 0.9989627003669739,
+        "min_head_skip": 0.9962007403373718,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.999200165271759
+      },
+      {
+        "layer": 17,
+        "skip_rate": 0.9986502528190613,
+        "min_head_skip": 0.9970005750656128,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.9986002445220947
+      },
+      {
+        "layer": 18,
+        "skip_rate": 0.9988502264022827,
+        "min_head_skip": 0.9952009320259094,
+        "max_head_skip": 0.9996000528335571,
+        "median_head_skip": 0.999200165271759
+      },
+      {
+        "layer": 19,
+        "skip_rate": 0.9994500875473022,
+        "min_head_skip": 0.9990001916885376,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.9994001388549805
+      },
+      {
+        "layer": 20,
+        "skip_rate": 0.9992751479148865,
+        "min_head_skip": 0.9986002445220947,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.9994001388549805
+      },
+      {
+        "layer": 21,
+        "skip_rate": 0.9993376135826111,
+        "min_head_skip": 0.9986002445220947,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.9994001388549805
+      },
+      {
+        "layer": 22,
+        "skip_rate": 0.9993751049041748,
+        "min_head_skip": 0.9978004097938538,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.9994001388549805
+      },
+      {
+        "layer": 23,
+        "skip_rate": 0.9993876218795776,
+        "min_head_skip": 0.9988002181053162,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.9994001388549805
+      },
+      {
+        "layer": 24,
+        "skip_rate": 0.9993751049041748,
+        "min_head_skip": 0.9990001916885376,
+        "max_head_skip": 0.9996000528335571,
+        "median_head_skip": 0.9994001388549805
+      },
+      {
+        "layer": 25,
+        "skip_rate": 0.9991376399993896,
+        "min_head_skip": 0.9976004958152771,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.9994001388549805
+      },
+      {
+        "layer": 26,
+        "skip_rate": 0.9994125962257385,
+        "min_head_skip": 0.9988002181053162,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.9994001388549805
+      },
+      {
+        "layer": 27,
+        "skip_rate": 0.9993876218795776,
+        "min_head_skip": 0.9984003305435181,
+        "max_head_skip": 0.9998000264167786,
+        "median_head_skip": 0.9994001388549805
+      }
+    ]
+  }
+]

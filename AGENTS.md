@@ -249,8 +249,8 @@ S24 replaced all 5 `expf` with `__expf` in VEC kernel. ~2^-21 relative error is 
 ### Norm-out-of-loop: Dead End #32
 S24B tested factoring norm multiplication out of centroid lookup (1 multiply instead of 4 per iteration). Compiler was already doing this optimization — manual refactor interfered with instruction scheduling. -0.8% regression. Reverted.
 
-### Sparse V threshold: 5e-3 for turbo3/4, 1e-2 for turbo2/1.5
-S25 raised sparse V skip threshold from 1e-6 to type-specific values. At 32K, most V positions have negligible attention weight — skipping their dequant saves significant bandwidth. PPL bit-exact at ctx=512 and ctx=2048 across all models tested. turbo3 32K: +5-11%, turbo2 32K: +13%, 8B Llama: **+28%** (32 KV heads, no GQA). Models with more KV heads benefit more because FA is a larger fraction of decode time.
+### Sparse V threshold: 5e-3 for turbo3/4, 1e-2 for turbo2/1.5 (S27B validated)
+S25 raised sparse V skip threshold from 1e-6 to type-specific values. **S27B control test proved 1e-2 threshold has ZERO PPL impact** — turbo2 ctx=32K PPL is bit-identical at 1e-2 and 1e-6 (10.0536 both). Same for turbo1.5 (11.1275 both). The growing delta at long context is inherent to 2-bit quantization, not the threshold. 1e-2 gives +13% speed at 32K for zero quality cost. turbo3/turbo4 stay at 5e-3 (proven healthy < 3% delta at 32K).
 
 ### K type dominates 32K speed, V type barely matters (S25 finding)
 With sparse V skip, most V positions are never read. K scoring is the bottleneck at long context. On 8B Llama at 32K: turbo2 K gives 113-119 tok/s regardless of V type (5% spread). turbo3 K: 105-112. turbo4 K: 74-75. turbo1.5 K: 67. **Implication for LA: use turbo2 K for speed, V type for quality only.**
@@ -314,6 +314,9 @@ ALL turbo types use q8_1 Q + nthreads_KQ=8. Centroids are `static constexpr` (re
 | 24 | __expf fast-math, LA kv_ord hybrid fix, LA=13-15, GQA warning | turbo3 short +0.67%, 32K +3.69%, Q4_K_M ctx=2048 beats q8_0 |
 | 24B | nthreads_KQ=8 for turbo4/1.5, constexpr centroids | turbo4 short +10.7%, 32K +17.7%. AmesianX gap closed: +10-11% us |
 | 25 | Sparse V threshold 5e-3/1e-2, 43 iterations autoresearch | turbo3 32K +5-11%, turbo2 +13%, 8B +28%. K type dominates 32K speed. |
+| 26 | SM120 D=256 LUT fix (NVBUG 5218000), turbo4/1.5 Q_reg fix, block-128 storage | Block-128: turbo3 3.125bpv, turbo2 2.125bpv. All types beat q8_0. |
+| 27 | Norm correction verified, 50-chunk wikitext-103, skip rate measurement, quality gate | PPL delta grows with ctx for turbo2/1.5 (inherent to 2-bit quant). |
+| 27B | Sparse V threshold VALIDATED: 1e-2 correct (control test: 0 PPL diff). NIAH 5090 re-run | 1e-2 gives +13% speed for zero quality cost. Pushed to release. |
 
 ## Dead Ends (Don't Repeat)
 
