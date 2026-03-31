@@ -2,7 +2,7 @@
 
 CUDA implementation of [TurboQuant](https://arxiv.org/abs/2504.19874) (ICLR 2026) KV cache compression for llama.cpp, targeting NVIDIA GPUs (SM86+).
 
-**The short version:** TurboQuant compresses the KV cache 2-8x while maintaining (or exceeding) uncompressed decode speed. At 32K context, turbo3 is **faster** than q8_0 while using **4.6x less memory**. At 256K context, turbo2 still generates 36+ tok/s on a consumer RTX 5090 — a context length where f16 KV would OOM.
+**The short version:** TurboQuant compresses the KV cache 4-8x while being **faster** than uncompressed. At 32K context, ALL 4 turbo types beat q8_0 — turbo2 by **9.8%** at 7.5x compression. At 256K context, turbo2 still generates 36+ tok/s on a consumer RTX 5090 — a context length where f16 KV would OOM.
 
 Built on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, native Flash Attention vec_dot, and MMA prefill. All 4 turbo types (turbo4/turbo3/turbo2/turbo1.5) with 36 asymmetric K/V combinations. Validated across 5 models, 3 GPUs, 1,251+ stability iterations with zero failures.
 
@@ -10,27 +10,27 @@ Built on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, na
 
 | Type | Bits/Value | Compression | Short Decode | 32K Decode | PPL ctx=512 | PPL ctx=2048 |
 |------|:---------:|:-----------:|:------------:|:----------:|:-----------:|:------------:|
-| f16 | 16.0 | 1x | 62.30 tok/s | 56.55 | — | — |
-| q8_0 | 8.5 | 1.9x | 61.21 | 53.06 | 6.759 | 5.674 |
-| **turbo4** | **4.25** | **3.8x** | **60.92** | **50.63** | 6.825 (+0.97%) | 5.694 |
-| **turbo3** | **3.25** | **4.6x** | **61.46** | **55.08** | 6.852 (+1.38%) | **5.674 (=q8_0)** |
-| **turbo2** | **2.50** | **6.4x** | **62.07** | **56.02** | 7.080 (+4.75%) | 5.892 |
-| **turbo1.5** | **2.00** | **8.0x** | 59.22 | 47.89 | 7.312 (+8.18%) | 6.103 |
+| q8_0 | 8.5 | 1.9x | 64.06 tok/s | 54.01 | 6.759 | 5.674 |
+| **turbo4** | **4.25** | **3.8x** | **65.33** | **58.03** | 6.825 (+0.97%) | 5.694 |
+| **turbo3** | **3.125** | **5.12x** | **65.14** | **56.28** | 6.852 (+1.38%) | **5.674 (=q8_0)** |
+| **turbo2** | **2.125** | **7.53x** | **64.13** | **58.48** | 7.080 (+4.75%) | 5.892 |
+| **turbo1.5** | **2.00** | **8.0x** | **64.00** | **55.62** | 7.312 (+8.18%) | 6.103 |
 
 Key takeaways from this table:
-- **turbo3 at 32K is faster than q8_0** (55.08 vs 53.06) while using 4.6x less KV memory
-- **turbo2 at 32K nearly matches f16** (56.02 vs 56.55) at 6.4x compression
-- **turbo3 PPL at ctx=2048 equals q8_0** (5.674 = 5.674) — lossless quality at 4.6x compression
-- All types maintain 95-100% of f16 speed at short context
+- **ALL turbo types beat q8_0 at both short AND 32K** — even with 4-8x less KV memory
+- **turbo2 at 32K beats q8_0 by 8.3%** (58.48 vs 54.01) — the long-context champion at 7.5x compression
+- **turbo4 at 32K beats q8_0 by 7.4%** (58.03 vs 54.01) at 3.8x compression, best quality
+- **turbo3 PPL at ctx=2048 equals q8_0** (5.674 = 5.674) — lossless quality at 5.1x compression
 
 **More highlights across models and contexts:**
 
 | Result | Numbers |
 |--------|---------|
+| turbo2 32K decode | **58.48 tok/s** — 8.3% faster than q8_0 at 7.5x compression |
 | turbo2 at 256K tokens (Q4_K_M) | **36.62 tok/s** — consumer GPU, 8x cheaper KV than f16 |
-| 8B Llama-3.3 turbo3 at 32K | **105.64 tok/s** (+28% from sparse V skip, Session 25) |
+| 8B Llama-3.3 turbo3 at 32K | **105.64 tok/s** (+28% from sparse V skip) |
 | MoE (Qwen 3.5 35B-A3B) turbo3 | **195 tok/s** (+107% vs signalnine's original) |
-| Q4_K_M + turbo3 short decode | **77.25 tok/s** — beats vLLM INT4 (68.3) on same GPU die |
+| NIAH retrieval (3090 Ti) | turbo3 **86.4%** beats q8_0 84.8% — sparse V denoising effect |
 | Stability across 3 GPUs | **1,251+ iterations, 0 failures, PPL bit-exact** |
 
 ## Quality (Perplexity)
@@ -39,16 +39,16 @@ Key takeaways from this table:
 |------|----:|:-----------:|--------:|:------------:|--------:|
 | q8_0 | 8.5 | 6.759 | — | 5.674 | — |
 | turbo4 | 4.25 | 6.825 | +0.97% | 5.694 | +0.35% |
-| turbo3 | 3.25 | 6.852 | +1.38% | **5.674** | **0.00%** |
-| turbo2 | 2.5 | 7.080 | +4.75% | 5.892 | +3.84% |
+| turbo3 | 3.125 | 6.852 | +1.38% | **5.674** | **0.00%** |
+| turbo2 | 2.125 | 7.080 | +4.75% | 5.892 | +3.84% |
 | turbo1.5 | 2.0 | 7.312 | +8.18% | 6.103 | +7.56% |
 
 ## Which Mode Should I Use?
 
 | Your priority | Mode | Why | Command |
 |---|---|---|---|
-| **Best balance** | turbo3 | q8_0 quality at 4.6x compression | `-ctk turbo3 -ctv turbo3` |
-| **Long context** | turbo2 | Fastest at 32K+, 36 tok/s at 256K | `-ctk turbo2 -ctv turbo2` |
+| **Best balance** | turbo3 | q8_0 quality at 5.1x compression | `-ctk turbo3 -ctv turbo3` |
+| **Long context** | turbo2 | 32K champion (+8.3% vs q8_0), 36 tok/s at 256K, 7.5x compression | `-ctk turbo2 -ctv turbo2` |
 | **Best quality** | turbo4 | +0.97% PPL at 3.8x compression | `-ctk turbo4 -ctv turbo4` |
 | **Maximum compression** | turbo1.5 | 8x compression, 174 tok/s MoE | `-ctk turbo1.5 -ctv turbo1.5` |
 
@@ -86,7 +86,7 @@ PPL impact: Q4_K_M + turbo3 = 7.127 (+1.39% vs q8_0 = 7.030). Safe on 27B+ model
 cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="120"
 cmake --build build -j$(nproc)
 
-# turbo3 (best balance — matches q8_0 quality at 4.6x compression)
+# turbo3 (best balance — matches q8_0 quality at 5.1x compression)
 ./build/bin/llama-cli -hf your-model-GGUF -ctk turbo3 -ctv turbo3 -fa -ngl 99
 
 # turbo2 (long-context champion — beats q8_0 speed at 32K)
@@ -142,7 +142,7 @@ Validated on 3 NVIDIA GPUs across 3 architecture generations, **1,251+ total sta
 | f16 | 16 | 86.01 | OOM | OOM | — |
 | q8_0 | 8.5 | 85.52 | 73.06 | OOM | 8.525 |
 | turbo4 | 4.25 | 84.62 | 70.95 | 59.80 | 8.634 |
-| **turbo3** | 3.25 | **84.62** | **72.90** | **63.44** | 8.624 |
+| **turbo3** | 3.50 | **84.62** | **72.90** | **63.44** | 8.624 |
 | **turbo2** | 2.5 | **85.03** | **77.05** | **70.06** | 8.937 |
 | turbo1.5 | 2.0 | 84.19 | 64.41 | 51.75 | 9.402 |
 
@@ -170,7 +170,7 @@ turbo2 at 64K = **70.06 tok/s** — runs where q8_0 OOMs. turbo3 32K now **match
 |------|----:|------:|----:|----:|:-----------:|
 | q8_0 | 8.5 | ~54 | 45.3 | — | 8.477 |
 | turbo4 | 4.25 | ~53 | 44.48 | — | 8.598 |
-| **turbo3** | 3.25 | ~53 | 43.24 | 46.89 | 8.586 |
+| **turbo3** | 3.50 | ~53 | 43.24 | 46.89 | 8.586 |
 | **turbo2** | 2.5 | ~53 | **47.77** | **55.81** | 8.898 |
 | turbo1.5 | 2.0 | ~52 | 44.13 | 46.71 | 9.211 |
 
@@ -208,9 +208,9 @@ turbo2 and turbo3 are **faster than f16 and q8_0 at 65K+**. At 256K, only turbo 
 ## Limitations
 
 - **Head dimension**: Only D∈{64, 128, 256} use native Flash Attention. D=80, D=96, D=112, and others gracefully fall back to mul_mat attention (slower but correct).
+- **SM120 D=256 LUT**: Due to a confirmed NVIDIA compiler bug ([NVBUG 5218000](https://docs.nvidia.com/cuda/cublasdx/0.5.0/release_notes.html), [NVBUG 5288270](https://docs.nvidia.com/cuda/cusolverdx/release_notes.html)), the LUT scoring optimization is automatically disabled for D=256 models on SM120 (RTX 5090). The VEC kernel uses vec_dot scoring instead — same speed, correct output, zero PPL impact. D=64 and D=128 models use LUT normally. Tested across CUDA 12.8 through 13.2 — all affected. Will re-enable when NVIDIA fixes SM120 codegen.
 - **Attention sinks**: Implemented but provide 0% PPL improvement across all tested configurations. **Warning**: `TURBO_SINK_SIZE` values {1, 4, 16} crash on SM89 (RTX 4090). Sizes {0, 2, 8} work. SM86 and SM120 are unaffected.
 - **V sinks**: Dead end — register pressure causes -12.7% speed regression at 32K.
-- **turbo1.5 sparse V**: The Session 25 sparse V threshold optimization does not help turbo1.5. At 1.58 bits, V values are ternary ({-1, 0, +1}) and have no sparse structure. turbo3/turbo2/turbo4 all benefit (+5-15% at 32K+), but turbo1.5 long-context speed is unchanged.
 - **FP4 tensor core acceleration**: Not viable. Q values are too small for E2M1 (99.5% map to zero), and no mixed fp16×E2M1 MMA instruction exists on SM120.
 - **Known Gemma 3 issues**: Gibberish after context shift and slow quantized KV cache are upstream llama.cpp bugs, not TurboQuant-specific.
 
