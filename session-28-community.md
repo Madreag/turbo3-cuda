@@ -1,4 +1,4 @@
-# Session 28 — RELEASE: Clean Repo, Standardized Benchmarks, Community Post, PR
+# Session 28 — RELEASE: Full Metrics, Clean Repo, Community Post, PR
 
 ## READ FIRST (MANDATORY)
 
@@ -11,277 +11,330 @@
 
 ## CONTEXT
 
-Sessions 25-27 are complete. All bugs fixed, block-128 shipped, quality validated, 37 kernel optimizations attempted (all dead — 168-reg ceiling confirmed). The code is stable and release-ready.
+Sessions 25-27 are complete. Code is stable. S27C added KV serialization fix + auto Boundary V.
 
-**Now we need to**:
-1. Clean the release branch (remove all dev files)
-2. Run TheTom's standardized benchmark script on OUR build and HIS latest build (apples-to-apples)
-3. Get standardized data from 3090 Ti and 4090M machines
-4. Post to Discussion #20969 with the data
-5. Prepare the upstream PR
+**This session has two goals:**
+1. Collect EVERY metric TheTom reports so we have complete parity (see checklist below)
+2. Clean the repo, write the Discussion post, prepare the upstream PR
+
+**TheTom's repos for reference:**
+- Python/docs: `/home/erol/ai/thetom/turboquant_plus/`
+- C++ llama.cpp: `/home/erol/ai/thetom/llama-cpp-turboquant/` (branch `feature/turboquant-kv-cache`)
+- His benchmark script: `/home/erol/ai/thetom/turboquant_plus/scripts/turbo-quick-bench.sh`
 
 ---
 
-## TASK 1: Clean the Release Branch (FIRST — before anything else)
+## THE METRICS CHECKLIST
 
-The release branch has dev files that shouldn't be public. Remove them ALL.
+TheTom reports all of these in his README. We need every one.
 
-### Files to Remove from Git Tracking
+| # | Metric | Status | What To Run (5090) |
+|:-:|--------|:------:|-------------------|
+| 1 | PPL ctx=512 (all types) | HAVE | Already collected |
+| 2 | PPL ctx=2048 (all types) | HAVE | Already collected |
+| 3 | PPL ctx=8K/32K (50-chunk wikitext-103) | HAVE | S27 data |
+| 4 | **KL divergence vs f16** | **NEED** | Task 2 below |
+| 5 | Decode short tg128 (all types) | HAVE | S26 data |
+| 6 | Decode 32K (all types) | HAVE | S26 data |
+| 7 | **Prefill context scaling (pp512→pp32K)** | **NEED** | Task 3 below |
+| 8 | **Sparse V ON/OFF delta** | **NEED** | Task 4 below |
+| 9 | **Norm correction impact** | **NEED** | Task 5 below |
+| 10 | **Block-size ablation (32 vs 128)** | **NEED** | Task 6 below |
+| 11 | **Asymmetric K/V quality matrix** | **NEED** | Task 7 below |
+| 12 | NIAH single needle (depth × context) | HAVE | S27 5090 + S26 3090 Ti |
+| 13 | NIAH multi-key (RULER) | PARTIAL | S26 3090 Ti only |
+| 14 | Skip rate per layer | HAVE | S27 data |
+| 15 | **TheTom bench comparison (our build vs his)** | **NEED** | Task 8 below |
+
+Items 4-11 and 15 are NEW tests to run on the 5090. Items 12-13 also need 3090 Ti/4090M runs (separate prompts).
+
+---
+
+## TASK 1: Clean the Release Branch
+
+Remove all dev files before any public-facing work.
 
 ```bash
 git checkout release/cuda-optimized
 
-# Session prompts
-git rm session-26-blast.md session-26-part2-bugfix.md session-27-quality.md session-27b-threshold.md session-28-community.md
+# Remove session prompts
+git rm -f session-*.md
 
-# Quality test results (raw data — keep scripts, remove results)
-git rm quality-tests/niah_results_*.json
-git rm quality-tests/passkey_results_*.json
-git rm quality-tests/skip_rate_*.json
+# Remove test result JSON (keep test scripts)
+git rm -f quality-tests/*_results_*.json quality-tests/skip_rate_*.json quality-tests/passkey_results_*.json
 
-# Dev files
-git rm AGENTS.md
+# Remove dev files
+git rm -f AGENTS.md
 
-git commit -m "chore: clean release branch — remove session prompts, test results, dev files"
-```
-
-### Files to KEEP on Release
-- `README.md` — the public face
-- `quality-tests/niah_test.py` — useful for users to run their own tests
-- `quality-tests/passkey_retrieval.py` — same
-- `quality-tests/quality-gate.sh` — same
-- `quality-tests/measure_skip_rate.py` — same
-- `quality-tests/run_quality_suite.sh` — same
-- All source code in `ggml/`, `src/`, `common/`, etc.
-
-### Verify .gitignore Blocks Re-addition
-Check that `.gitignore` has:
-```
-/[Ss]ession*
-/SESSION*
-/AGENTS.md
-/CLAUDE.md
-```
-
-### After Cleaning
-```bash
+git commit -m "chore: clean release branch for public release"
 git push myfork release/cuda-optimized
 ```
 
+**Keep**: README.md, quality-tests/*.py, quality-tests/*.sh, all source code.
+
 ---
 
-## TASK 2: Run TheTom's Standardized Benchmark Script
+## TASK 2: KL Divergence vs f16
 
-### Why
-TheTom's community uses `turbo-quick-bench.sh` as the standard. Running it on our build gives directly comparable data. Running it on HIS latest build gives an apples-to-apples comparison.
+TheTom reports KLD for all types. We need the same.
 
-### Step A: Run on Our Build
+Create `quality-tests/kl_divergence.py`. For 100 wikitext-2 prompts (256 tokens each):
+1. Start server with f16 KV → request logprobs (`/v1/completions`, `logprobs: 10`, `max_tokens: 1`)
+2. Restart with each turbo type → request same logprobs
+3. Compute: KLD, top-p agreement %, delta-p RMS
+
+**Use `max_tokens: 1`** — avoids Qwen 3.5 thinking issue entirely.
+
+TheTom's reference numbers (M5 Max, MoE):
+| Type | KLD | Same top-p |
+|------|-----|-----------|
+| q8_0 | 0.001549 | 98.43% |
+| turbo4 | 0.009633 | 95.98% |
+| turbo3 | 0.016145 | 94.31% |
+
+Run on 27B Q6_K. If time permits, also MoE (35B-A3B Q4_K_M).
+
+---
+
+## TASK 3: Prefill Context Scaling
+
+TheTom shows prefill tok/s at 2K, 4K, 8K, 16K, 32K. We don't have this.
 
 ```bash
-# Copy TheTom's benchmark script to our repo
-cp /home/erol/ai/turboquant/research/llama-cpp-turboquant/.trash/research/repos/TheTom-turboquant_plus/scripts/turbo-quick-bench.sh quality-tests/
+MODEL=/home/erol/ai/turboquant/models/opus-v2-Q6_K.gguf
 
-# Adapt paths for our build
-# The script expects: turbo-quick-bench.sh <model.gguf> [llama_dir]
-# Our llama_dir is the repo root, build is at build/bin/
-
-# Run on 27B Q6_K
-bash quality-tests/turbo-quick-bench.sh --no-ref \
-  /home/erol/ai/turboquant/models/opus-v2-Q6_K.gguf \
-  /home/erol/ai/turboquant/turboquant-kv-cache
-
-# Run on 9B Q8_0
-bash quality-tests/turbo-quick-bench.sh --no-ref \
-  /home/erol/ai/turboquant/models/Qwen3.5-9B-Q8_0.gguf \
-  /home/erol/ai/turboquant/turboquant-kv-cache
+for CTX in 512 4096 8192 16384 32768; do
+  for TYPE in q8_0 turbo4 turbo3 turbo2 turbo1.5; do
+    echo "=== $TYPE pp$CTX ==="
+    ./build/bin/llama-bench -m $MODEL -fa 1 -ctk $TYPE -ctv $TYPE -ngl 99 -t 1 -r 3 -p $CTX -n 0 -mmp 0 2>&1 | grep "pp$CTX"
+  done
+done
 ```
 
-**Note**: The script expects `build-turbo/bin/` — you may need to edit it to use `build/bin/` or create a symlink.
+Build table:
+| Context | q8_0 | turbo4 | turbo3 | turbo2 | turbo1.5 |
+|---------|------|--------|--------|--------|----------|
+| pp512 | | | | | |
+| pp4096 | | | | | |
+| pp8192 | | | | | |
+| pp16384 | | | | | |
+| pp32768 | | | | | |
 
-### Step B: Clone and Build TheTom's Latest, Run Same Script
+---
+
+## TASK 4: Sparse V ON/OFF Delta
+
+TheTom claims "Sparse V ON/OFF delta = 0.000" on PPL. We need to prove the same for CUDA.
+
+Temporarily disable sparse V (set threshold to 0 or very small), rebuild, run PPL:
+
+```cuda
+// In fattn-vec.cuh, temporarily change:
+constexpr float sparse_v_threshold_f = V_is_low_bpv ? 1e-2f : 5e-3f;
+// To:
+constexpr float sparse_v_threshold_f = 0.0f;  // TEMP: sparse V disabled
+```
+
+Run:
+```bash
+# turbo3 PPL at ctx=512 and ctx=2048 — should be IDENTICAL to sparse V enabled
+# turbo3 speed at 32K — should be SLOWER (this measures the speed gain)
+```
+
+Record:
+| Metric | Sparse V ON | Sparse V OFF | Delta |
+|--------|:-----------:|:------------:|:-----:|
+| turbo3 PPL 512 | 6.852 | ? | should be 0.000 |
+| turbo3 PPL 2048 | 5.674 | ? | should be 0.000 |
+| turbo3 32K tok/s | 56.28 | ? | should be -X% |
+
+Revert after testing.
+
+---
+
+## TASK 5: Norm Correction Impact
+
+TheTom claims -1.17% PPL on CUDA. We have norm correction (from HyperionMS2040's S26 block-128 fix) but never measured the delta.
+
+Check if norm correction can be toggled. In `set-rows.cu`, look for:
+```cuda
+const float corrected_norm = (recon_norm > 1e-10f) ? grp_norm / recon_norm : grp_norm;
+```
+
+Temporarily change to `const float corrected_norm = grp_norm;` (disable correction), rebuild, run PPL. Compare.
+
+| Metric | With Correction | Without | Delta |
+|--------|:-:|:-:|:-:|
+| turbo3 PPL 512 | 6.852 | ? | should be worse without |
+
+Revert after testing.
+
+---
+
+## TASK 6: Block-Size Ablation (32 vs 128)
+
+TheTom documents 4.6x vs 5.12x compression. We standardized on 128 but should show the comparison.
+
+Temporarily revert `QK_TURBO3=32` and `QK_TURBO2=32` in `ggml-common.h`. Also revert the SET_ROWS warp-to-block changes (restore `blk = blk_base + warp_id`). Rebuild, run PPL + speed.
 
 ```bash
-cd /home/erol/ai/turboquant
-git clone https://github.com/TheTom/llama-cpp-turboquant.git thetom-latest
-cd thetom-latest
-git checkout feature/turboquant-kv-cache
+# Block-32: PPL + speed
+./build/bin/llama-perplexity -m $MODEL -f $WIKI -c 512 -ctk turbo3 -ctv turbo3 -fa on --chunks 8 -ngl 99 --no-mmap
+./build/bin/llama-bench -m $MODEL -fa 1 -ctk turbo3 -ctv turbo3 -d 32768 -ngl 99 -t 1 -r 3 -p 0 -n 32 -mmp 0
+```
 
+Record:
+| Block Size | bpv | Compression | PPL 512 | 32K tok/s |
+|:----------:|:---:|:-----------:|:-------:|:---------:|
+| 32 | 3.50 | 4.57x | ? | ? |
+| 128 | 3.125 | 5.12x | 6.852 | 56.28 |
+
+Revert to block-128 after testing. This is reference data for the README.
+
+---
+
+## TASK 7: Asymmetric K/V Quality Matrix
+
+TheTom documents which asymmetric combos work and which are catastrophic. We need the same.
+
+```bash
+MODEL=/home/erol/ai/turboquant/models/opus-v2-Q6_K.gguf
+WIKI=$(find /home/erol/ai/turboquant -name "wiki.test.raw" 2>/dev/null | head -1)
+
+# Key combos to test:
+for K in q8_0 turbo4 turbo3 turbo2; do
+  for V in q8_0 turbo4 turbo3 turbo2; do
+    echo "=== K=$K V=$V ==="
+    ./build/bin/llama-perplexity -m $MODEL -f $WIKI -c 512 -ctk $K -ctv $V -fa on --chunks 8 -ngl 99 --no-mmap 2>&1 | grep "Final"
+  done
+done
+```
+
+Build matrix:
+| K \ V | q8_0 | turbo4 | turbo3 | turbo2 |
+|-------|:----:|:------:|:------:|:------:|
+| q8_0 | baseline | | | |
+| turbo4 | | | | |
+| turbo3 | | | | |
+| turbo2 | | | | |
+
+This takes ~16 PPL runs × 5 min = ~1.5 hours.
+
+---
+
+## TASK 8: TheTom's Benchmark Comparison (Our Build vs His)
+
+Run his standardized script on both builds with the same model.
+
+```bash
+# Our build (already built)
+# Adapt his script for our build paths
+cp /home/erol/ai/thetom/turboquant_plus/scripts/turbo-quick-bench.sh quality-tests/
+
+# His build
+cd /home/erol/ai/thetom/llama-cpp-turboquant
 cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=120
 cmake --build build -j$(nproc)
-
-# Run same benchmark on same models
-bash scripts/turbo-quick-bench.sh --no-ref \
-  /home/erol/ai/turboquant/models/opus-v2-Q6_K.gguf \
-  /home/erol/ai/turboquant/thetom-latest
 ```
 
-### Step C: Side-by-Side Comparison Table
-
-| Metric | Madreag (ours) | TheTom (latest) | Delta |
-|--------|:-:|:-:|:-:|
-| turbo3 PPL ctx=512 | | | |
-| turbo3 decode tg128 | | | |
-| turbo3 NIAH 3/3 | | | |
-| turbo4 PPL ctx=512 | | | |
-| turbo4 decode tg128 | | | |
-
-This is the data that goes in the Discussion post.
+Run on same model (9B Q8_0 or 27B Q6_K), record side-by-side.
 
 ---
 
-## TASK 3: Prepare 3090 Ti and 4090M Benchmark Prompts
+## TASK 9: Write Discussion #20969 Post
 
-Create updated prompts in `/mnt/c/vaults/dump/` for remote machines to run TheTom's benchmark script.
+With ALL metrics collected, write the post. Include every table from the checklist.
 
-### 3090 Ti Prompt (`/mnt/c/vaults/dump/3090ti_s28_bench.md`)
+**Structure**:
+1. Headline: ALL types beat q8_0 at both short and 32K. 5.12x turbo3, 7.53x turbo2.
+2. Performance table (S26 final)
+3. Prefill context scaling (Task 3)
+4. Quality: PPL + KLD + wikitext-103 50-chunk
+5. Sparse V validation (ON/OFF delta = 0, speed gain quantified)
+6. NIAH matrices (5090 + 3090 Ti)
+7. Cross-GPU: 1,351+ iterations, 3090 Ti stock + OC, 4090M
+8. Block-128 ablation (Task 6)
+9. Asymmetric matrix (Task 7)
+10. TheTom comparison (Task 8)
+11. Limitations (2-bit long-ctx degradation, SM120 D=256 LUT)
+12. Configuration recommendations
+13. Attribution
 
-```markdown
-# 3090 Ti — TheTom Standardized Benchmark
+Save to `/mnt/c/vaults/forge/09 Community/discussion_20969_final.md`.
 
-Clone BOTH repos, build both, run turbo-quick-bench.sh on same model.
+---
 
-## Our build:
-git clone https://github.com/Madreag/turbo3-cuda.git madreag-build
-cd madreag-build && git checkout release/cuda-optimized
-cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=86
-cmake --build build -j$(nproc)
+## TASK 10: Prepare Upstream PR
 
-## TheTom's build:
-git clone https://github.com/TheTom/llama-cpp-turboquant.git thetom-build
-cd thetom-build && git checkout feature/turboquant-kv-cache
-cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=86
-cmake --build build -j$(nproc)
+Same as before — squash logical features, include speed+PPL data per commit, save draft.
 
-## Run on 9B Q8_0:
-bash scripts/turbo-quick-bench.sh --no-ref $MODEL madreag-build
-bash scripts/turbo-quick-bench.sh --no-ref $MODEL thetom-build
+Save to `/mnt/c/vaults/forge/09 Community/upstream_pr_draft.md`.
 
-Upload results to /mnt/c/vaults/dump/3090ti_s28_comparison.md
+---
+
+## TASK 11: Update README with All New Metrics
+
+Add sections for:
+- KL divergence table
+- Prefill context scaling table
+- Sparse V ON/OFF delta
+- Block-size ablation
+- Asymmetric K/V matrix (or key combos)
+- Norm correction impact note
+
+---
+
+## TASK 12: Check Dump Folder + Update Vault + Push
+
+```bash
+ls /mnt/c/vaults/dump/*s28* /mnt/c/vaults/dump/*comparison* 2>/dev/null
 ```
 
-Same for 4090M with SM89.
-
----
-
-## TASK 4: KL Divergence Measurement
-
-Same as before — create `quality-tests/kl_divergence.py`, measure all types vs f16. Use `max_tokens: 1` to avoid thinking model issues. This data goes in the Discussion post.
-
----
-
-## TASK 5: Cross-Format Sparse V
-
-Apply sparse V to q8_0/q4_0 types. Must stay constexpr (S27 proved non-constexpr spills registers). Measure q8_0 speed at 32K before/after. If +3-5% with bit-exact PPL, this is an upstream llama.cpp contribution.
-
----
-
-## TASK 6: Write Discussion #20969 Post
-
-### Data Sources for the Post
-1. **Speed**: S26 final table (all types, short + 32K) + TheTom comparison from Task 2
-2. **Quality**: S27 wikitext-103 PPL table + KLD from Task 4
-3. **NIAH**: 3090 Ti data (turbo3 86.4% beats q8_0) + 5090 data
-4. **Cross-GPU**: 3090 Ti stock + OC, 4090M, 5090 (from dump folder)
-5. **Compression**: Block-128 bpv (turbo3 5.12x, turbo2 7.53x)
-6. **TheTom comparison**: Apples-to-apples from Task 2
-
-### Structure
-1. Headline numbers
-2. Performance table (standardized via TheTom's bench script)
-3. Quality table (PPL + KLD)
-4. NIAH matrices
-5. Cross-GPU data
-6. What optimizations we did (brief, link to repo for details)
-7. Honest limitations (2-bit degradation at long ctx, SM120 D=256 LUT disabled)
-8. Configuration recommendations (reference TheTom's guide)
-9. Attribution (TheTom, signalnine, spiritbuun, HyperionMS2040)
-10. Link to repo + invite testing
-
-### Save To
-`/mnt/c/vaults/forge/09 Community/discussion_20969_final.md`
-
----
-
-## TASK 7: Prepare Upstream PR
-
-### What Goes in the PR to TheTom/llama-cpp-turboquant
-
-**Include** (squashed into logical commits):
-1. Sparse V type-adaptive thresholds (5e-3/1e-2)
-2. Half-precision LUT (D≤128)
-3. Block-128 storage + SET_ROWS fix (credit HyperionMS2040)
-4. nthreads_KQ=8 all types
-5. constexpr centroids
-6. turbo4/turbo1.5 vec_dot Q_reg fix
-7. D=256 LUT disable on SM120
-8. L2 prefetch hints
-9. `__expf` softmax
-10. `__launch_bounds__(128, 3)`
-11. 8-wide LUT scoring
-
-**Do NOT include**: session files, vault, AGENTS.md, dead code removal hack, quality test JSON results
-
-### PR Description
-Title: `feat: CUDA optimizations — all types beat q8_0 at 32K, block-128 5.12x compression`
-
-Body: link to Discussion #20969 post, summary table, attribution, test methodology.
-
-### Save To
-`/mnt/c/vaults/forge/09 Community/upstream_pr_draft.md`
-
----
-
-## TASK 8: Update README for Release
-
-### Add
-- KLD section (Task 4 data)
-- NIAH depth×context matrices (existing data — format for README)
-- Community hardware: 3090 Ti (stock + OC), 4090M (from dump folder)
-- Configuration recommendations (reference TheTom's guide)
-
-### Remove/Clean
-- Any references to session numbers in the main text (keep in Contributions section commits)
-- Any stale numbers (verify all match S26 final)
-
----
-
-## TASK 9: Update Vault and Push
-
-- `01 Sessions/Session 28.md`
-- `03 Benchmarks/Benchmark Hub.md` — KLD data, TheTom comparison
-- `09 Community/discussion_20969_final.md`
-- `09 Community/upstream_pr_draft.md`
-- `00 Dashboard/Project Status.md`
-- `08 Plans/Roadmap.md` — S28 DONE
-- Push to `release/cuda-optimized`
+Update vault: Session 28 note, Benchmark Hub, Dashboard, Roadmap S28 DONE. Push to release.
 
 ---
 
 ## EXECUTION ORDER
 
-1. **Clean release branch** (Task 1) — 15 min
-2. **Run TheTom's bench on our build** (Task 2A) — 15 min
-3. **Clone + build TheTom's latest, run bench** (Task 2B) — 30 min
-4. **Write 3090 Ti / 4090M prompts** (Task 3) — 15 min
-5. **KL divergence** (Task 4) — 3-4 hours
-6. **Cross-format sparse V** (Task 5) — 2 hours
-7. **Discussion post draft** (Task 6) — 2 hours
-8. **PR draft** (Task 7) — 2 hours
-9. **README update** (Task 8) — 1 hour
-10. **Vault + push** (Task 9) — 30 min
+1. Clean release branch (Task 1) — 15 min
+2. Prefill context scaling (Task 3) — 30 min
+3. Sparse V ON/OFF delta (Task 4) — 30 min
+4. Norm correction impact (Task 5) — 30 min
+5. Block-size ablation (Task 6) — 45 min (requires rebuild twice)
+6. Asymmetric K/V matrix (Task 7) — 1.5 hours
+7. KL divergence (Task 2) — 3 hours
+8. TheTom build comparison (Task 8) — 30 min
+9. Write Discussion post (Task 9) — 2 hours
+10. PR draft (Task 10) — 2 hours
+11. README update (Task 11) — 1 hour
+12. Vault + push (Task 12) — 30 min
 
-**Total: ~12-14 hours**
+**Total: ~13 hours**
+
+---
+
+## MODELS
+
+| Model | Path | Use For |
+|-------|------|---------|
+| Qwen 3.5 27B Q6_K | `models/opus-v2-Q6_K.gguf` | PPL, speed, KLD, prefill, all metrics |
+| Qwen 3.5 9B Q8_0 | `models/Qwen3.5-9B-Q8_0.gguf` | Generation, NIAH, TheTom bench comparison |
+| MoE 35B-A3B Q4_K_M | `models/Qwen3.5-35B-A3B-Q4_K_M.gguf` | MoE KLD (if time) |
 
 ---
 
 ## SUCCESS CRITERIA
 
-- [ ] Release branch clean (no session prompts, test results JSON, AGENTS.md)
-- [ ] TheTom's bench script run on our build + his build (comparison table)
-- [ ] 3090 Ti + 4090M prompts written and placed in dump folder
-- [ ] KLD measured for all types
-- [ ] Cross-format sparse V tested on q8_0
-- [ ] Discussion #20969 post drafted (Erol reviews before posting)
-- [ ] Upstream PR drafted (Erol reviews before submitting)
-- [ ] README fully updated for release
-- [ ] Vault updated, release/cuda-optimized pushed
+- [ ] Release branch clean
+- [ ] ALL 15 metrics from checklist collected
+- [ ] KL divergence measured
+- [ ] Prefill context scaling table
+- [ ] Sparse V ON/OFF delta proven (0.000 PPL, +X% speed)
+- [ ] Norm correction impact measured
+- [ ] Block-size ablation documented
+- [ ] Asymmetric K/V matrix
+- [ ] TheTom build comparison
+- [ ] Discussion post drafted
+- [ ] PR drafted
+- [ ] README has all new sections
+- [ ] Vault updated, pushed to release
