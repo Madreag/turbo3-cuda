@@ -75,7 +75,7 @@ def query_server(base_url: str, context: str, passkey: str) -> tuple:
             {"role": "system", "content": "You are a helpful assistant. Read the text carefully and answer precisely."},
             {"role": "user", "content": f"{context}\n\nWhat is the special passkey mentioned in the text above? Respond with ONLY the 5-digit number, nothing else."},
         ],
-        "max_tokens": 500,
+        "max_tokens": 2000,
         "temperature": 0,
     }
     try:

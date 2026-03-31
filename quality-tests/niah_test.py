@@ -82,7 +82,7 @@ def insert_needle(haystack: str, needle: str, depth_percent: float, context_leng
     return before + "\n" + needle + "\n" + after
 
 
-def query_server(base_url: str, prompt: str, max_tokens: int = 1000) -> str:
+def query_server(base_url: str, prompt: str, max_tokens: int = 2000) -> str:
     """Query llama-server via OpenAI-compatible chat completions API."""
     url = f"{base_url}/v1/chat/completions"
     payload = {
