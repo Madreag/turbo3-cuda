@@ -15,7 +15,7 @@ The KV cache is the memory bottleneck for long-context LLM inference. At 32K+ to
 | **turbo2** | 2.125 | 7.53x | Long context / speed | +5.35% PPL, but **fastest at 32K+** on all GPUs |
 | **turbo1.5** | 2.00 | 8x | Maximum compression | +8.18% PPL, most memory savings |
 
-### What This Fork Adds (vs [TheTom's upstream](https://github.com/TheTom/llama-cpp-turboquant))
+### What This Fork Adds (over [TheTom's base implementation](https://github.com/TheTom/llama-cpp-turboquant))
 
 This fork by [@Madreag](https://github.com/Madreag) adds aggressive **CUDA kernel optimizations** that improve turbo decode by **13-68% at 32K context** over the base implementation (verified on 3 GPUs: 5090, 3090, 4090M):
 
@@ -27,9 +27,9 @@ This fork by [@Madreag](https://github.com/Madreag) adds aggressive **CUDA kerne
 | `__launch_bounds__(128, 3)` occupancy | +7-13% at 32K |
 | Half-precision LUT, `__expf` softmax, L2 prefetch | cumulative ~9% |
 
-At short context, both builds are identical (~64 tok/s). The advantage shows at **32K+** where KV bandwidth dominates — the bigger the context, the larger the gain.
+At short context, both builds are identical or near-identical. The advantage shows at **32K+** where KV bandwidth dominates — the bigger the context, the larger the gain.
 
-Built on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, native Flash Attention vec_dot, and MMA prefill. All 4 turbo types with 36 asymmetric K/V combinations. Validated across 5 models, 3 GPUs, 1,351+ stability iterations with zero failures.
+Built on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, native Flash Attention vec_dot, and MMA prefill. All 4 turbo types with 36 asymmetric K/V combinations. Validated across 5 models, 4 GPUs, 1,351+ stability iterations with zero failures.
 
 ## Performance (RTX 5090, Qwen 3.5 27B Q6_K)
 
@@ -153,13 +153,14 @@ The VEC Flash Attention kernel supports **D=64, D=128, D=256** (`D % 64 == 0` re
 
 ## Cross-GPU Validation
 
-Validated on 3 NVIDIA GPUs across 3 architecture generations, **1,351+ total stability iterations, zero failures**:
+Validated on 4 NVIDIA GPUs across 3 architecture generations, **1,351+ total stability iterations, zero failures**:
 
 | GPU | SM | VRAM | Stability | PPL Drift | turbo2 > q8_0 at 32K? |
 |-----|:--:|-----:|:---------:|:---------:|:---------------------:|
 | RTX 5090 | SM120 | 32 GB | 340+ iterations | None | Yes (58.61 vs 55.60) |
 | RTX 3090 Ti (OC) | SM86 | 24 GB | 486+ iterations, 48 PPL checks | Bit-exact | Yes (81.58 vs 77.44) |
-| RTX 4090M | SM89 | 16 GB | 425+ iterations, 14+ PPL checks | Bit-exact | Yes (55.15 vs 55.13) |
+| RTX 3090 | SM86 | 24 GB | 100+ iterations | PPL bit-exact | Yes (63.12 vs 61.0) |
+| RTX 4090M | SM89 | 16 GB | 425+ iterations, 14+ PPL checks | Bit-exact | Yes (52.7 vs 52.0) |
 
 ### RTX 3090 Ti (SM86, 24 GB GDDR6X, OC +2200 mem, Qwen 3.5 9B Q8_0)
 
@@ -179,13 +180,13 @@ turbo2 at 32K = **81.58 tok/s** — beats q8_0 (77.44) by 5.3% at 7.5x compressi
 
 | Type | bpv | Short | 32K | PPL ctx=512 |
 |------|----:|------:|----:|:-----------:|
-| q8_0 | 8.5 | 58.88 | 55.13 | 9.374 |
-| turbo4 | 4.25 | 58.83 | 52.80 | 9.535 |
-| **turbo3** | **3.125** | **58.50** | **51.52** | 9.683 |
-| **turbo2** | **2.125** | **57.68** | **55.15** | 9.584 |
-| turbo1.5 | 2.00 | 56.87 | 51.36 | 10.394 |
+| q8_0 | 8.5 | 55.5 | 52.0 | 9.374 |
+| turbo4 | 4.25 | 55.9 | 52.4 | 9.535 |
+| turbo3 | 3.125 | 55.7 | 49.0 | 9.683 |
+| **turbo2** | **2.125** | **55.9** | **52.7** | 9.584 |
+| turbo1.5 | 2.00 | 55.7 | 48.3 | 10.394 |
 
-All types 57-59 tok/s at short context after GPU warmup. turbo2 at 32K **matches q8_0** (55.15 vs 55.13) on a 16GB laptop GPU. Max context capped at 32K (65K crashes WSL2 OOM). Speed not yet re-measured with `-d` flag methodology. NIAH (max_tokens=2000): q8_0/turbo3/turbo2 all 90%, turbo1.5 35%. Retest with max_tokens=4000 pending.
+All types ~55-56 tok/s at short context. turbo2 at 32K **matches q8_0** (52.7 vs 52.0) on a 16GB laptop GPU. Max context capped at 32K (65K crashes WSL2 OOM). Speed measured with `-d` flag (tg128 @ depth). NIAH (max_tokens=2000): q8_0/turbo3/turbo2 all 90%, turbo1.5 35%.
 
 ### 32K Context — turbo2 Beats q8_0 on ALL Models (RTX 5090)
 
@@ -329,9 +330,9 @@ CUDA kernel optimizations, cross-GPU validation, and quality testing by [@Madrea
 - D=64/128/256 FA dispatch with graceful D=96 fallback
 
 **Validation:**
-- 1,351+ stability iterations across 3 NVIDIA GPUs (SM86/SM89/SM120), zero failures
+- 1,351+ stability iterations across 4 NVIDIA GPUs (SM86×2/SM89/SM120), zero failures
 - 5-model architecture sweep (D=64/96/128/256, GQA 1:1 to 4:1)
-- NIAH quality testing across 3 GPUs (4K-64K): **100% on 5090** (max_tokens=4000), all types **92% on 3090 Ti** (model-limited)
+- NIAH quality testing across 4 GPUs (4K-64K): **100% on 5090 and 3090**, all types **92% on 3090 Ti**
 - Extreme context: turbo2 at 256K = 42.57 tok/s on consumer RTX 5090
 
 ### Upstream Contributors
