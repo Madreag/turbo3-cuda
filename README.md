@@ -2,9 +2,34 @@
 
 CUDA implementation of [TurboQuant](https://arxiv.org/abs/2504.19874) (ICLR 2026) KV cache compression for llama.cpp, targeting NVIDIA GPUs (SM86+).
 
-**The short version:** TurboQuant compresses the KV cache 4-8x with zero speed penalty at short context and **faster decode at 32K+**. turbo2 beats q8_0 by **5.4%** at 32K (7.5x compression). At 256K context, turbo2 generates **42+ tok/s** on a consumer RTX 5090 — a context length where q8_0/f16 KV would OOM.
+## Why TurboQuant?
 
-Built on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, native Flash Attention vec_dot, and MMA prefill. All 4 turbo types (turbo4/turbo3/turbo2/turbo1.5) with 36 asymmetric K/V combinations. Validated across 5 models, 3 GPUs, 1,351+ stability iterations with zero failures.
+The KV cache is the memory bottleneck for long-context LLM inference. At 32K+ tokens, the KV cache can exceed the model weights in size, consuming VRAM and bandwidth. TurboQuant compresses KV values from 8.5 bits (q8_0) down to 2-4 bits — **slashing memory 4-8x** while maintaining quality. The result: longer context, more concurrent users, and on bandwidth-limited GPUs, **faster decode**.
+
+### The 4 Turbo Types at a Glance
+
+| Type | Bits/Value | Compression | Best For | Trade-off |
+|------|:---------:|:-----------:|----------|-----------|
+| **turbo4** | 4.25 | 3.8x | Best quality | +0.97% PPL, lowest KL divergence |
+| **turbo3** | 3.125 | 5.12x | Best balance | +1.38% PPL at ctx=512, **equals q8_0 at ctx=2048** |
+| **turbo2** | 2.125 | 7.53x | Long context / speed | +5.35% PPL, but **fastest at 32K+** on all GPUs |
+| **turbo1.5** | 2.00 | 8x | Maximum compression | +8.18% PPL, most memory savings |
+
+### What This Fork Adds (vs [TheTom's upstream](https://github.com/TheTom/llama-cpp-turboquant))
+
+This fork by [@Madreag](https://github.com/Madreag) adds aggressive **CUDA kernel optimizations** that make turbo types **13-46% faster at 32K context** vs TheTom's build on the same GPU:
+
+| Optimization | Impact |
+|---|---|
+| 8-wide LUT scoring (turbo3/turbo2) | +4.7% at 32K |
+| `nthreads_KQ=8` for all types | up to +17.7% at 32K |
+| Sparse V skip (type-adaptive thresholds) | +4.6% at 32K, zero PPL cost |
+| `__launch_bounds__(128, 3)` occupancy | +7-13% at 32K |
+| Half-precision LUT, `__expf` softmax, L2 prefetch | cumulative ~9% |
+
+At short context, both builds are identical (~64 tok/s). The advantage shows at **32K+** where KV bandwidth dominates — the bigger the context, the larger the gain.
+
+Built on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, native Flash Attention vec_dot, and MMA prefill. All 4 turbo types with 36 asymmetric K/V combinations. Validated across 5 models, 3 GPUs, 1,351+ stability iterations with zero failures.
 
 ## Performance (RTX 5090, Qwen 3.5 27B Q6_K)
 
