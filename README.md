@@ -186,7 +186,7 @@ turbo2 at 32K = **81.58 tok/s** — beats q8_0 (77.44) by 5.3% at 7.5x compressi
 | **turbo2** | **2.125** | **55.9** | **52.7** | 9.584 |
 | turbo1.5 | 2.00 | 55.7 | 48.3 | 10.394 |
 
-All types ~55-56 tok/s at short context. turbo2 at 32K **matches q8_0** (52.7 vs 52.0) on a 16GB laptop GPU. Max context capped at 32K (65K crashes WSL2 OOM). Speed measured with `-d` flag (tg128 @ depth). NIAH (max_tokens=2000): q8_0/turbo3/turbo2 all 90%, turbo1.5 35%.
+All types ~55-56 tok/s at short context. turbo2 at 32K **matches q8_0** (52.7 vs 52.0) on a 16GB laptop GPU. Max context capped at 32K (65K crashes WSL2 OOM). Speed measured with `-d` flag (tg128 @ depth). NIAH (max_tokens=4000): q8_0=turbo3=**100%**, turbo2=**95%**, turbo1.5=50%.
 
 ### 32K Context — turbo2 Beats q8_0 on ALL Models (RTX 5090)
 
