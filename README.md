@@ -275,8 +275,8 @@ Measured by comparing the base TurboQuant implementation against the optimized f
 | Type | Before | After | Improvement |
 |------|:------:|:-----:|:-----------:|
 | q8_0 32K | 56.91 | 61.0 | **+7.2%** |
-| turbo4 32K | ~35.9 | 60.28 | **+68%** |
-| turbo3 32K | ~45.0 | 56.82 | **+26%** |
+| turbo4 32K | 35.63 | 60.28 | **+69%** |
+| turbo3 32K | 44.79 | 56.82 | **+27%** |
 | turbo2 32K | 53.21 | 63.12 | **+19%** |
 | turbo3 64K | 33.43 | 49.27 | **+47%** |
 | turbo2 64K | 42.45 | 56.91 | **+34%** |
