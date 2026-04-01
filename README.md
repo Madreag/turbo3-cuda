@@ -35,7 +35,7 @@ Built on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, na
 
 | Type | Bits/Value | Compression | Short Decode | 32K Decode | PPL ctx=512 | PPL ctx=2048 |
 |------|:---------:|:-----------:|:------------:|:----------:|:-----------:|:------------:|
-| q8_0 | 8.5 | 1.9x | 63.40 tok/s | 55.60 | 6.759 | 5.674 |
+| q8_0 | 8.5 | 1.88x | 63.40 tok/s | 55.60 | 6.759 | 5.674 |
 | turbo4 | 4.25 | 3.76x | 63.70 | **56.73** | 6.825 (+0.97%) | 5.694 |
 | turbo3 | 3.125 | 5.12x | 63.55 | **55.84** | 6.852 (+1.38%) | **5.674 (=q8_0)** |
 | **turbo2** | **2.125** | **7.53x** | **65.50** | **58.61** | 7.121 (+5.35%) | 5.873 |
@@ -56,7 +56,7 @@ Key takeaways from this table:
 | turbo2 32K decode | **58.61 tok/s** — 5.4% faster than q8_0 at 7.5x compression |
 | turbo2 at 256K tokens (Q4_K_M) | **42.57 tok/s** — consumer GPU, 8x cheaper KV than f16 |
 | Kernel optimization impact (4 GPUs) | **+13-69% at 32K** vs base implementation, confirmed on 5090/3090 Ti/3090/4090M |
-| NIAH retrieval (4 GPUs) | **100% on 5090**, all types **92% on 3090 Ti** (model-limited, not turbo) |
+| NIAH retrieval (4 GPUs) | q8_0/turbo3/turbo2 **100% on 5090**, all types **92% on 3090 Ti** |
 | Stability across 4 GPUs | **1,351+ iterations, 0 failures, PPL bit-exact** |
 
 ## Quality (Perplexity)
