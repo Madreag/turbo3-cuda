@@ -247,7 +247,7 @@ Same model, same GPU, back-to-back measurement. TheTom build: `llama-cpp-turboqu
 | turbo3 32K | 55.84 | 46.62 | **+19.8%** |
 | turbo2 32K | 58.61 | 51.69 | **+13.4%** |
 
-Short context is identical between builds (~64-65 tok/s). The Madreag advantage shows at **32K context** where the kernel optimizations (LUT scoring, nthreads_KQ=8, sparse V) reduce KV bandwidth: **+13-46% faster** than TheTom at 32K.
+**Why short is identical but 32K diverges**: At short context, decode time is dominated by model weight loading (~20 GB) — the KV cache is tiny and both builds read it equally fast. At 32K, the KV cache grows to several GB and becomes a significant fraction of total bandwidth. Madreag's optimizations (LUT scoring, nthreads_KQ=8, sparse V skip) reduce the per-token KV access cost, which only matters when KV is large enough to compete with weight loading. The bigger the KV cache relative to model weights, the larger the advantage — hence turbo4 (+46%) benefits more than turbo2 (+13%) because turbo4's larger KV makes TheTom's unoptimized dequant path more expensive.
 
 ### Quality (wikitext-2, 8 chunks)
 
