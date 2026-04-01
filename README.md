@@ -10,9 +10,9 @@ Built on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, na
 
 | Type | Bits/Value | Compression | Short Decode | 32K Decode | PPL ctx=512 | PPL ctx=2048 |
 |------|:---------:|:-----------:|:------------:|:----------:|:-----------:|:------------:|
-| q8_0 | 8.5 | 1.9x | 64.56 tok/s | 55.60 | 6.759 | 5.674 |
+| q8_0 | 8.5 | 1.9x | 63.40 tok/s | 55.60 | 6.759 | 5.674 |
 | turbo4 | 4.25 | 3.8x | 63.70 | **56.73** | 6.825 (+0.97%) | 5.694 |
-| turbo3 | 3.125 | 5.12x | 64.50 | **55.84** | 6.852 (+1.38%) | **5.674 (=q8_0)** |
+| turbo3 | 3.125 | 5.12x | 63.55 | **55.84** | 6.852 (+1.38%) | **5.674 (=q8_0)** |
 | **turbo2** | **2.125** | **7.53x** | **65.50** | **58.61** | 7.121 (+5.35%) | 5.873 |
 | turbo1.5 | 2.00 | 8.0x | 63.13 | 55.16 | 7.312 (+8.18%) | 6.103 |
 
@@ -22,7 +22,7 @@ Key takeaways from this table:
 - **turbo2 at 32K beats q8_0 by 5.4%** (58.61 vs 55.60) — the long-context champion at 7.5x compression
 - **turbo4 at 32K beats q8_0 by 2.0%** (56.73 vs 55.60) at 3.8x compression, best quality
 - **turbo3 PPL at ctx=2048 equals q8_0** (5.674 = 5.674) — lossless quality at 5.1x compression
-- **All types match q8_0 at short context** (~64 tok/s) — zero overhead from turbo encoding
+- **All types match or beat q8_0 at short context** — turbo2 +3.3%, others within 1%
 
 **More highlights across models and contexts:**
 
@@ -60,10 +60,10 @@ Combining Q4_K_M weight quantization with turbo KV cache compression enables ext
 
 | KV Type | bpv | 32K | 65K | 131K | 256K |
 |---------|----:|----:|----:|-----:|-----:|
-| turbo4 | 4.25 | 66.33 | 60.41 | ~49.5 | OOM |
+| turbo4 | 4.25 | 66.33 | 60.41 | 49.06 | OOM |
 | **turbo3** | **3.125** | **66.88** | 58.37 | 47.36 | **35.38** |
 | **turbo2** | **2.125** | **70.65** | **63.94** | **51.23** | **42.57** |
-| turbo1.5 | 2.00 | 64.77 | 57.99 | 44.83 | 33.40 |
+| turbo1.5 | 2.00 | 64.77 | 57.99 | 46.38 | 33.40 |
 
 turbo2 is the long-context champion at every depth. At 256K, turbo2 generates **42+ tok/s** on a consumer 5090 — a context length where q8_0 would OOM.
 
@@ -167,7 +167,7 @@ All types 57-59 tok/s at short context after GPU warmup. turbo2 at 32K **matches
 
 | Model | Params | D | turbo2 32K | q8_0 32K | Advantage |
 |-------|-------:|:-:|----------:|---------:|:---------:|
-| Phi-4-mini | 3.84B | 128 | 183.78 | 139.72 | **+32%** |
+| Phi-4-mini | 3.84B | 128 | 182.50 | 139.72 | **+31%** |
 | Llama-3.3-8B | 8.03B | 128 | 131.64 | 117.73 | **+12%** |
 | Gemma-3-12B | 12.2B | 256 | 104.50 | 95.76 | **+9%** |
 | Qwen 27B | 26.9B | 256 | 58.61 | 55.60 | **+5%** |
