@@ -17,7 +17,7 @@ The KV cache is the memory bottleneck for long-context LLM inference. At 32K+ to
 
 ### What This Fork Adds (vs [TheTom's upstream](https://github.com/TheTom/llama-cpp-turboquant))
 
-This fork by [@Madreag](https://github.com/Madreag) adds aggressive **CUDA kernel optimizations** that make turbo types **13-68% faster at 32K context** vs TheTom's build (verified on 3 GPUs: 5090, 3090, 4090M):
+This fork by [@Madreag](https://github.com/Madreag) adds aggressive **CUDA kernel optimizations** that improve turbo decode by **13-68% at 32K context** over the base implementation (verified on 3 GPUs: 5090, 3090, 4090M):
 
 | Optimization | Impact |
 |---|---|
@@ -55,7 +55,7 @@ Key takeaways from this table:
 |--------|---------|
 | turbo2 32K decode | **58.61 tok/s** — 5.4% faster than q8_0 at 7.5x compression |
 | turbo2 at 256K tokens (Q4_K_M) | **42.57 tok/s** — consumer GPU, 8x cheaper KV than f16 |
-| vs TheTom at 32K (3 GPUs) | **+13-68% faster** — turbo4 up to +68%, turbo2 +13-19%, confirmed on 5090/3090/4090M |
+| Kernel optimization impact (3 GPUs) | **+13-68% at 32K** vs base implementation, confirmed on 5090/3090/4090M |
 | NIAH retrieval (3 GPUs) | **100% on 5090**, all types **92% on 3090 Ti** (model-limited, not turbo) |
 | Stability across 3 GPUs | **1,351+ iterations, 0 failures, PPL bit-exact** |
 
@@ -256,44 +256,42 @@ V type dominates PPL (columns vary more than rows). K compression is nearly free
 - **FP4 tensor core acceleration**: Not viable. Q values are too small for E2M1 (99.5% map to zero), and no mixed fp16×E2M1 MMA instruction exists on SM120.
 - **Known Gemma 3 issues**: Gibberish after context shift and slow quantized KV cache are upstream llama.cpp bugs, not TurboQuant-specific.
 
-## Madreag vs TheTom — Head-to-Head
+## Impact of CUDA Kernel Optimizations
 
-Back-to-back measurements on same GPU, same model. TheTom build: `llama-cpp-turboquant @ feature/turboquant-kv-cache` (latest with sparse V + Boundary V). All speed measured with `-d` flag (tg128 @ depth).
+Measured by comparing the base TurboQuant implementation against the optimized fork on the same GPU, same model, back-to-back. All speed with `-d` flag (tg128 @ depth).
 
 ### RTX 5090 (27B Q6_K)
 
-| Type | Madreag | TheTom | Advantage |
-|------|:-------:|:------:|:---------:|
-| turbo4 short | 63.70 | 63.86 | ~tie |
-| turbo3 short | 64.50 | ~64.50 | ~tie |
-| turbo2 short | 65.50 | 65.60 | ~tie |
-| turbo4 32K | 56.73 | 38.88 | **+45.9%** |
-| turbo3 32K | 55.84 | 46.62 | **+19.8%** |
-| turbo2 32K | 58.61 | 51.69 | **+13.4%** |
+| Type | Before | After | Improvement |
+|------|:------:|:-----:|:-----------:|
+| Short (all types) | 63-65 | 63-65 | ~tie |
+| turbo4 32K | 38.88 | 56.73 | **+45.9%** |
+| turbo3 32K | 46.62 | 55.84 | **+19.8%** |
+| turbo2 32K | 51.69 | 58.61 | **+13.4%** |
 
 ### RTX 3090 (9B Q8_0)
 
-| Type | Madreag | TheTom | Advantage |
-|------|:-------:|:------:|:---------:|
-| All types short | 72-73 | 69-70 | **+5%** |
-| q8_0 32K | 61.0 | 56.91 | **+7.2%** |
-| turbo4 32K | 60.28 | ~35.9 | **+68%** |
-| turbo3 32K | 56.82 | ~45.0 | **+26%** |
-| turbo2 32K | 63.12 | 53.21 | **+19%** |
-| turbo3 64K | 49.27 | 33.43 | **+47%** |
-| turbo2 64K | 56.91 | 42.45 | **+34%** |
+| Type | Before | After | Improvement |
+|------|:------:|:-----:|:-----------:|
+| Short (all types) | 69-70 | 72-73 | **+5%** |
+| q8_0 32K | 56.91 | 61.0 | **+7.2%** |
+| turbo4 32K | ~35.9 | 60.28 | **+68%** |
+| turbo3 32K | ~45.0 | 56.82 | **+26%** |
+| turbo2 32K | 53.21 | 63.12 | **+19%** |
+| turbo3 64K | 33.43 | 49.27 | **+47%** |
+| turbo2 64K | 42.45 | 56.91 | **+34%** |
 
 ### RTX 4090M (9B Q8_0)
 
-| Type | Madreag | TheTom | Advantage |
-|------|:-------:|:------:|:---------:|
-| All types short | 55-56 | 55-56 | ~tie |
-| q8_0 32K | 52.0 | 48.2 | **+8%** |
-| turbo4 32K | 52.4 | 34.5 | **+52%** |
-| turbo3 32K | 49.0 | 40.3 | **+22%** |
-| turbo2 32K | 52.7 | 44.9 | **+17%** |
+| Type | Before | After | Improvement |
+|------|:------:|:-----:|:-----------:|
+| Short (all types) | 55-56 | 55-56 | ~tie |
+| q8_0 32K | 48.2 | 52.0 | **+8%** |
+| turbo4 32K | 34.5 | 52.4 | **+52%** |
+| turbo3 32K | 40.3 | 49.0 | **+22%** |
+| turbo2 32K | 44.9 | 52.7 | **+17%** |
 
-**Pattern across 3 GPUs**: Short context is identical or near-identical (weight-loading bound). The Madreag advantage appears at **32K+** where KV bandwidth dominates — kernel optimizations (LUT scoring, nthreads_KQ=8, sparse V skip) reduce per-token KV access cost. turbo4 benefits most (+46-68%) because its larger KV makes TheTom's unoptimized dequant path more expensive. Advantage grows with context depth: 32K → 64K shows +34-47% on the 3090.
+**Pattern across 3 GPUs**: Short context is identical or near-identical (weight-loading bound). Optimizations show at **32K+** where KV bandwidth dominates — LUT scoring, nthreads_KQ=8, and sparse V skip reduce per-token KV access cost. turbo4 benefits most (+46-68%) because its larger KV amplifies the unoptimized dequant cost. Advantage grows with context depth: 32K → 64K shows +34-47% on the 3090.
 
 ### Quality (wikitext-2, 8 chunks)
 
