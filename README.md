@@ -17,7 +17,7 @@ The KV cache is the memory bottleneck for long-context LLM inference. At 32K+ to
 
 ### What This Fork Adds (over [TheTom's base implementation](https://github.com/TheTom/llama-cpp-turboquant))
 
-This fork by [@Madreag](https://github.com/Madreag) adds aggressive **CUDA kernel optimizations** that improve turbo decode by **13-69% at 32K context** over the base implementation (verified on 3 GPUs: 5090, 3090, 4090M):
+This fork by [@Madreag](https://github.com/Madreag) adds aggressive **CUDA kernel optimizations** that improve turbo decode by **13-69% at 32K context** over the base implementation (verified on 4 GPUs: 5090, 3090 Ti, 3090, 4090M):
 
 | Optimization | Impact |
 |---|---|
@@ -55,9 +55,9 @@ Key takeaways from this table:
 |--------|---------|
 | turbo2 32K decode | **58.61 tok/s** — 5.4% faster than q8_0 at 7.5x compression |
 | turbo2 at 256K tokens (Q4_K_M) | **42.57 tok/s** — consumer GPU, 8x cheaper KV than f16 |
-| Kernel optimization impact (3 GPUs) | **+13-69% at 32K** vs base implementation, confirmed on 5090/3090/4090M |
-| NIAH retrieval (3 GPUs) | **100% on 5090**, all types **92% on 3090 Ti** (model-limited, not turbo) |
-| Stability across 3 GPUs | **1,351+ iterations, 0 failures, PPL bit-exact** |
+| Kernel optimization impact (4 GPUs) | **+13-69% at 32K** vs base implementation, confirmed on 5090/3090 Ti/3090/4090M |
+| NIAH retrieval (4 GPUs) | **100% on 5090**, all types **92% on 3090 Ti** (model-limited, not turbo) |
+| Stability across 4 GPUs | **1,351+ iterations, 0 failures, PPL bit-exact** |
 
 ## Quality (Perplexity)
 
@@ -291,7 +291,7 @@ Measured by comparing the base TurboQuant implementation against the optimized f
 | turbo3 32K | 40.3 | 49.0 | **+22%** |
 | turbo2 32K | 44.9 | 52.7 | **+17%** |
 
-**Pattern across 3 GPUs**: Short context is identical or near-identical (weight-loading bound). Optimizations show at **32K+** where KV bandwidth dominates — LUT scoring, nthreads_KQ=8, and sparse V skip reduce per-token KV access cost. turbo4 benefits most (+46-68%) because its larger KV amplifies the unoptimized dequant cost. Advantage grows with context depth: 32K → 64K shows +34-47% on the 3090.
+**Pattern across 4 GPUs**: Short context is identical or near-identical (weight-loading bound). Optimizations show at **32K+** where KV bandwidth dominates — LUT scoring, nthreads_KQ=8, and sparse V skip reduce per-token KV access cost. turbo4 benefits most (+46-68%) because its larger KV amplifies the unoptimized dequant cost. Advantage grows with context depth: 32K → 64K shows +34-47% on the 3090.
 
 ### Quality (wikitext-2, 8 chunks)
 
