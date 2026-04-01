@@ -52,7 +52,7 @@ Key takeaways from this table:
 | **Best balance** | turbo3 | q8_0 quality at 5.1x compression | `-ctk turbo3 -ctv turbo3` |
 | **Long context** | turbo2 | 32K champion (+5.4% vs q8_0), 42 tok/s at 256K, 7.5x compression | `-ctk turbo2 -ctv turbo2` |
 | **Best quality** | turbo4 | +0.97% PPL at 3.8x compression | `-ctk turbo4 -ctv turbo4` |
-| **Maximum compression** | turbo1.5 | 8x compression, 174 tok/s MoE | `-ctk turbo1.5 -ctv turbo1.5` |
+| **Maximum compression** | turbo1.5 | 8x compression, 212 tok/s MoE | `-ctk turbo1.5 -ctv turbo1.5` |
 
 ## Q4_K_M Weight Quantization (Speed Champion)
 
@@ -167,9 +167,9 @@ All types 57-59 tok/s at short context after GPU warmup. turbo2 at 32K **matches
 
 | Model | Params | D | turbo2 32K | q8_0 32K | Advantage |
 |-------|-------:|:-:|----------:|---------:|:---------:|
-| Phi-4-mini | 3.84B | 128 | 119.79 | 89.12 | **+34%** |
-| Llama-3.3-8B | 8.03B | 128 | 117.02 | 103.35 | **+13%** |
-| Gemma-3-12B | 12.2B | 256 | 82.87 | 77.73 | **+7%** |
+| Phi-4-mini | 3.84B | 128 | 173.38 | 139.72 | **+24%** |
+| Llama-3.3-8B | 8.03B | 128 | 131.64 | ~115 | **+14%** |
+| Gemma-3-12B | 12.2B | 256 | 104.50 | 95.76 | **+9%** |
 | Qwen 27B | 26.9B | 256 | 58.61 | 55.60 | **+5%** |
 
 turbo2 advantage scales with bandwidth-boundedness: smaller models benefit more.
