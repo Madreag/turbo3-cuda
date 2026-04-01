@@ -10,7 +10,7 @@ The KV cache is the memory bottleneck for long-context LLM inference. At 32K+ to
 
 | Type | Bits/Value | Compression | Best For | Trade-off |
 |------|:---------:|:-----------:|----------|-----------|
-| **turbo4** | 4.25 | 3.8x | Best quality | +0.97% PPL, lowest KL divergence |
+| **turbo4** | 4.25 | 3.76x | Best quality | +0.97% PPL, lowest KL divergence |
 | **turbo3** | 3.125 | 5.12x | Best balance | +1.38% PPL at ctx=512, **equals q8_0 at ctx=2048** |
 | **turbo2** | 2.125 | 7.53x | Long context / speed | +5.35% PPL, but **fastest at 32K+** on all GPUs |
 | **turbo1.5** | 2.00 | 8x | Maximum compression | +8.18% PPL, most memory savings |
@@ -36,7 +36,7 @@ Built on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, na
 | Type | Bits/Value | Compression | Short Decode | 32K Decode | PPL ctx=512 | PPL ctx=2048 |
 |------|:---------:|:-----------:|:------------:|:----------:|:-----------:|:------------:|
 | q8_0 | 8.5 | 1.9x | 63.40 tok/s | 55.60 | 6.759 | 5.674 |
-| turbo4 | 4.25 | 3.8x | 63.70 | **56.73** | 6.825 (+0.97%) | 5.694 |
+| turbo4 | 4.25 | 3.76x | 63.70 | **56.73** | 6.825 (+0.97%) | 5.694 |
 | turbo3 | 3.125 | 5.12x | 63.55 | **55.84** | 6.852 (+1.38%) | **5.674 (=q8_0)** |
 | **turbo2** | **2.125** | **7.53x** | **65.50** | **58.61** | 7.121 (+5.35%) | 5.873 |
 | turbo1.5 | 2.00 | 8.0x | 63.13 | 55.16 | 7.312 (+8.18%) | 6.103 |
@@ -45,7 +45,7 @@ Speed measured with `llama-bench -d 32768` (tg128 @ depth), ±0.3% variance. PPL
 
 Key takeaways from this table:
 - **turbo2 at 32K beats q8_0 by 5.4%** (58.61 vs 55.60) — the long-context champion at 7.5x compression
-- **turbo4 at 32K beats q8_0 by 2.0%** (56.73 vs 55.60) at 3.8x compression, best quality
+- **turbo4 at 32K beats q8_0 by 2.0%** (56.73 vs 55.60) at 3.76x compression, best quality
 - **turbo3 PPL at ctx=2048 equals q8_0** (5.674 = 5.674) — lossless quality at 5.1x compression
 - **All types match or beat q8_0 at short context** — turbo2 +3.3%, others within 1%
 
@@ -75,7 +75,7 @@ Key takeaways from this table:
 |---|---|---|---|
 | **Best balance** | turbo3 | q8_0 quality at 5.1x compression | `-ctk turbo3 -ctv turbo3` |
 | **Long context** | turbo2 | 32K champion (+5.4% vs q8_0), 42 tok/s at 256K, 7.5x compression | `-ctk turbo2 -ctv turbo2` |
-| **Best quality** | turbo4 | +0.97% PPL at 3.8x compression | `-ctk turbo4 -ctv turbo4` |
+| **Best quality** | turbo4 | +0.97% PPL at 3.76x compression | `-ctk turbo4 -ctv turbo4` |
 | **Maximum compression** | turbo1.5 | 8x compression, 212 tok/s MoE | `-ctk turbo1.5 -ctv turbo1.5` |
 
 ## Q4_K_M Weight Quantization (Speed Champion)
@@ -234,10 +234,10 @@ Sparse V skips V dequantization for attention positions with negligible weight. 
 
 | K \ V | q8_0 | turbo4 | turbo3 | turbo2 |
 |-------|:----:|:------:|:------:|:------:|
-| q8_0 | 6.640 | 6.694 | 6.689 | 6.863 |
-| turbo4 | 6.658 | 6.710 | 6.709 | 6.882 |
-| turbo3 | 6.670 | 6.726 | 6.725 | 6.885 |
-| turbo2 | 6.817 | 6.869 | 6.843 | 7.040 |
+| q8_0 | 6.6395 | 6.6935 | 6.6885 | 6.8630 |
+| turbo4 | 6.6580 | 6.7102 | 6.7088 | 6.8821 |
+| turbo3 | 6.6698 | 6.7259 | 6.7251 | 6.8849 |
+| turbo2 | 6.8168 | 6.8687 | 6.8429 | 7.0396 |
 
 V type dominates PPL (columns vary more than rows). K compression is nearly free — K=turbo3/V=q8_0 is almost identical to q8_0/q8_0.
 
@@ -331,7 +331,7 @@ CUDA kernel optimizations, cross-GPU validation, and quality testing by [@Madrea
 **Validation:**
 - 1,351+ stability iterations across 4 NVIDIA GPUs (SM86×2/SM89/SM120), zero failures
 - 5-model architecture sweep (D=64/96/128/256, GQA 1:1 to 4:1)
-- NIAH quality testing across 4 GPUs (4K-64K): **100% on 5090 and 3090**, all types **92% on 3090 Ti**
+- NIAH quality testing across 4 GPUs (4K-64K): q8_0/turbo3 **100%** on 5090, 3090, 4090M; all types **92%** on 3090 Ti
 - Extreme context: turbo2 at 256K = 42.57 tok/s on consumer RTX 5090
 
 ### Upstream Contributors
