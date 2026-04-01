@@ -11,10 +11,10 @@ Built on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, na
 | Type | Bits/Value | Compression | Short Decode | 32K Decode | PPL ctx=512 | PPL ctx=2048 |
 |------|:---------:|:-----------:|:------------:|:----------:|:-----------:|:------------:|
 | q8_0 | 8.5 | 1.9x | 64.56 tok/s | 55.60 | 6.759 | 5.674 |
-| **turbo4** | **4.25** | **3.8x** | **63.70** | **56.73** | 6.825 (+0.97%) | 5.694 |
-| **turbo3** | **3.125** | **5.12x** | **64.50** | **55.84** | 6.852 (+1.38%) | **5.674 (=q8_0)** |
+| turbo4 | 4.25 | 3.8x | 63.70 | **56.73** | 6.825 (+0.97%) | 5.694 |
+| turbo3 | 3.125 | 5.12x | 64.50 | **55.84** | 6.852 (+1.38%) | **5.674 (=q8_0)** |
 | **turbo2** | **2.125** | **7.53x** | **65.50** | **58.61** | 7.121 (+5.35%) | 5.873 |
-| **turbo1.5** | **2.00** | **8.0x** | **63.13** | **55.16** | 7.312 (+8.18%) | 6.103 |
+| turbo1.5 | 2.00 | 8.0x | 63.13 | 55.16 | 7.312 (+8.18%) | 6.103 |
 
 Speed measured with `llama-bench -d 32768` (tg128 @ depth), ±0.3% variance. PPL from wikitext-2, 8 chunks.
 
@@ -56,16 +56,16 @@ Key takeaways from this table:
 
 ## Q4_K_M Weight Quantization (Speed Champion)
 
-Combining Q4_K_M weight quantization with turbo KV cache compression yields the highest decode speeds:
+Combining Q4_K_M weight quantization with turbo KV cache compression enables extreme context lengths. Decode speed measured with `llama-bench -d [depth]` (tg128 @ depth):
 
-| Config | Weights | KV | Short | 32K | 65K | 131K | 256K |
-|--------|---------|-----|------:|----:|----:|-----:|-----:|
-| f16 KV | Q4_K_M | f16 | 76.62 | 67.47 | 53.51 | 47.44 | OOM |
-| q8_0 KV | Q4_K_M | q8_0 | 73.40 | 57.24 | 53.45 | 39.13 | OOM |
-| **turbo4 KV** | **Q4_K_M** | **turbo4** | **75.08** | **59.06** | **48.78** | **36.60** | OOM |
-| **turbo3 KV** | **Q4_K_M** | **turbo3** | **77.25** | **60.88** | **57.05** | **45.52** | **29.84** |
-| **turbo2 KV** | **Q4_K_M** | **turbo2** | **74.94** | **61.49** | **54.78** | **53.19** | **36.62** |
-| **turbo1.5 KV** | **Q4_K_M** | **turbo1.5** | 74.85 | 51.60 | 42.23 | 29.72 | 17.53 |
+| KV Type | bpv | 32K | 65K | 131K | 256K |
+|---------|----:|----:|----:|-----:|-----:|
+| turbo4 | 4.25 | 66.33 | 60.41 | ~49.5 | OOM |
+| **turbo3** | **3.125** | **66.88** | 58.37 | 47.36 | **35.38** |
+| **turbo2** | **2.125** | **70.65** | **63.94** | **51.23** | **42.57** |
+| turbo1.5 | 2.00 | 64.77 | 57.99 | 44.83 | 33.40 |
+
+turbo2 is the long-context champion at every depth. At 256K, turbo2 generates **42+ tok/s** on a consumer 5090 — a context length where q8_0 would OOM.
 
 PPL impact: Q4_K_M + turbo3 = 7.127 (+1.39% vs q8_0 = 7.030). Safe on 27B+ models.
 
@@ -170,20 +170,9 @@ All types 57-59 tok/s at short context after GPU warmup. turbo2 at 32K **matches
 | Phi-4-mini | 3.84B | 128 | 119.79 | 89.12 | **+34%** |
 | Llama-3.3-8B | 8.03B | 128 | 117.02 | 103.35 | **+13%** |
 | Gemma-3-12B | 12.2B | 256 | 82.87 | 77.73 | **+7%** |
-| Qwen 27B | 26.9B | 256 | 58.48 | 54.01 | **+8%** |
+| Qwen 27B | 26.9B | 256 | 58.61 | 55.60 | **+5%** |
 
 turbo2 advantage scales with bandwidth-boundedness: smaller models benefit more.
-
-### Extreme Long Context (RTX 5090, Qwen 3.5 27B Q4_K_M)
-
-| Context | turbo4 | turbo3 | turbo2 | turbo1.5 |
-|--------:|:------:|:------:|:------:|:--------:|
-| 32K | 66.33 | 66.88 | **70.65** | 64.77 |
-| 65K | 60.41 | 58.37 | **63.94** | 57.99 |
-| 131K | ~49.5 | 47.36 | **51.23** | 44.83 |
-| 256K | OOM | 35.38 | **42.57** | 33.40 |
-
-Measured with `llama-bench -d [depth]` (tg128 @ depth), ±0.5% variance. q8_0 OOMs above 65K on 32GB. turbo2 is the long-context champion at every depth. At 256K, turbo2 generates **42+ tok/s** — a context length where q8_0/f16 would OOM.
 
 ## KL Divergence vs f16 (RTX 5090, 27B Q6_K, 100 prompts)
 
@@ -216,7 +205,7 @@ Prefill auto-dequants turbo→fp16 and uses MMA/TILE kernels. All types track q8
 
 Sparse V skips V dequantization for attention positions with negligible weight. Proven zero quality impact. Type-adaptive thresholds: 5e-3 for turbo3/turbo4, 1e-2 for turbo2/turbo1.5.
 
-## Asymmetric K/V Quality Matrix (PPL ctx=512, 27B Q6_K)
+## Asymmetric K/V Quality Matrix (PPL ctx=512, 27B Q6_K, wikitext-103 50ch)
 
 | K \ V | q8_0 | turbo4 | turbo3 | turbo2 |
 |-------|:----:|:------:|:------:|:------:|
@@ -299,7 +288,7 @@ CUDA kernel optimizations, cross-GPU validation, and quality testing by [@Madrea
 - 1,351+ stability iterations across 3 NVIDIA GPUs (SM86/SM89/SM120), zero failures
 - 5-model architecture sweep (D=64/96/128/256, GQA 1:1 to 4:1)
 - NIAH quality testing across 3 GPUs (4K-64K): **100% on 5090** (max_tokens=4000), all types **92% on 3090 Ti** (model-limited)
-- Extreme context: turbo2 at 256K = 36.62 tok/s on consumer RTX 5090
+- Extreme context: turbo2 at 256K = 42.57 tok/s on consumer RTX 5090
 
 ### Upstream Contributors
 
