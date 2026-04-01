@@ -201,9 +201,9 @@ Prefill auto-dequants turbo→fp16 and uses MMA/TILE kernels. All types track q8
 | Metric | Sparse V ON | Sparse V OFF | Delta |
 |--------|:-----------:|:------------:|:-----:|
 | turbo3 PPL ctx=512 | 6.7251 | 6.7251 | **0.000** |
-| turbo3 32K tok/s | ~53.7 | 51.34 | **+4.6% speed** |
+| turbo3 32K speed | +4.6% | baseline | **+4.6%** |
 
-Sparse V skips V dequantization for attention positions with negligible weight. Proven zero quality impact. Type-adaptive thresholds: 5e-3 for turbo3/turbo4, 1e-2 for turbo2/turbo1.5.
+Sparse V skips V dequantization for attention positions with negligible weight. Proven zero quality impact via controlled A/B test (PPL bit-identical). Type-adaptive thresholds: 5e-3 for turbo3/turbo4, 1e-2 for turbo2/turbo1.5.
 
 ## Asymmetric K/V Quality Matrix (PPL ctx=512, 27B Q6_K, wikitext-103 50ch)
 
