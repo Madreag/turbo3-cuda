@@ -17,7 +17,7 @@ The KV cache is the memory bottleneck for long-context LLM inference. At 32K+ to
 
 ### What This Fork Adds (over [TheTom's base implementation](https://github.com/TheTom/llama-cpp-turboquant))
 
-This fork by [@Madreag](https://github.com/Madreag) adds aggressive **CUDA kernel optimizations** that improve turbo decode by **13-68% at 32K context** over the base implementation (verified on 3 GPUs: 5090, 3090, 4090M):
+This fork by [@Madreag](https://github.com/Madreag) adds aggressive **CUDA kernel optimizations** that improve turbo decode by **13-69% at 32K context** over the base implementation (verified on 3 GPUs: 5090, 3090, 4090M):
 
 | Optimization | Impact |
 |---|---|
@@ -55,7 +55,7 @@ Key takeaways from this table:
 |--------|---------|
 | turbo2 32K decode | **58.61 tok/s** — 5.4% faster than q8_0 at 7.5x compression |
 | turbo2 at 256K tokens (Q4_K_M) | **42.57 tok/s** — consumer GPU, 8x cheaper KV than f16 |
-| Kernel optimization impact (3 GPUs) | **+13-68% at 32K** vs base implementation, confirmed on 5090/3090/4090M |
+| Kernel optimization impact (3 GPUs) | **+13-69% at 32K** vs base implementation, confirmed on 5090/3090/4090M |
 | NIAH retrieval (3 GPUs) | **100% on 5090**, all types **92% on 3090 Ti** (model-limited, not turbo) |
 | Stability across 3 GPUs | **1,351+ iterations, 0 failures, PPL bit-exact** |
 
