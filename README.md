@@ -295,13 +295,13 @@ Measured by comparing the base TurboQuant implementation against the optimized f
 
 ### Quality (wikitext-2, 8 chunks)
 
-| Metric | Madreag | TheTom |
-|--------|:-------:|:------:|
-| q8_0 PPL 512 | 6.7590 | 6.7590 |
-| turbo3 PPL 512 | 6.8522 | 6.8380 |
-| turbo3 PPL 2048 | **5.6744** (=q8_0) | 5.6997 |
+| Metric | Before | After | Delta |
+|--------|:------:|:-----:|:-----:|
+| q8_0 PPL 512 | 6.7590 | 6.7590 | identical |
+| turbo3 PPL 512 | 6.8380 | 6.8522 | +0.2% |
+| turbo3 PPL 2048 | 5.6997 | **5.6744** (=q8_0) | **-0.4%** (better) |
 
-q8_0 identical. turbo3 at ctx=2048: Madreag equals q8_0 exactly, TheTom +0.45%.
+q8_0 identical. Optimized turbo3 at ctx=2048 equals q8_0 exactly (5.6744 = 5.6744).
 
 ## Acknowledgments and Contributions
 
