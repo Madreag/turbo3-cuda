@@ -1,8 +1,8 @@
-# llama.cpp + TurboQuant CUDA — Up to 8x KV Compression, Faster Than Uncompressed
+# llama.cpp + TurboQuant CUDA — Up to 8x KV Compression, Zero Speed Penalty
 
 CUDA implementation of [TurboQuant](https://arxiv.org/abs/2504.19874) (ICLR 2026) KV cache compression for llama.cpp, targeting NVIDIA GPUs (SM86+).
 
-**The short version:** TurboQuant compresses the KV cache 4-8x while being **faster** than uncompressed. At 32K context, turbo2 beats q8_0 by **5.4%** at 7.5x compression. At 256K context, turbo2 generates **42+ tok/s** on a consumer RTX 5090 — a context length where f16 KV would OOM.
+**The short version:** TurboQuant compresses the KV cache 4-8x with zero speed penalty at short context and **faster decode at 32K+**. turbo2 beats q8_0 by **5.4%** at 32K (7.5x compression). At 256K context, turbo2 generates **42+ tok/s** on a consumer RTX 5090 — a context length where q8_0/f16 KV would OOM.
 
 Built on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, native Flash Attention vec_dot, and MMA prefill. All 4 turbo types (turbo4/turbo3/turbo2/turbo1.5) with 36 asymmetric K/V combinations. Validated across 5 models, 3 GPUs, 1,351+ stability iterations with zero failures.
 
@@ -94,7 +94,7 @@ cmake --build build -j$(nproc)
 # turbo2 (long-context champion — beats q8_0 speed at 32K)
 ./build/bin/llama-cli -hf your-model-GGUF -ctk turbo2 -ctv turbo2 -fa -ngl 99
 
-# turbo1.5 (8x compression, best for 128K+)
+# turbo1.5 (8x compression, maximum memory savings)
 ./build/bin/llama-cli -hf your-model-GGUF -ctk turbo1.5 -ctv turbo1.5 -fa -ngl 99
 
 # Server mode
@@ -143,7 +143,7 @@ Validated on 3 NVIDIA GPUs across 3 architecture generations, **1,351+ total sta
 |------|----:|------:|----:|----:|:-----------:|
 | q8_0 | 8.5 | 91.01 | 77.44 | OOM | 8.525 |
 | turbo4 | 4.25 | 90.03 | 75.55 | OOM | 8.634 |
-| **turbo3** | **3.125** | **90.35** | **75.01** | **61.47** | 8.624 |
+| turbo3 | 3.125 | 90.35 | 75.01 | 61.47 | 8.624 |
 | **turbo2** | **2.125** | **90.75** | **81.58** | **72.79** | 8.747 |
 | turbo1.5 | 2.00 | 90.13 | 74.85 | 63.44 | 9.402 |
 
@@ -161,13 +161,13 @@ turbo2 at 32K = **81.58 tok/s** — beats q8_0 (77.44) by 5.3% at 7.5x compressi
 | **turbo2** | **2.125** | **57.68** | **55.15** | 9.584 |
 | turbo1.5 | 2.00 | 56.87 | 51.36 | 10.394 |
 
-All types 57-59 tok/s at short context after GPU warmup. turbo2 at 32K **matches q8_0** (55.15 vs 55.13) on a 16GB laptop GPU. Max context capped at 32K (65K crashes WSL2 OOM). NIAH (max_tokens=2000): q8_0/turbo3/turbo2 all 90%, turbo1.5 35%. Retest with 4000 tokens pending.
+All types 57-59 tok/s at short context after GPU warmup. turbo2 at 32K **matches q8_0** (55.15 vs 55.13) on a 16GB laptop GPU. Max context capped at 32K (65K crashes WSL2 OOM). Speed not yet re-measured with `-d` flag methodology. NIAH (max_tokens=2000): q8_0/turbo3/turbo2 all 90%, turbo1.5 35%. Retest with max_tokens=4000 pending.
 
 ### 32K Context — turbo2 Beats q8_0 on ALL Models (RTX 5090)
 
 | Model | Params | D | turbo2 32K | q8_0 32K | Advantage |
 |-------|-------:|:-:|----------:|---------:|:---------:|
-| Phi-4-mini | 3.84B | 128 | ~183 | 139.72 | **+31%** |
+| Phi-4-mini | 3.84B | 128 | 183.78 | 139.72 | **+32%** |
 | Llama-3.3-8B | 8.03B | 128 | 131.64 | 117.73 | **+12%** |
 | Gemma-3-12B | 12.2B | 256 | 104.50 | 95.76 | **+9%** |
 | Qwen 27B | 26.9B | 256 | 58.61 | 55.60 | **+5%** |
