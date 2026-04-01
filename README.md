@@ -17,7 +17,7 @@ The KV cache is the memory bottleneck for long-context LLM inference. At 32K+ to
 
 ### What This Fork Adds (vs [TheTom's upstream](https://github.com/TheTom/llama-cpp-turboquant))
 
-This fork by [@Madreag](https://github.com/Madreag) adds aggressive **CUDA kernel optimizations** that make turbo types **13-46% faster at 32K context** vs TheTom's build on the same GPU:
+This fork by [@Madreag](https://github.com/Madreag) adds aggressive **CUDA kernel optimizations** that make turbo types **13-68% faster at 32K context** vs TheTom's build (verified on 3 GPUs: 5090, 3090, 4090M):
 
 | Optimization | Impact |
 |---|---|
@@ -55,8 +55,7 @@ Key takeaways from this table:
 |--------|---------|
 | turbo2 32K decode | **58.61 tok/s** — 5.4% faster than q8_0 at 7.5x compression |
 | turbo2 at 256K tokens (Q4_K_M) | **42.57 tok/s** — consumer GPU, 8x cheaper KV than f16 |
-| turbo2 at 32K vs TheTom | **58.61 vs 51.69 tok/s** — Madreag **+13.4%** faster |
-| turbo4 at 32K vs TheTom | **56.73 vs 38.88 tok/s** — Madreag **+45.9%** faster |
+| vs TheTom at 32K (3 GPUs) | **+13-68% faster** — turbo4 up to +68%, turbo2 +13-19%, confirmed on 5090/3090/4090M |
 | NIAH retrieval (3 GPUs) | **100% on 5090**, all types **92% on 3090 Ti** (model-limited, not turbo) |
 | Stability across 3 GPUs | **1,351+ iterations, 0 failures, PPL bit-exact** |
 
@@ -257,11 +256,11 @@ V type dominates PPL (columns vary more than rows). K compression is nearly free
 - **FP4 tensor core acceleration**: Not viable. Q values are too small for E2M1 (99.5% map to zero), and no mixed fp16×E2M1 MMA instruction exists on SM120.
 - **Known Gemma 3 issues**: Gibberish after context shift and slow quantized KV cache are upstream llama.cpp bugs, not TurboQuant-specific.
 
-## Madreag vs TheTom — Head-to-Head (RTX 5090, 27B Q6_K)
+## Madreag vs TheTom — Head-to-Head
 
-Same model, same GPU, back-to-back measurement. TheTom build: `llama-cpp-turboquant @ 5364f8a` (latest with sparse V + Boundary V).
+Back-to-back measurements on same GPU, same model. TheTom build: `llama-cpp-turboquant @ feature/turboquant-kv-cache` (latest with sparse V + Boundary V). All speed measured with `-d` flag (tg128 @ depth).
 
-### Decode Speed (tg128, `-d` flag)
+### RTX 5090 (27B Q6_K)
 
 | Type | Madreag | TheTom | Advantage |
 |------|:-------:|:------:|:---------:|
@@ -272,7 +271,29 @@ Same model, same GPU, back-to-back measurement. TheTom build: `llama-cpp-turboqu
 | turbo3 32K | 55.84 | 46.62 | **+19.8%** |
 | turbo2 32K | 58.61 | 51.69 | **+13.4%** |
 
-**Why short is identical but 32K diverges**: At short context, decode time is dominated by model weight loading (~20 GB) — the KV cache is tiny and both builds read it equally fast. At 32K, the KV cache grows to several GB and becomes a significant fraction of total bandwidth. Madreag's optimizations (LUT scoring, nthreads_KQ=8, sparse V skip) reduce the per-token KV access cost, which only matters when KV is large enough to compete with weight loading. The bigger the KV cache relative to model weights, the larger the advantage — hence turbo4 (+46%) benefits more than turbo2 (+13%) because turbo4's larger KV makes TheTom's unoptimized dequant path more expensive.
+### RTX 3090 (9B Q8_0)
+
+| Type | Madreag | TheTom | Advantage |
+|------|:-------:|:------:|:---------:|
+| All types short | 72-73 | 69-70 | **+5%** |
+| q8_0 32K | 61.0 | 56.91 | **+7.2%** |
+| turbo4 32K | 60.28 | ~35.9 | **+68%** |
+| turbo3 32K | 56.82 | ~45.0 | **+26%** |
+| turbo2 32K | 63.12 | 53.21 | **+19%** |
+| turbo3 64K | 49.27 | 33.43 | **+47%** |
+| turbo2 64K | 56.91 | 42.45 | **+34%** |
+
+### RTX 4090M (9B Q8_0)
+
+| Type | Madreag | TheTom | Advantage |
+|------|:-------:|:------:|:---------:|
+| All types short | 55-56 | 55-56 | ~tie |
+| q8_0 32K | 52.0 | 48.2 | **+8%** |
+| turbo4 32K | 52.4 | 34.5 | **+52%** |
+| turbo3 32K | 49.0 | 40.3 | **+22%** |
+| turbo2 32K | 52.7 | 44.9 | **+17%** |
+
+**Pattern across 3 GPUs**: Short context is identical or near-identical (weight-loading bound). The Madreag advantage appears at **32K+** where KV bandwidth dominates — kernel optimizations (LUT scoring, nthreads_KQ=8, sparse V skip) reduce per-token KV access cost. turbo4 benefits most (+46-68%) because its larger KV makes TheTom's unoptimized dequant path more expensive. Advantage grows with context depth: 32K → 64K shows +34-47% on the 3090.
 
 ### Quality (wikitext-2, 8 chunks)
 
