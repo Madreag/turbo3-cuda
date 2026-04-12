@@ -6,80 +6,88 @@
 #include <cstring>
 #include <cerrno>
 #include <algorithm>
+#include <mutex>
 
 static void load_norm_alpha_v() {
-    static bool loaded = false;
-    if (loaded) return;
-    loaded = true;
-    const char *s = getenv("TURBO_NORM_ALPHA_V");
-    if (!s) return;
-    char *end;
-    errno = 0;
-    float a = strtof(s, &end);
-    if (end == s || errno != 0 || a <= 0.0f || a >= 10.0f) {
-        fprintf(stderr, "TURBO: invalid TURBO_NORM_ALPHA_V='%s'\n", s);
-    } else {
-        cudaMemcpyToSymbol(d_norm_alpha_v, &a, sizeof(float));
-        fprintf(stderr, "TURBO: V-cache norm alpha=%.3f\n", a);
-    }
+    static std::once_flag flag;
+    std::call_once(flag, []() {
+        const char *s = getenv("TURBO_NORM_ALPHA_V");
+        if (!s) return;
+        char *end;
+        errno = 0;
+        float a = strtof(s, &end);
+        if (end == s || errno != 0 || a <= 0.0f || a >= 10.0f) {
+            fprintf(stderr, "TURBO: invalid TURBO_NORM_ALPHA_V='%s'\n", s);
+        } else {
+            cudaMemcpyToSymbol(d_norm_alpha_v, &a, sizeof(float));
+            fprintf(stderr, "TURBO: V-cache norm alpha=%.3f\n", a);
+        }
+    });
 }
 
 static void load_turbo4_norm_alpha_v() {
-    static bool loaded = false;
-    if (loaded) return;
-    loaded = true;
-    const char *s = getenv("TURBO4_NORM_ALPHA_V");
-    if (!s) return;
-    char *end;
-    errno = 0;
-    float a = strtof(s, &end);
-    if (end == s || errno != 0 || a <= 0.0f || a >= 10.0f) {
-        fprintf(stderr, "TURBO4: invalid TURBO4_NORM_ALPHA_V='%s'\n", s);
-    } else {
-        cudaMemcpyToSymbol(d_turbo4_norm_alpha_v, &a, sizeof(float));
-        fprintf(stderr, "TURBO4: V-cache norm alpha=%.3f\n", a);
-    }
+    static std::once_flag flag;
+    std::call_once(flag, []() {
+        const char *s = getenv("TURBO4_NORM_ALPHA_V");
+        if (!s) return;
+        char *end;
+        errno = 0;
+        float a = strtof(s, &end);
+        if (end == s || errno != 0 || a <= 0.0f || a >= 10.0f) {
+            fprintf(stderr, "TURBO4: invalid TURBO4_NORM_ALPHA_V='%s'\n", s);
+        } else {
+            cudaMemcpyToSymbol(d_turbo4_norm_alpha_v, &a, sizeof(float));
+            fprintf(stderr, "TURBO4: V-cache norm alpha=%.3f\n", a);
+        }
+    });
 }
 
 static void load_tcq_norm_alpha() {
-    static bool loaded = false;
-    if (loaded) return;
-    loaded = true;
-    const char *sk = getenv("TURBO_TCQ_ALPHA");
-    const char *sv = getenv("TURBO_TCQ_ALPHA_V");
-    if (sk) {
-        char *end; errno = 0;
-        float a = strtof(sk, &end);
-        if (end != sk && errno == 0 && a > 0.0f && a < 10.0f) {
-            cudaMemcpyToSymbol(d_tcq_norm_alpha, &a, sizeof(float));
-            fprintf(stderr, "TCQ: K norm alpha=%.3f\n", a);
+    static std::once_flag flag;
+    std::call_once(flag, []() {
+        const char *sk = getenv("TURBO_TCQ_ALPHA");
+        const char *sv = getenv("TURBO_TCQ_ALPHA_V");
+        if (sk) {
+            char *end; errno = 0;
+            float a = strtof(sk, &end);
+            if (end != sk && errno == 0 && a > 0.0f && a < 10.0f) {
+                cudaMemcpyToSymbol(d_tcq_norm_alpha, &a, sizeof(float));
+                fprintf(stderr, "TCQ: K norm alpha=%.3f\n", a);
+            }
         }
-    }
-    if (sv) {
-        char *end; errno = 0;
-        float a = strtof(sv, &end);
-        if (end != sv && errno == 0 && a > 0.0f && a < 10.0f) {
-            cudaMemcpyToSymbol(d_tcq_norm_alpha_v, &a, sizeof(float));
-            fprintf(stderr, "TCQ: V norm alpha=%.3f\n", a);
+        if (sv) {
+            char *end; errno = 0;
+            float a = strtof(sv, &end);
+            if (end != sv && errno == 0 && a > 0.0f && a < 10.0f) {
+                cudaMemcpyToSymbol(d_tcq_norm_alpha_v, &a, sizeof(float));
+                fprintf(stderr, "TCQ: V norm alpha=%.3f\n", a);
+            }
         }
-    }
+    });
 }
 
-// TCQ Viterbi backtrace buffer (global, reused across launches)
-static uint8_t * tcq_bt_buf = nullptr;
-static size_t    tcq_bt_buf_size = 0;
+// TCQ Viterbi backtrace buffer (per-device, reused across launches)
+static std::mutex           tcq_bt_mutex;
+static uint8_t *            tcq_bt_bufs[GGML_CUDA_MAX_DEVICES] = {};
+static size_t               tcq_bt_buf_sizes[GGML_CUDA_MAX_DEVICES] = {};
 
-static void ensure_tcq_bt_buf(size_t needed) {
-    if (tcq_bt_buf_size >= needed) return;
-    if (tcq_bt_buf) { cudaFree(tcq_bt_buf); tcq_bt_buf = nullptr; tcq_bt_buf_size = 0; }
-    cudaError_t err = cudaMalloc(&tcq_bt_buf, needed);
+static uint8_t * ensure_tcq_bt_buf(size_t needed, int device) {
+    std::lock_guard<std::mutex> lock(tcq_bt_mutex);
+    if (tcq_bt_buf_sizes[device] >= needed) return tcq_bt_bufs[device];
+    int prev_device;
+    cudaGetDevice(&prev_device);
+    if (prev_device != device) cudaSetDevice(device);
+    if (tcq_bt_bufs[device]) { cudaFree(tcq_bt_bufs[device]); tcq_bt_bufs[device] = nullptr; tcq_bt_buf_sizes[device] = 0; }
+    cudaError_t err = cudaMalloc(&tcq_bt_bufs[device], needed);
+    if (prev_device != device) cudaSetDevice(prev_device);
     if (err != cudaSuccess) {
-        tcq_bt_buf = nullptr;
-        tcq_bt_buf_size = 0;
+        tcq_bt_bufs[device] = nullptr;
+        tcq_bt_buf_sizes[device] = 0;
         GGML_ABORT("TCQ: cudaMalloc failed for Viterbi backtrace buffer (%zu bytes): %s",
                     needed, cudaGetErrorString(err));
     }
-    tcq_bt_buf_size = needed;
+    tcq_bt_buf_sizes[device] = needed;
+    return tcq_bt_bufs[device];
 }
 
 typedef void (*set_rows_kernel_t)(const char * src, char * dst);
@@ -1697,12 +1705,12 @@ static void set_rows_cuda(ggml_backend_cuda_context & ctx, const ggml_tensor * s
         const int64_t ne_total_groups = (ne00 * ne01 * ne02 * ne03) / QK_TURBO3_TCQ;
         const int64_t s01_f = nb01/sizeof(float); const int64_t s02_f = nb02/sizeof(float); const int64_t s03_f = nb03/sizeof(float);
         const int64_t s10_i = nb10/sizeof(idx_t); const int64_t s11_i = nb11/sizeof(idx_t); const int64_t s12_i = nb12/sizeof(idx_t);
-        const int iq_is_k = (dst->name && strncmp(dst->name, "cache_k_", 8) == 0) ? 1 : 0;
+        const int iq_is_k = (dst->name && strncmp(dst->name, "cache_k_", 8) == 0) ? 1 : (dst->name ? 0 : 1);
         constexpr int64_t bt_per_group = 128 * 512;
         constexpr int64_t max_bt_buf_bytes = (int64_t)128 * 1024 * 1024;
         const int64_t max_groups_per_batch = max_bt_buf_bytes / bt_per_group;
         if (ne_total_groups > 0) {
-            ensure_tcq_bt_buf(std::min(ne_total_groups, max_groups_per_batch) * bt_per_group);
+            uint8_t * bt_buf = ensure_tcq_bt_buf(std::min(ne_total_groups, max_groups_per_batch) * bt_per_group, ctx.device);
             const uint3 ne00_fd = init_fastdiv_values((uint32_t) ne00);
             const uint3 ne01_fd = init_fastdiv_values((uint32_t) ne01);
             const uint3 ne02_fd = init_fastdiv_values((uint32_t) ne02);
@@ -1712,7 +1720,7 @@ static void set_rows_cuda(ggml_backend_cuda_context & ctx, const ggml_tensor * s
                 const int64_t batch = std::min(max_groups_per_batch, ne_total_groups - g);
                 k_set_rows_turbo3_tcq<idx_t><<<(int)batch, 512, 0, stream>>>(
                     src0_d, src1_d, (block_turbo3_tcq *)dst->data,
-                    ne_total_groups, tcq_bt_buf, g,
+                    ne_total_groups, bt_buf, g,
                     ne00, ne01, ne02, ne10, ne11, ne12, ne13,
                     s01_f, s02_f, s03_f, s10_i, s11_i, s12_i, iq_is_k,
                     nb1, nb2, nb3,
@@ -1725,12 +1733,12 @@ static void set_rows_cuda(ggml_backend_cuda_context & ctx, const ggml_tensor * s
         const int64_t ne_total_groups = (ne00 * ne01 * ne02 * ne03) / QK_TURBO2_TCQ;
         const int64_t s01_f = nb01/sizeof(float); const int64_t s02_f = nb02/sizeof(float); const int64_t s03_f = nb03/sizeof(float);
         const int64_t s10_i = nb10/sizeof(idx_t); const int64_t s11_i = nb11/sizeof(idx_t); const int64_t s12_i = nb12/sizeof(idx_t);
-        const int iq_is_k = (dst->name && strncmp(dst->name, "cache_k_", 8) == 0) ? 1 : 0;
+        const int iq_is_k = (dst->name && strncmp(dst->name, "cache_k_", 8) == 0) ? 1 : (dst->name ? 0 : 1);
         constexpr int64_t bt_per_group = 128 * 256;
         constexpr int64_t max_bt_buf_bytes = (int64_t)128 * 1024 * 1024;
         const int64_t max_groups_per_batch = max_bt_buf_bytes / bt_per_group;
         if (ne_total_groups > 0) {
-            ensure_tcq_bt_buf(std::min(ne_total_groups, max_groups_per_batch) * bt_per_group);
+            uint8_t * bt_buf = ensure_tcq_bt_buf(std::min(ne_total_groups, max_groups_per_batch) * bt_per_group, ctx.device);
             const uint3 ne00_fd = init_fastdiv_values((uint32_t) ne00);
             const uint3 ne01_fd = init_fastdiv_values((uint32_t) ne01);
             const uint3 ne02_fd = init_fastdiv_values((uint32_t) ne02);
@@ -1740,7 +1748,7 @@ static void set_rows_cuda(ggml_backend_cuda_context & ctx, const ggml_tensor * s
                 const int64_t batch = std::min(max_groups_per_batch, ne_total_groups - g);
                 k_set_rows_turbo2_tcq<idx_t><<<(int)batch, 256, 0, stream>>>(
                     src0_d, src1_d, (block_turbo2_tcq *)dst->data,
-                    ne_total_groups, tcq_bt_buf, g,
+                    ne_total_groups, bt_buf, g,
                     ne00, ne01, ne02, ne10, ne11, ne12, ne13,
                     s01_f, s02_f, s03_f, s10_i, s11_i, s12_i, iq_is_k,
                     nb1, nb2, nb3,
