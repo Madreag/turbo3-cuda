@@ -2,6 +2,25 @@
 #include "cpy-utils.cuh"
 #include "turbo-quant.cuh"
 #include "turbo-sink.cuh"
+#include <cstring>
+#include <cerrno>
+
+static void load_norm_alpha_v() {
+    static bool loaded = false;
+    if (loaded) return;
+    loaded = true;
+    const char *s = getenv("TURBO_NORM_ALPHA_V");
+    if (!s) return;
+    char *end;
+    errno = 0;
+    float a = strtof(s, &end);
+    if (end == s || errno != 0 || a <= 0.0f || a >= 10.0f) {
+        fprintf(stderr, "TURBO: invalid TURBO_NORM_ALPHA_V='%s'\n", s);
+    } else {
+        cudaMemcpyToSymbol(d_norm_alpha_v, &a, sizeof(float));
+        fprintf(stderr, "TURBO: V-cache norm alpha=%.3f\n", a);
+    }
+}
 
 typedef void (*set_rows_kernel_t)(const char * src, char * dst);
 
@@ -247,7 +266,8 @@ static __global__ void k_set_rows_turbo3(
         const int64_t s12,
         const int64_t s1,
         const int64_t s2,
-        const int64_t s3) {
+        const int64_t s3,
+        const int     is_v) {
 
     static_assert(GROUP_SIZE == 128 || GROUP_SIZE == 64, "GROUP_SIZE must be 128 or 64");
 
@@ -391,7 +411,8 @@ static __global__ void k_set_rows_turbo3(
         s_recon_sq = total;
     }
     __syncthreads();
-    const float corrected_norm = (s_recon_sq > 1e-20f) ? grp_norm * rsqrtf(s_recon_sq) : grp_norm;
+    float corrected_norm = (s_recon_sq > 1e-20f) ? grp_norm * rsqrtf(s_recon_sq) : grp_norm;
+    if (is_v) corrected_norm *= d_norm_alpha_v;
 
     // ---- Step 8: Write corrected norm (one thread per turbo3 block) ----
     if (elem_in_block == 0) blk->norm = __float2half(corrected_norm);
@@ -560,6 +581,10 @@ static void set_rows_cuda_turbo3(
     // InnerQ: check/finalize calibration before kernel launch
     turbo_innerq_check_finalize(group_size, ne00);
 
+    // Detect K vs V cache from tensor name (V gets norm alpha correction)
+    load_norm_alpha_v();
+    const int is_v = (dst->name && strncmp(dst->name, "cache_k_", 8) != 0) ? 1 : 0;
+
     // Launch 1: full groups with WHT rotation
     if (n_full_groups > 0) {
         const int64_t ne_total = n_full_groups * ne01 * ne02 * ne03;
@@ -568,13 +593,13 @@ static void set_rows_cuda_turbo3(
                 src0_d, src1_d, (block_turbo3_0 *)dst->data,
                 ne00, ne01, ne10, ne11, ne12, ne13,
                 s01, s02, s03, s10, s11, s12,
-                nb1, nb2, nb3);
+                nb1, nb2, nb3, is_v);
         } else {
             k_set_rows_turbo3<idx_t, 64><<<(int)ne_total, 64, 0, stream>>>(
                 src0_d, src1_d, (block_turbo3_0 *)dst->data,
                 ne00, ne01, ne10, ne11, ne12, ne13,
                 s01, s02, s03, s10, s11, s12,
-                nb1, nb2, nb3);
+                nb1, nb2, nb3, is_v);
         }
     }
 
@@ -622,7 +647,8 @@ static __global__ void k_set_rows_turbo2(
         const int64_t s12,
         const int64_t s1,
         const int64_t s2,
-        const int64_t s3) {
+        const int64_t s3,
+        const int     is_v) {
 
     static_assert(GROUP_SIZE == 128 || GROUP_SIZE == 64, "GROUP_SIZE must be 128 or 64");
 
@@ -755,7 +781,8 @@ static __global__ void k_set_rows_turbo2(
         s_recon_sq = total;
     }
     __syncthreads();
-    const float corrected_norm = (s_recon_sq > 1e-20f) ? grp_norm * rsqrtf(s_recon_sq) : grp_norm;
+    float corrected_norm = (s_recon_sq > 1e-20f) ? grp_norm * rsqrtf(s_recon_sq) : grp_norm;
+    if (is_v) corrected_norm *= d_norm_alpha_v;
 
     // ---- Step 8: Write corrected norm ----
     if (elem_in_block == 0) blk->norm = __float2half(corrected_norm);
@@ -908,6 +935,10 @@ static void set_rows_cuda_turbo2(
     // InnerQ: check/finalize calibration before kernel launch
     turbo_innerq_check_finalize(group_size, ne00);
 
+    // Detect K vs V cache from tensor name (V gets norm alpha correction)
+    load_norm_alpha_v();
+    const int is_v = (dst->name && strncmp(dst->name, "cache_k_", 8) != 0) ? 1 : 0;
+
     if (n_full_groups > 0) {
         const int64_t ne_total = n_full_groups * ne01 * ne02 * ne03;
         if (group_size == 128) {
@@ -915,13 +946,13 @@ static void set_rows_cuda_turbo2(
                 src0_d, src1_d, (block_turbo2_0 *)dst->data,
                 ne00, ne01, ne10, ne11, ne12, ne13,
                 s01, s02, s03, s10, s11, s12,
-                nb1, nb2, nb3);
+                nb1, nb2, nb3, is_v);
         } else {
             k_set_rows_turbo2<idx_t, 64><<<(int)ne_total, 64, 0, stream>>>(
                 src0_d, src1_d, (block_turbo2_0 *)dst->data,
                 ne00, ne01, ne10, ne11, ne12, ne13,
                 s01, s02, s03, s10, s11, s12,
-                nb1, nb2, nb3);
+                nb1, nb2, nb3, is_v);
         }
     }
 

@@ -52,7 +52,7 @@ static __global__ void flash_attn_ext_vec(
 #ifdef FLASH_ATTN_AVAILABLE
 
     // Skip unused kernel variants for faster compilation:
-    if (use_logit_softcap && !(D == 128 || D == 256)) {
+    if (use_logit_softcap && !(D == 128 || D == 256 || D == 512)) {
         GGML_UNUSED_VARS(Q, K, V, mask, sinks, KV_max, dst, dst_meta, scale,
             max_bias, m0, m1, n_head_log2, logit_softcap,
             ne00, ne01, ne02, ne03,
@@ -799,11 +799,12 @@ EXTERN_DECL_FATTN_VEC_CASES(256, GGML_TYPE_Q5_1)
 EXTERN_DECL_FATTN_VEC_CASES(256, GGML_TYPE_Q8_0)
 EXTERN_DECL_FATTN_VEC_CASES(256, GGML_TYPE_BF16)
 
-// Macro for extern declarations with D=64, 128, 256
+// Macro for extern declarations with D=64, 128, 256, 512
 #define EXTERN_DECL_FATTN_VEC_TURBO(type_K, type_V) \
     extern DECL_FATTN_VEC_CASE( 64, type_K, type_V); \
     extern DECL_FATTN_VEC_CASE(128, type_K, type_V); \
-    extern DECL_FATTN_VEC_CASE(256, type_K, type_V);
+    extern DECL_FATTN_VEC_CASE(256, type_K, type_V); \
+    extern DECL_FATTN_VEC_CASE(512, type_K, type_V);
 
 // Symmetric turbo types
 EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO3_0, GGML_TYPE_TURBO3_0)
