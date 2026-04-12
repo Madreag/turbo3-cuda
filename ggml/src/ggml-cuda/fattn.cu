@@ -503,7 +503,12 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
 
     // For small batch sizes the vector kernel may be preferable over the kernels optimized for large batch sizes:
     // D=512 VEC kernels only instantiated for turbo/TCQ types; non-turbo caps at 256
-    const bool is_turbo_kv = (ggml_type_name(K->type)[0] == 't') || (ggml_type_name(V->type)[0] == 't');
+    auto is_turbo_or_tcq = [](ggml_type t) {
+        return t == GGML_TYPE_TURBO3_0 || t == GGML_TYPE_TURBO4_0 ||
+               t == GGML_TYPE_TURBO2_0 || t == GGML_TYPE_TURBO1_5 ||
+               t == GGML_TYPE_TURBO3_TCQ || t == GGML_TYPE_TURBO2_TCQ;
+    };
+    const bool is_turbo_kv = is_turbo_or_tcq(K->type) || is_turbo_or_tcq(V->type);
     const int max_D_vec = is_turbo_kv ? 512 : 256;
     const bool can_use_vector_kernel = Q->ne[0] <= max_D_vec && Q->ne[0] % 64 == 0 && K->ne[1] % FATTN_KQ_STRIDE == 0;
 
