@@ -702,18 +702,8 @@ size_t quantize_turbo1_5(const float * GGML_RESTRICT src, void * GGML_RESTRICT d
 /* ---------- TURBO3_TCQ: 3-bit Trellis-Coded Quantization (CPU fallback) ---------- */
 
 void dequantize_row_turbo3_tcq(const block_turbo3_tcq * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k) {
-    /* CPU dequant reads 9-bit trellis states from bitstream and looks up codebook.
-     * Full codebook not embedded in CPU path — returns zeros for now.
-     * Production use goes through CUDA dequant in fattn kernels. */
-    assert(k % QK_TURBO3_TCQ == 0);
-    const int nb = k / QK_TURBO3_TCQ;
-    for (int block = 0; block < nb; block++) {
-        const float norm = GGML_FP16_TO_FP32(x[block].norm);
-        for (int t = 0; t < 128; t++) {
-            y[block * QK_TURBO3_TCQ + t] = 0.0f;  /* stub — GPU path handles real dequant */
-        }
-        GGML_UNUSED(norm);
-    }
+    GGML_UNUSED(x); GGML_UNUSED(y); GGML_UNUSED(k);
+    GGML_ABORT("TURBO3_TCQ dequantization is only supported on CUDA — CPU fallback not implemented");
 }
 
 void quantize_row_turbo3_tcq_ref(const float * GGML_RESTRICT x, block_turbo3_tcq * GGML_RESTRICT y, int64_t k) {
@@ -731,15 +721,8 @@ void quantize_row_turbo3_tcq_ref(const float * GGML_RESTRICT x, block_turbo3_tcq
 /* ---------- TURBO2_TCQ: 2-bit Trellis-Coded Quantization (CPU fallback) ---------- */
 
 void dequantize_row_turbo2_tcq(const block_turbo2_tcq * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k) {
-    assert(k % QK_TURBO2_TCQ == 0);
-    const int nb = k / QK_TURBO2_TCQ;
-    for (int block = 0; block < nb; block++) {
-        const float norm = GGML_FP16_TO_FP32(x[block].norm);
-        for (int t = 0; t < 128; t++) {
-            y[block * QK_TURBO2_TCQ + t] = 0.0f;  /* stub — GPU path handles real dequant */
-        }
-        GGML_UNUSED(norm);
-    }
+    GGML_UNUSED(x); GGML_UNUSED(y); GGML_UNUSED(k);
+    GGML_ABORT("TURBO2_TCQ dequantization is only supported on CUDA — CPU fallback not implemented");
 }
 
 void quantize_row_turbo2_tcq_ref(const float * GGML_RESTRICT x, block_turbo2_tcq * GGML_RESTRICT y, int64_t k) {
