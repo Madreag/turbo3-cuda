@@ -8,9 +8,20 @@
 #include <algorithm>
 #include <mutex>
 
+// Per-device env var loading: cudaMemcpyToSymbol only writes __constant__
+// memory on the *current* device, so we must repeat for each GPU.
+// Env var parsing is done once; the parsed value is applied per-device.
+
+static std::mutex          alpha_init_mutex;
+static bool                norm_alpha_v_loaded[GGML_CUDA_MAX_DEVICES] = {};
+static bool                turbo4_alpha_v_loaded[GGML_CUDA_MAX_DEVICES] = {};
+static bool                tcq_alpha_loaded[GGML_CUDA_MAX_DEVICES] = {};
+
 static void load_norm_alpha_v() {
-    static std::once_flag flag;
-    std::call_once(flag, []() {
+    static std::once_flag parse_flag;
+    static float parsed_val = 0.0f;
+    static bool  has_override = false;
+    std::call_once(parse_flag, []() {
         const char *s = getenv("TURBO_NORM_ALPHA_V");
         if (!s) return;
         char *end;
@@ -19,15 +30,26 @@ static void load_norm_alpha_v() {
         if (end == s || errno != 0 || a <= 0.0f || a >= 10.0f) {
             fprintf(stderr, "TURBO: invalid TURBO_NORM_ALPHA_V='%s'\n", s);
         } else {
-            cudaMemcpyToSymbol(d_norm_alpha_v, &a, sizeof(float));
-            fprintf(stderr, "TURBO: V-cache norm alpha=%.3f\n", a);
+            parsed_val = a;
+            has_override = true;
         }
     });
+    if (!has_override) return;
+    int device;
+    cudaGetDevice(&device);
+    std::lock_guard<std::mutex> lock(alpha_init_mutex);
+    if (!norm_alpha_v_loaded[device]) {
+        cudaMemcpyToSymbol(d_norm_alpha_v, &parsed_val, sizeof(float));
+        fprintf(stderr, "TURBO: V-cache norm alpha=%.3f (device %d)\n", parsed_val, device);
+        norm_alpha_v_loaded[device] = true;
+    }
 }
 
 static void load_turbo4_norm_alpha_v() {
-    static std::once_flag flag;
-    std::call_once(flag, []() {
+    static std::once_flag parse_flag;
+    static float parsed_val = 0.0f;
+    static bool  has_override = false;
+    std::call_once(parse_flag, []() {
         const char *s = getenv("TURBO4_NORM_ALPHA_V");
         if (!s) return;
         char *end;
@@ -36,34 +58,60 @@ static void load_turbo4_norm_alpha_v() {
         if (end == s || errno != 0 || a <= 0.0f || a >= 10.0f) {
             fprintf(stderr, "TURBO4: invalid TURBO4_NORM_ALPHA_V='%s'\n", s);
         } else {
-            cudaMemcpyToSymbol(d_turbo4_norm_alpha_v, &a, sizeof(float));
-            fprintf(stderr, "TURBO4: V-cache norm alpha=%.3f\n", a);
+            parsed_val = a;
+            has_override = true;
         }
     });
+    if (!has_override) return;
+    int device;
+    cudaGetDevice(&device);
+    std::lock_guard<std::mutex> lock(alpha_init_mutex);
+    if (!turbo4_alpha_v_loaded[device]) {
+        cudaMemcpyToSymbol(d_turbo4_norm_alpha_v, &parsed_val, sizeof(float));
+        fprintf(stderr, "TURBO4: V-cache norm alpha=%.3f (device %d)\n", parsed_val, device);
+        turbo4_alpha_v_loaded[device] = true;
+    }
 }
 
 static void load_tcq_norm_alpha() {
-    static std::once_flag flag;
-    std::call_once(flag, []() {
+    static std::once_flag parse_flag;
+    static float parsed_k = 0.0f, parsed_v = 0.0f;
+    static bool  has_k = false, has_v = false;
+    std::call_once(parse_flag, []() {
         const char *sk = getenv("TURBO_TCQ_ALPHA");
         const char *sv = getenv("TURBO_TCQ_ALPHA_V");
         if (sk) {
             char *end; errno = 0;
             float a = strtof(sk, &end);
             if (end != sk && errno == 0 && a > 0.0f && a < 10.0f) {
-                cudaMemcpyToSymbol(d_tcq_norm_alpha, &a, sizeof(float));
-                fprintf(stderr, "TCQ: K norm alpha=%.3f\n", a);
+                parsed_k = a;
+                has_k = true;
             }
         }
         if (sv) {
             char *end; errno = 0;
             float a = strtof(sv, &end);
             if (end != sv && errno == 0 && a > 0.0f && a < 10.0f) {
-                cudaMemcpyToSymbol(d_tcq_norm_alpha_v, &a, sizeof(float));
-                fprintf(stderr, "TCQ: V norm alpha=%.3f\n", a);
+                parsed_v = a;
+                has_v = true;
             }
         }
     });
+    if (!has_k && !has_v) return;
+    int device;
+    cudaGetDevice(&device);
+    std::lock_guard<std::mutex> lock(alpha_init_mutex);
+    if (!tcq_alpha_loaded[device]) {
+        if (has_k) {
+            cudaMemcpyToSymbol(d_tcq_norm_alpha, &parsed_k, sizeof(float));
+            fprintf(stderr, "TCQ: K norm alpha=%.3f (device %d)\n", parsed_k, device);
+        }
+        if (has_v) {
+            cudaMemcpyToSymbol(d_tcq_norm_alpha_v, &parsed_v, sizeof(float));
+            fprintf(stderr, "TCQ: V norm alpha=%.3f (device %d)\n", parsed_v, device);
+        }
+        tcq_alpha_loaded[device] = true;
+    }
 }
 
 // TCQ Viterbi backtrace buffer (per-device, reused across launches)
