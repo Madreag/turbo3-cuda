@@ -154,13 +154,13 @@ static __global__ void flash_attn_ext_vec(
     float * smem_codebook_K = smem_codebook_buf;
     float * smem_codebook_V = share_cb ? smem_codebook_buf : (smem_codebook_buf + smem_cb_K_size);
     if constexpr (smem_cb_K_size > 0) {
-        const float * cb_K_src = K_is_tcq3 ? d_turbo3_tcq_codebook_fattn : d_turbo2_tcq_codebook_fattn;
+        const float * cb_K_src = K_is_tcq3 ? d_turbo3_tcq_codebook : d_turbo2_tcq_codebook;
         for (int i = tid; i < smem_cb_K_size; i += nthreads) {
             smem_codebook_K[i] = cb_K_src[i];
         }
     }
     if constexpr (smem_cb_V_size > 0 && !share_cb) {
-        const float * cb_V_src = V_is_tcq3 ? d_turbo3_tcq_codebook_fattn : d_turbo2_tcq_codebook_fattn;
+        const float * cb_V_src = V_is_tcq3 ? d_turbo3_tcq_codebook : d_turbo2_tcq_codebook;
         for (int i = tid; i < smem_cb_V_size; i += nthreads) {
             smem_codebook_V[i] = cb_V_src[i];
         }
