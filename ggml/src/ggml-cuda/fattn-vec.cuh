@@ -741,8 +741,7 @@ void ggml_cuda_flash_attn_ext_vec_case_impl(ggml_backend_cuda_context & ctx, ggm
     // Uses __device__ variables updated via cudaGetSymbolAddress + cudaMemcpyAsync
     // (graph-capturable). Previous __managed__ approach crashed on SM86.
     if constexpr (type_K == GGML_TYPE_TURBO3_0 || type_K == GGML_TYPE_TURBO4_0 ||
-                  type_K == GGML_TYPE_TURBO2_0 || type_K == GGML_TYPE_TURBO1_5 ||
-                  type_K == GGML_TYPE_TURBO3_TCQ || type_K == GGML_TYPE_TURBO2_TCQ) {
+                  type_K == GGML_TYPE_TURBO2_0 || type_K == GGML_TYPE_TURBO1_5) {
         const int ss = turbo_sink_size();
         if (ss > 0) {
             const ggml_tensor * K = dst->src[1];
