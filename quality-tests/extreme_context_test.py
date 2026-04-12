@@ -3,6 +3,8 @@
 Extreme context NIAH test — loads ~500K tokens of filler text with a hidden fact,
 then asks the model to retrieve it.
 """
+import glob
+import os
 import requests
 import sys
 import time
@@ -28,11 +30,13 @@ def wait_for_server(timeout=120):
 
 def build_haystack(target_tokens=500000):
     """Build a massive text haystack from wikitext, repeating as needed."""
-    wiki_paths = [
-        "/home/erol/ai/turboquant/wikitext-103-raw-v1/wiki.test.raw",
-        "/home/erol/ai/turboquant/research/llama-cpp-turboquant/wikitext-2-raw/wiki.train.raw",
-        "/home/erol/ai/turboquant/research/llama-cpp-turboquant/wikitext-2-raw/wiki.test.raw",
-    ]
+    if os.environ.get("WIKITEXT_PATHS"):
+        wiki_paths = os.environ["WIKITEXT_PATHS"].split(":")
+    elif os.environ.get("WIKITEXT_DIR"):
+        wiki_paths = sorted(glob.glob(os.path.join(os.environ["WIKITEXT_DIR"], "**", "*.raw"), recursive=True))
+    else:
+        print("ERROR: Set WIKITEXT_PATHS (colon-separated .raw file paths) or WIKITEXT_DIR environment variable")
+        sys.exit(1)
     
     text = ""
     for path in wiki_paths:

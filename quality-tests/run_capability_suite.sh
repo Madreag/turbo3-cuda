@@ -9,7 +9,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SERVER="$REPO_DIR/build/bin/llama-server"
-MODEL="${1:-/home/erol/ai/turboquant/models/opus-v2-Q6_K.gguf}"
+MODEL="${1:-${MODEL:?Set MODEL env var or pass model path as argument}}"
 PORT=8090
 MAX_CTX=40000
 
