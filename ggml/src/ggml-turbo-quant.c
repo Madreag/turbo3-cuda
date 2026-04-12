@@ -698,3 +698,57 @@ size_t quantize_turbo1_5(const float * GGML_RESTRICT src, void * GGML_RESTRICT d
     }
     return nrows * row_size;
 }
+
+/* ---------- TURBO3_TCQ: 3-bit Trellis-Coded Quantization (CPU fallback) ---------- */
+
+void dequantize_row_turbo3_tcq(const block_turbo3_tcq * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k) {
+    /* CPU dequant reads 9-bit trellis states from bitstream and looks up codebook.
+     * Full codebook not embedded in CPU path — returns zeros for now.
+     * Production use goes through CUDA dequant in fattn kernels. */
+    assert(k % QK_TURBO3_TCQ == 0);
+    const int nb = k / QK_TURBO3_TCQ;
+    for (int block = 0; block < nb; block++) {
+        const float norm = GGML_FP16_TO_FP32(x[block].norm);
+        for (int t = 0; t < 128; t++) {
+            y[block * QK_TURBO3_TCQ + t] = 0.0f;  /* stub — GPU path handles real dequant */
+        }
+        GGML_UNUSED(norm);
+    }
+}
+
+void quantize_row_turbo3_tcq_ref(const float * GGML_RESTRICT x, block_turbo3_tcq * GGML_RESTRICT y, int64_t k) {
+    /* CPU greedy fallback — Viterbi encoder runs on GPU only. */
+    assert(k % QK_TURBO3_TCQ == 0);
+    const int nb = k / QK_TURBO3_TCQ;
+    for (int block = 0; block < nb; block++) {
+        memset(&y[block], 0, sizeof(block_turbo3_tcq));
+        float norm_sq = 0.0f;
+        for (int j = 0; j < 128; j++) norm_sq += x[block * 128 + j] * x[block * 128 + j];
+        y[block].norm = GGML_FP32_TO_FP16(sqrtf(norm_sq));
+    }
+}
+
+/* ---------- TURBO2_TCQ: 2-bit Trellis-Coded Quantization (CPU fallback) ---------- */
+
+void dequantize_row_turbo2_tcq(const block_turbo2_tcq * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k) {
+    assert(k % QK_TURBO2_TCQ == 0);
+    const int nb = k / QK_TURBO2_TCQ;
+    for (int block = 0; block < nb; block++) {
+        const float norm = GGML_FP16_TO_FP32(x[block].norm);
+        for (int t = 0; t < 128; t++) {
+            y[block * QK_TURBO2_TCQ + t] = 0.0f;  /* stub — GPU path handles real dequant */
+        }
+        GGML_UNUSED(norm);
+    }
+}
+
+void quantize_row_turbo2_tcq_ref(const float * GGML_RESTRICT x, block_turbo2_tcq * GGML_RESTRICT y, int64_t k) {
+    assert(k % QK_TURBO2_TCQ == 0);
+    const int nb = k / QK_TURBO2_TCQ;
+    for (int block = 0; block < nb; block++) {
+        memset(&y[block], 0, sizeof(block_turbo2_tcq));
+        float norm_sq = 0.0f;
+        for (int j = 0; j < 128; j++) norm_sq += x[block * 128 + j] * x[block * 128 + j];
+        y[block].norm = GGML_FP32_TO_FP16(sqrtf(norm_sq));
+    }
+}

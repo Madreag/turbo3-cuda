@@ -1,6 +1,7 @@
 #include "set-rows.cuh"
 #include "cpy-utils.cuh"
 #include "turbo-quant.cuh"
+#include "turbo-tcq.cuh"
 #include "turbo-sink.cuh"
 #include <cstring>
 #include <cerrno>
@@ -20,6 +21,41 @@ static void load_norm_alpha_v() {
         cudaMemcpyToSymbol(d_norm_alpha_v, &a, sizeof(float));
         fprintf(stderr, "TURBO: V-cache norm alpha=%.3f\n", a);
     }
+}
+
+static void load_tcq_norm_alpha() {
+    static bool loaded = false;
+    if (loaded) return;
+    loaded = true;
+    const char *sk = getenv("TURBO_TCQ_ALPHA");
+    const char *sv = getenv("TURBO_TCQ_ALPHA_V");
+    if (sk) {
+        char *end; errno = 0;
+        float a = strtof(sk, &end);
+        if (end != sk && errno == 0 && a > 0.0f && a < 10.0f) {
+            cudaMemcpyToSymbol(d_tcq_norm_alpha, &a, sizeof(float));
+            fprintf(stderr, "TCQ: K norm alpha=%.3f\n", a);
+        }
+    }
+    if (sv) {
+        char *end; errno = 0;
+        float a = strtof(sv, &end);
+        if (end != sv && errno == 0 && a > 0.0f && a < 10.0f) {
+            cudaMemcpyToSymbol(d_tcq_norm_alpha_v, &a, sizeof(float));
+            fprintf(stderr, "TCQ: V norm alpha=%.3f\n", a);
+        }
+    }
+}
+
+// TCQ Viterbi backtrace buffer (global, reused across launches)
+static uint8_t * tcq_bt_buf = nullptr;
+static size_t    tcq_bt_buf_size = 0;
+
+static void ensure_tcq_bt_buf(size_t needed) {
+    if (tcq_bt_buf_size >= needed) return;
+    if (tcq_bt_buf) cudaFree(tcq_bt_buf);
+    cudaMalloc(&tcq_bt_buf, needed);
+    tcq_bt_buf_size = needed;
 }
 
 typedef void (*set_rows_kernel_t)(const char * src, char * dst);
@@ -1625,6 +1661,52 @@ static void set_rows_cuda(ggml_backend_cuda_context & ctx, const ggml_tensor * s
         set_rows_cuda_turbo4<idx_t>(ctx, src0, src1, dst);
     } else if (dst->type == GGML_TYPE_TURBO1_5) {
         set_rows_cuda_turbo1_5<idx_t>(ctx, src0, src1, dst);
+    } else if (dst->type == GGML_TYPE_TURBO3_TCQ) {
+        load_tcq_norm_alpha();
+        GGML_ASSERT(ne00 % QK_TURBO3_TCQ == 0);
+        const int64_t ne_total_groups = (ne00 * ne01 * ne02 * ne03) / QK_TURBO3_TCQ;
+        const int64_t s01_f = nb01/sizeof(float); const int64_t s02_f = nb02/sizeof(float); const int64_t s03_f = nb03/sizeof(float);
+        const int64_t s10_i = nb10/sizeof(idx_t); const int64_t s11_i = nb11/sizeof(idx_t); const int64_t s12_i = nb12/sizeof(idx_t);
+        const int iq_is_k = (dst->name && strncmp(dst->name, "cache_k_", 8) == 0) ? 1 : 0;
+        // Viterbi backtrace buffer: 128 steps × 512 states per group
+        ensure_tcq_bt_buf(ne_total_groups * 128 * 512);
+        if (ne_total_groups > 0) {
+            const uint3 ne00_fd = init_fastdiv_values((uint32_t) ne00);
+            const uint3 ne01_fd = init_fastdiv_values((uint32_t) ne01);
+            const uint3 ne02_fd = init_fastdiv_values((uint32_t) ne02);
+            const uint3 ne11_fd = init_fastdiv_values((uint32_t) ne11);
+            const uint3 ne12_fd = init_fastdiv_values((uint32_t) ne12);
+            k_set_rows_turbo3_tcq<idx_t><<<(int)ne_total_groups, 512, 0, stream>>>(
+                src0_d, src1_d, (block_turbo3_tcq *)dst->data,
+                ne_total_groups, tcq_bt_buf,
+                ne00, ne01, ne02, ne10, ne11, ne12, ne13,
+                s01_f, s02_f, s03_f, s10_i, s11_i, s12_i, iq_is_k,
+                nb1, nb2, nb3,
+                ne00_fd, ne01_fd, ne02_fd, ne11_fd, ne12_fd);
+        }
+    } else if (dst->type == GGML_TYPE_TURBO2_TCQ) {
+        load_tcq_norm_alpha();
+        GGML_ASSERT(ne00 % QK_TURBO2_TCQ == 0);
+        const int64_t ne_total_groups = (ne00 * ne01 * ne02 * ne03) / QK_TURBO2_TCQ;
+        const int64_t s01_f = nb01/sizeof(float); const int64_t s02_f = nb02/sizeof(float); const int64_t s03_f = nb03/sizeof(float);
+        const int64_t s10_i = nb10/sizeof(idx_t); const int64_t s11_i = nb11/sizeof(idx_t); const int64_t s12_i = nb12/sizeof(idx_t);
+        const int iq_is_k = (dst->name && strncmp(dst->name, "cache_k_", 8) == 0) ? 1 : 0;
+        // Viterbi backtrace buffer: 128 steps × 256 states per group
+        ensure_tcq_bt_buf(ne_total_groups * 128 * 256);
+        if (ne_total_groups > 0) {
+            const uint3 ne00_fd = init_fastdiv_values((uint32_t) ne00);
+            const uint3 ne01_fd = init_fastdiv_values((uint32_t) ne01);
+            const uint3 ne02_fd = init_fastdiv_values((uint32_t) ne02);
+            const uint3 ne11_fd = init_fastdiv_values((uint32_t) ne11);
+            const uint3 ne12_fd = init_fastdiv_values((uint32_t) ne12);
+            k_set_rows_turbo2_tcq<idx_t><<<(int)ne_total_groups, 256, 0, stream>>>(
+                src0_d, src1_d, (block_turbo2_tcq *)dst->data,
+                ne_total_groups, tcq_bt_buf,
+                ne00, ne01, ne02, ne10, ne11, ne12, ne13,
+                s01_f, s02_f, s03_f, s10_i, s11_i, s12_i, iq_is_k,
+                nb1, nb2, nb3,
+                ne00_fd, ne01_fd, ne02_fd, ne11_fd, ne12_fd);
+        }
     } else {
         GGML_ABORT("unsupported type %s", ggml_type_name(dst->type));
     }
