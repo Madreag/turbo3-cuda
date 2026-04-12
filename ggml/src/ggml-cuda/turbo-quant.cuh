@@ -14,10 +14,16 @@
 #include <cmath>
 
 // V-cache norm alpha: learned scaling applied at encode time.
-// Default 1.04f (KLD-optimal at 2K context).
+// Default 1.04f (KLD-optimal at 2K context) for turbo3/turbo2.
 // TCQ types use their own d_tcq_norm_alpha_v (1.04f) in turbo-tcq.cuh.
 // Override via TURBO_NORM_ALPHA_V env var.
 static __constant__ float d_norm_alpha_v = 1.04f;
+
+// turbo4 V-alpha: default 1.10f, calibrated on opus-v3 Q6_K wiki.test.raw
+// (32 chunks). At α=1.10, q8_0 K + turbo4 V matches q8_0 K + q8_0 V PPL
+// within 0.05% — effectively lossless at 2× compression.
+// Override via TURBO4_NORM_ALPHA_V env var.
+static __constant__ float d_turbo4_norm_alpha_v = 1.10f;
 
 // ---- Quantization ratios for dequantize_block template ----
 #define QR_TURBO3 1  // Each dequantize call produces 2 consecutive elements (like q8_0)
