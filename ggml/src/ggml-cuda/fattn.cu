@@ -330,6 +330,20 @@ static void ggml_cuda_flash_attn_ext_vec(ggml_backend_cuda_context & ctx, ggml_t
     FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_F16, GGML_TYPE_TURBO2_0)
     FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_F16, GGML_TYPE_TURBO1_5)
 
+    // TCQ types (D=64, 128, 256 only)
+#define FATTN_VEC_CASES_ALL_D_TCQ(type_K, type_V) \
+    FATTN_VEC_CASE( 64, type_K, type_V)            \
+    FATTN_VEC_CASE(128, type_K, type_V)            \
+    FATTN_VEC_CASE(256, type_K, type_V)            \
+
+    // Symmetric TCQ types
+    FATTN_VEC_CASES_ALL_D_TCQ(GGML_TYPE_TURBO3_TCQ, GGML_TYPE_TURBO3_TCQ)
+    FATTN_VEC_CASES_ALL_D_TCQ(GGML_TYPE_TURBO2_TCQ, GGML_TYPE_TURBO2_TCQ)
+
+    // TCQ cross-types (turbo3_tcq x turbo2_tcq)
+    FATTN_VEC_CASES_ALL_D_TCQ(GGML_TYPE_TURBO3_TCQ, GGML_TYPE_TURBO2_TCQ)
+    FATTN_VEC_CASES_ALL_D_TCQ(GGML_TYPE_TURBO2_TCQ, GGML_TYPE_TURBO3_TCQ)
+
     GGML_ABORT("fatal error");
 }
 
@@ -408,7 +422,8 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
         // Allow all turbo cross-type KV combinations (turbo×turbo, turbo×q8_0, turbo×f16)
         auto is_turbo = [](ggml_type t) {
             return t == GGML_TYPE_TURBO3_0 || t == GGML_TYPE_TURBO4_0 ||
-                   t == GGML_TYPE_TURBO2_0 || t == GGML_TYPE_TURBO1_5;
+                   t == GGML_TYPE_TURBO2_0 || t == GGML_TYPE_TURBO1_5 ||
+                   t == GGML_TYPE_TURBO3_TCQ || t == GGML_TYPE_TURBO2_TCQ;
         };
         auto is_turbo_compatible = [&](ggml_type t) {
             return is_turbo(t) || t == GGML_TYPE_Q8_0 || t == GGML_TYPE_F16;
@@ -451,6 +466,25 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
                         (long long)D);
                     fflush(stderr);
                     warned_turbo_d = true;
+                }
+                return BEST_FATTN_KERNEL_NONE;
+            }
+            break;
+        }
+        case GGML_TYPE_TURBO3_TCQ:
+        case GGML_TYPE_TURBO2_TCQ: {
+            // TCQ VEC kernel only instantiated for D in {64, 128, 256}.
+            const int64_t D = K->ne[0];
+            if (D != 64 && D != 128 && D != 256) {
+                static bool warned_tcq_d = false;
+                if (!warned_tcq_d) {
+                    fprintf(stderr,
+                        "\n[turbo-tcq] WARNING: head_dim=%lld is not supported by TCQ Flash Attention.\n"
+                        "[turbo-tcq]   Supported dimensions: 64, 128, 256.\n"
+                        "[turbo-tcq]   Falling back to standard attention — performance will be reduced.\n\n",
+                        (long long)D);
+                    fflush(stderr);
+                    warned_tcq_d = true;
                 }
                 return BEST_FATTN_KERNEL_NONE;
             }
