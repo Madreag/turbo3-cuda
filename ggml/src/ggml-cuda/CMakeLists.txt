@@ -156,7 +156,11 @@ if (CUDAToolkit_FOUND)
             template-instances/fattn-vec-instance-f16-turbo4_0.cu
             template-instances/fattn-vec-instance-f16-turbo3_0.cu
             template-instances/fattn-vec-instance-f16-turbo2_0.cu
-            template-instances/fattn-vec-instance-f16-turbo1_5.cu)
+            template-instances/fattn-vec-instance-f16-turbo1_5.cu
+            template-instances/fattn-vec-instance-turbo3_tcq-turbo3_tcq.cu
+            template-instances/fattn-vec-instance-turbo2_tcq-turbo2_tcq.cu
+            template-instances/fattn-vec-instance-turbo3_tcq-turbo2_tcq.cu
+            template-instances/fattn-vec-instance-turbo2_tcq-turbo3_tcq.cu)
     endif()
 
     ggml_add_backend_library(ggml-cuda

@@ -432,7 +432,9 @@ extern "C" {
         GGML_TYPE_TURBO4_0 = 42, // TurboQuant 4-bit KV cache: 3-bit PolarQuant + 1-bit QJL
         GGML_TYPE_TURBO2_0 = 43, // TurboQuant 2-bit KV cache: 2-bit PolarQuant (no QJL)
         GGML_TYPE_TURBO1_5 = 44, // TurboQuant 1.5-bit KV cache: ternary {-C, 0, +C}
-        GGML_TYPE_COUNT   = 45,
+        GGML_TYPE_TURBO3_TCQ = 45, // TurboQuant 3-bit TCQ: Viterbi trellis-coded quantization
+        GGML_TYPE_TURBO2_TCQ = 46, // TurboQuant 2-bit TCQ: Viterbi trellis-coded quantization
+        GGML_TYPE_COUNT   = 47,
     };
 
     // precision

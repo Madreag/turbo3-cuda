@@ -1,7 +1,142 @@
 #include "set-rows.cuh"
 #include "cpy-utils.cuh"
 #include "turbo-quant.cuh"
+#include "turbo-tcq.cuh"
 #include "turbo-sink.cuh"
+#include <cstring>
+#include <cerrno>
+#include <algorithm>
+#include <mutex>
+
+// Per-device env var loading: cudaMemcpyToSymbol only writes __constant__
+// memory on the *current* device, so we must repeat for each GPU.
+// Env var parsing is done once; the parsed value is applied per-device.
+
+static std::mutex          alpha_init_mutex;
+static bool                norm_alpha_v_loaded[GGML_CUDA_MAX_DEVICES] = {};
+static bool                turbo4_alpha_v_loaded[GGML_CUDA_MAX_DEVICES] = {};
+static bool                tcq_alpha_loaded[GGML_CUDA_MAX_DEVICES] = {};
+
+static void load_norm_alpha_v() {
+    static std::once_flag parse_flag;
+    static float parsed_val = 0.0f;
+    static bool  has_override = false;
+    std::call_once(parse_flag, []() {
+        const char *s = getenv("TURBO_NORM_ALPHA_V");
+        if (!s) return;
+        char *end;
+        errno = 0;
+        float a = strtof(s, &end);
+        if (end == s || errno != 0 || a <= 0.0f || a >= 10.0f) {
+            fprintf(stderr, "TURBO: invalid TURBO_NORM_ALPHA_V='%s'\n", s);
+        } else {
+            parsed_val = a;
+            has_override = true;
+        }
+    });
+    if (!has_override) return;
+    int device;
+    cudaGetDevice(&device);
+    std::lock_guard<std::mutex> lock(alpha_init_mutex);
+    if (!norm_alpha_v_loaded[device]) {
+        cudaMemcpyToSymbol(d_norm_alpha_v, &parsed_val, sizeof(float));
+        fprintf(stderr, "TURBO: V-cache norm alpha=%.3f (device %d)\n", parsed_val, device);
+        norm_alpha_v_loaded[device] = true;
+    }
+}
+
+static void load_turbo4_norm_alpha_v() {
+    static std::once_flag parse_flag;
+    static float parsed_val = 0.0f;
+    static bool  has_override = false;
+    std::call_once(parse_flag, []() {
+        const char *s = getenv("TURBO4_NORM_ALPHA_V");
+        if (!s) return;
+        char *end;
+        errno = 0;
+        float a = strtof(s, &end);
+        if (end == s || errno != 0 || a <= 0.0f || a >= 10.0f) {
+            fprintf(stderr, "TURBO4: invalid TURBO4_NORM_ALPHA_V='%s'\n", s);
+        } else {
+            parsed_val = a;
+            has_override = true;
+        }
+    });
+    if (!has_override) return;
+    int device;
+    cudaGetDevice(&device);
+    std::lock_guard<std::mutex> lock(alpha_init_mutex);
+    if (!turbo4_alpha_v_loaded[device]) {
+        cudaMemcpyToSymbol(d_turbo4_norm_alpha_v, &parsed_val, sizeof(float));
+        fprintf(stderr, "TURBO4: V-cache norm alpha=%.3f (device %d)\n", parsed_val, device);
+        turbo4_alpha_v_loaded[device] = true;
+    }
+}
+
+static void load_tcq_norm_alpha() {
+    static std::once_flag parse_flag;
+    static float parsed_k = 0.0f, parsed_v = 0.0f;
+    static bool  has_k = false, has_v = false;
+    std::call_once(parse_flag, []() {
+        const char *sk = getenv("TURBO_TCQ_ALPHA");
+        const char *sv = getenv("TURBO_TCQ_ALPHA_V");
+        if (sk) {
+            char *end; errno = 0;
+            float a = strtof(sk, &end);
+            if (end != sk && errno == 0 && a > 0.0f && a < 10.0f) {
+                parsed_k = a;
+                has_k = true;
+            }
+        }
+        if (sv) {
+            char *end; errno = 0;
+            float a = strtof(sv, &end);
+            if (end != sv && errno == 0 && a > 0.0f && a < 10.0f) {
+                parsed_v = a;
+                has_v = true;
+            }
+        }
+    });
+    if (!has_k && !has_v) return;
+    int device;
+    cudaGetDevice(&device);
+    std::lock_guard<std::mutex> lock(alpha_init_mutex);
+    if (!tcq_alpha_loaded[device]) {
+        if (has_k) {
+            cudaMemcpyToSymbol(d_tcq_norm_alpha, &parsed_k, sizeof(float));
+            fprintf(stderr, "TCQ: K norm alpha=%.3f (device %d)\n", parsed_k, device);
+        }
+        if (has_v) {
+            cudaMemcpyToSymbol(d_tcq_norm_alpha_v, &parsed_v, sizeof(float));
+            fprintf(stderr, "TCQ: V norm alpha=%.3f (device %d)\n", parsed_v, device);
+        }
+        tcq_alpha_loaded[device] = true;
+    }
+}
+
+// TCQ Viterbi backtrace buffer (per-device, reused across launches)
+static std::mutex           tcq_bt_mutex;
+static uint8_t *            tcq_bt_bufs[GGML_CUDA_MAX_DEVICES] = {};
+static size_t               tcq_bt_buf_sizes[GGML_CUDA_MAX_DEVICES] = {};
+
+static uint8_t * ensure_tcq_bt_buf(size_t needed, int device) {
+    std::lock_guard<std::mutex> lock(tcq_bt_mutex);
+    if (tcq_bt_buf_sizes[device] >= needed) return tcq_bt_bufs[device];
+    int prev_device;
+    cudaGetDevice(&prev_device);
+    if (prev_device != device) cudaSetDevice(device);
+    if (tcq_bt_bufs[device]) { cudaFree(tcq_bt_bufs[device]); tcq_bt_bufs[device] = nullptr; tcq_bt_buf_sizes[device] = 0; }
+    cudaError_t err = cudaMalloc(&tcq_bt_bufs[device], needed);
+    if (prev_device != device) cudaSetDevice(prev_device);
+    if (err != cudaSuccess) {
+        tcq_bt_bufs[device] = nullptr;
+        tcq_bt_buf_sizes[device] = 0;
+        GGML_ABORT("TCQ: cudaMalloc failed for Viterbi backtrace buffer (%zu bytes): %s",
+                    needed, cudaGetErrorString(err));
+    }
+    tcq_bt_buf_sizes[device] = needed;
+    return tcq_bt_bufs[device];
+}
 
 typedef void (*set_rows_kernel_t)(const char * src, char * dst);
 
@@ -247,7 +382,8 @@ static __global__ void k_set_rows_turbo3(
         const int64_t s12,
         const int64_t s1,
         const int64_t s2,
-        const int64_t s3) {
+        const int64_t s3,
+        const int     is_v) {
 
     static_assert(GROUP_SIZE == 128 || GROUP_SIZE == 64, "GROUP_SIZE must be 128 or 64");
 
@@ -391,7 +527,8 @@ static __global__ void k_set_rows_turbo3(
         s_recon_sq = total;
     }
     __syncthreads();
-    const float corrected_norm = (s_recon_sq > 1e-20f) ? grp_norm * rsqrtf(s_recon_sq) : grp_norm;
+    float corrected_norm = (s_recon_sq > 1e-20f) ? grp_norm * rsqrtf(s_recon_sq) : grp_norm;
+    if (is_v) corrected_norm *= d_norm_alpha_v;
 
     // ---- Step 8: Write corrected norm (one thread per turbo3 block) ----
     if (elem_in_block == 0) blk->norm = __float2half(corrected_norm);
@@ -560,6 +697,10 @@ static void set_rows_cuda_turbo3(
     // InnerQ: check/finalize calibration before kernel launch
     turbo_innerq_check_finalize(group_size, ne00);
 
+    // Detect K vs V cache from tensor name (V gets norm alpha correction)
+    load_norm_alpha_v();
+    const int is_v = (dst->name && strncmp(dst->name, "cache_k_", 8) != 0) ? 1 : 0;
+
     // Launch 1: full groups with WHT rotation
     if (n_full_groups > 0) {
         const int64_t ne_total = n_full_groups * ne01 * ne02 * ne03;
@@ -568,13 +709,13 @@ static void set_rows_cuda_turbo3(
                 src0_d, src1_d, (block_turbo3_0 *)dst->data,
                 ne00, ne01, ne10, ne11, ne12, ne13,
                 s01, s02, s03, s10, s11, s12,
-                nb1, nb2, nb3);
+                nb1, nb2, nb3, is_v);
         } else {
             k_set_rows_turbo3<idx_t, 64><<<(int)ne_total, 64, 0, stream>>>(
                 src0_d, src1_d, (block_turbo3_0 *)dst->data,
                 ne00, ne01, ne10, ne11, ne12, ne13,
                 s01, s02, s03, s10, s11, s12,
-                nb1, nb2, nb3);
+                nb1, nb2, nb3, is_v);
         }
     }
 
@@ -622,7 +763,8 @@ static __global__ void k_set_rows_turbo2(
         const int64_t s12,
         const int64_t s1,
         const int64_t s2,
-        const int64_t s3) {
+        const int64_t s3,
+        const int     is_v) {
 
     static_assert(GROUP_SIZE == 128 || GROUP_SIZE == 64, "GROUP_SIZE must be 128 or 64");
 
@@ -755,7 +897,8 @@ static __global__ void k_set_rows_turbo2(
         s_recon_sq = total;
     }
     __syncthreads();
-    const float corrected_norm = (s_recon_sq > 1e-20f) ? grp_norm * rsqrtf(s_recon_sq) : grp_norm;
+    float corrected_norm = (s_recon_sq > 1e-20f) ? grp_norm * rsqrtf(s_recon_sq) : grp_norm;
+    if (is_v) corrected_norm *= d_norm_alpha_v;
 
     // ---- Step 8: Write corrected norm ----
     if (elem_in_block == 0) blk->norm = __float2half(corrected_norm);
@@ -908,6 +1051,10 @@ static void set_rows_cuda_turbo2(
     // InnerQ: check/finalize calibration before kernel launch
     turbo_innerq_check_finalize(group_size, ne00);
 
+    // Detect K vs V cache from tensor name (V gets norm alpha correction)
+    load_norm_alpha_v();
+    const int is_v = (dst->name && strncmp(dst->name, "cache_k_", 8) != 0) ? 1 : 0;
+
     if (n_full_groups > 0) {
         const int64_t ne_total = n_full_groups * ne01 * ne02 * ne03;
         if (group_size == 128) {
@@ -915,13 +1062,13 @@ static void set_rows_cuda_turbo2(
                 src0_d, src1_d, (block_turbo2_0 *)dst->data,
                 ne00, ne01, ne10, ne11, ne12, ne13,
                 s01, s02, s03, s10, s11, s12,
-                nb1, nb2, nb3);
+                nb1, nb2, nb3, is_v);
         } else {
             k_set_rows_turbo2<idx_t, 64><<<(int)ne_total, 64, 0, stream>>>(
                 src0_d, src1_d, (block_turbo2_0 *)dst->data,
                 ne00, ne01, ne10, ne11, ne12, ne13,
                 s01, s02, s03, s10, s11, s12,
-                nb1, nb2, nb3);
+                nb1, nb2, nb3, is_v);
         }
     }
 
@@ -961,7 +1108,8 @@ static __global__ void k_set_rows_turbo4(
         const int64_t ne10, const int64_t ne11, const int64_t ne12, const int64_t ne13,
         const int64_t s01, const int64_t s02, const int64_t s03,
         const int64_t s10, const int64_t s11, const int64_t s12,
-        const int64_t nb1, const int64_t nb2, const int64_t nb3) {
+        const int64_t nb1, const int64_t nb2, const int64_t nb3,
+        const int     is_v) {
 
     const int j = threadIdx.x;  // 0..127
 
@@ -1059,7 +1207,8 @@ static __global__ void k_set_rows_turbo4(
         s_recon_sq = total;
     }
     __syncthreads();
-    const float corrected_norm = (s_recon_sq > 1e-20f) ? grp_norm * rsqrtf(s_recon_sq) : grp_norm;
+    float corrected_norm = (s_recon_sq > 1e-20f) ? grp_norm * rsqrtf(s_recon_sq) : grp_norm;
+    if (is_v) corrected_norm *= d_turbo4_norm_alpha_v;
 
     // ---- Step 8: Write norm (thread 0 only) ----
     if (j == 0) {
@@ -1095,13 +1244,17 @@ static void set_rows_cuda_turbo4(
 
     turbo_innerq_check_finalize(128, ne00);
 
+    // Detect K vs V cache from tensor name (V gets optional norm alpha correction)
+    load_turbo4_norm_alpha_v();
+    const int is_v = (dst->name && strncmp(dst->name, "cache_k_", 8) != 0) ? 1 : 0;
+
     const int64_t n_groups = (ne00 / QK_TURBO4) * ne01 * ne02 * ne03;
 
     k_set_rows_turbo4<idx_t><<<(int)n_groups, 128, 0, stream>>>(
         src0_d, src1_d, (block_turbo4_0 *)dst->data,
         ne00, ne01, ne10, ne11, ne12, ne13,
         s01, s02, s03, s10, s11, s12,
-        nb1, nb2, nb3);
+        nb1, nb2, nb3, is_v);
 
     // Attention sinks: capture WHT-rotated fp16 for positions < TURBO_SINK_SIZE
     // turbo4 always uses group_size=128 (QK_TURBO4=128)
@@ -1594,6 +1747,62 @@ static void set_rows_cuda(ggml_backend_cuda_context & ctx, const ggml_tensor * s
         set_rows_cuda_turbo4<idx_t>(ctx, src0, src1, dst);
     } else if (dst->type == GGML_TYPE_TURBO1_5) {
         set_rows_cuda_turbo1_5<idx_t>(ctx, src0, src1, dst);
+    } else if (dst->type == GGML_TYPE_TURBO3_TCQ) {
+        load_tcq_norm_alpha();
+        GGML_ASSERT(ne00 % QK_TURBO3_TCQ == 0);
+        const int64_t ne_total_groups = (ne00 * ne01 * ne02 * ne03) / QK_TURBO3_TCQ;
+        const int64_t s01_f = nb01/sizeof(float); const int64_t s02_f = nb02/sizeof(float); const int64_t s03_f = nb03/sizeof(float);
+        const int64_t s10_i = nb10/sizeof(idx_t); const int64_t s11_i = nb11/sizeof(idx_t); const int64_t s12_i = nb12/sizeof(idx_t);
+        const int iq_is_k = (dst->name && strncmp(dst->name, "cache_k_", 8) == 0) ? 1 : (dst->name ? 0 : 1);
+        constexpr int64_t bt_per_group = 128 * 512;
+        constexpr int64_t max_bt_buf_bytes = (int64_t)128 * 1024 * 1024;
+        const int64_t max_groups_per_batch = max_bt_buf_bytes / bt_per_group;
+        if (ne_total_groups > 0) {
+            uint8_t * bt_buf = ensure_tcq_bt_buf(std::min(ne_total_groups, max_groups_per_batch) * bt_per_group, ctx.device);
+            const uint3 ne00_fd = init_fastdiv_values((uint32_t) ne00);
+            const uint3 ne01_fd = init_fastdiv_values((uint32_t) ne01);
+            const uint3 ne02_fd = init_fastdiv_values((uint32_t) ne02);
+            const uint3 ne11_fd = init_fastdiv_values((uint32_t) ne11);
+            const uint3 ne12_fd = init_fastdiv_values((uint32_t) ne12);
+            for (int64_t g = 0; g < ne_total_groups; g += max_groups_per_batch) {
+                const int64_t batch = std::min(max_groups_per_batch, ne_total_groups - g);
+                k_set_rows_turbo3_tcq<idx_t><<<(int)batch, 512, 0, stream>>>(
+                    src0_d, src1_d, (block_turbo3_tcq *)dst->data,
+                    ne_total_groups, bt_buf, g,
+                    ne00, ne01, ne02, ne10, ne11, ne12, ne13,
+                    s01_f, s02_f, s03_f, s10_i, s11_i, s12_i, iq_is_k,
+                    nb1, nb2, nb3,
+                    ne00_fd, ne01_fd, ne02_fd, ne11_fd, ne12_fd);
+            }
+        }
+    } else if (dst->type == GGML_TYPE_TURBO2_TCQ) {
+        load_tcq_norm_alpha();
+        GGML_ASSERT(ne00 % QK_TURBO2_TCQ == 0);
+        const int64_t ne_total_groups = (ne00 * ne01 * ne02 * ne03) / QK_TURBO2_TCQ;
+        const int64_t s01_f = nb01/sizeof(float); const int64_t s02_f = nb02/sizeof(float); const int64_t s03_f = nb03/sizeof(float);
+        const int64_t s10_i = nb10/sizeof(idx_t); const int64_t s11_i = nb11/sizeof(idx_t); const int64_t s12_i = nb12/sizeof(idx_t);
+        const int iq_is_k = (dst->name && strncmp(dst->name, "cache_k_", 8) == 0) ? 1 : (dst->name ? 0 : 1);
+        constexpr int64_t bt_per_group = 128 * 256;
+        constexpr int64_t max_bt_buf_bytes = (int64_t)128 * 1024 * 1024;
+        const int64_t max_groups_per_batch = max_bt_buf_bytes / bt_per_group;
+        if (ne_total_groups > 0) {
+            uint8_t * bt_buf = ensure_tcq_bt_buf(std::min(ne_total_groups, max_groups_per_batch) * bt_per_group, ctx.device);
+            const uint3 ne00_fd = init_fastdiv_values((uint32_t) ne00);
+            const uint3 ne01_fd = init_fastdiv_values((uint32_t) ne01);
+            const uint3 ne02_fd = init_fastdiv_values((uint32_t) ne02);
+            const uint3 ne11_fd = init_fastdiv_values((uint32_t) ne11);
+            const uint3 ne12_fd = init_fastdiv_values((uint32_t) ne12);
+            for (int64_t g = 0; g < ne_total_groups; g += max_groups_per_batch) {
+                const int64_t batch = std::min(max_groups_per_batch, ne_total_groups - g);
+                k_set_rows_turbo2_tcq<idx_t><<<(int)batch, 256, 0, stream>>>(
+                    src0_d, src1_d, (block_turbo2_tcq *)dst->data,
+                    ne_total_groups, bt_buf, g,
+                    ne00, ne01, ne02, ne10, ne11, ne12, ne13,
+                    s01_f, s02_f, s03_f, s10_i, s11_i, s12_i, iq_is_k,
+                    nb1, nb2, nb3,
+                    ne00_fd, ne01_fd, ne02_fd, ne11_fd, ne12_fd);
+            }
+        }
     } else {
         GGML_ABORT("unsupported type %s", ggml_type_name(dst->type));
     }

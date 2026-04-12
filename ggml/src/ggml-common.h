@@ -338,6 +338,30 @@ typedef struct {
 } block_turbo1_5;               // 16 bytes total
 static_assert(sizeof(block_turbo1_5) == 16, "turbo1.5 block must be 16 bytes");
 
+// TurboQuant 3-bit TCQ: Trellis-Coded Quantization (right-shift bitshift trellis, k=3, L=9)
+// One block = one 128-element rotation group. Bitstream: 6 zero-prefix + 128x3-bit outputs = 390 bits = 49 bytes.
+// Decode: state_t = read_9_bits(qs, t*3), recon_t = codebook[state_t] * norm
+// = 3.1875 bits/value, 5.0x compression vs fp16
+#define QK_TURBO3_TCQ 128
+typedef struct {
+    ggml_half  norm;                    //  2 bytes: corrected group L2 norm
+    uint8_t    qs[49];                  // 49 bytes: 390-bit trellis bitstream (2 padding bits)
+    uint8_t    pad;                     //  1 byte:  alignment padding
+} block_turbo3_tcq;                     // 52 bytes total for 128 values (3.25 bpv)
+static_assert(sizeof(block_turbo3_tcq) == sizeof(ggml_half) + 50, "wrong turbo3_tcq block size/padding");
+
+// TurboQuant 2-bit TCQ: Trellis-Coded Quantization (right-shift bitshift trellis, k=2, L=8)
+// One block = one 128-element rotation group. Bitstream: 6 prefix + 128x2-bit outputs = 262 bits = 33 bytes.
+// Decode: state_t = read_8_bits(qs, t*2), recon_t = codebook[state_t] * norm
+// = 2.25 bits/value, 7.1x compression vs fp16
+#define QK_TURBO2_TCQ 128
+typedef struct {
+    ggml_half  norm;                    //  2 bytes: corrected group L2 norm
+    uint8_t    qs[33];                  // 33 bytes: 262-bit trellis bitstream (2 padding bits)
+    uint8_t    pad;                     //  1 byte:  alignment padding
+} block_turbo2_tcq;                     // 36 bytes total for 128 values (2.25 bpv)
+static_assert(sizeof(block_turbo2_tcq) == sizeof(ggml_half) + 34, "wrong turbo2_tcq block size/padding");
+
 //
 // Super-block quantization structures
 //
