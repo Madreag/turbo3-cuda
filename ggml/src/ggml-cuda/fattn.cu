@@ -419,18 +419,21 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
 
 #ifndef GGML_CUDA_FA_ALL_QUANTS
     if (K->type != V->type) {
-        // Allow all turbo cross-type KV combinations (turbo×turbo, turbo×q8_0, turbo×f16)
-        auto is_turbo = [](ggml_type t) {
+        // Allow turbo cross-type KV combinations, but never mix TCQ with non-TCQ
+        auto is_turbo_nontcq = [](ggml_type t) {
             return t == GGML_TYPE_TURBO3_0 || t == GGML_TYPE_TURBO4_0 ||
-                   t == GGML_TYPE_TURBO2_0 || t == GGML_TYPE_TURBO1_5 ||
-                   t == GGML_TYPE_TURBO3_TCQ || t == GGML_TYPE_TURBO2_TCQ;
+                   t == GGML_TYPE_TURBO2_0 || t == GGML_TYPE_TURBO1_5;
+        };
+        auto is_tcq = [](ggml_type t) {
+            return t == GGML_TYPE_TURBO3_TCQ || t == GGML_TYPE_TURBO2_TCQ;
         };
         auto is_turbo_compatible = [&](ggml_type t) {
-            return is_turbo(t) || t == GGML_TYPE_Q8_0 || t == GGML_TYPE_F16;
+            return is_turbo_nontcq(t) || t == GGML_TYPE_Q8_0 || t == GGML_TYPE_F16;
         };
-        const bool turbo_cross = (is_turbo(K->type) || is_turbo(V->type)) &&
+        const bool tcq_cross = is_tcq(K->type) && is_tcq(V->type);
+        const bool turbo_cross = (is_turbo_nontcq(K->type) || is_turbo_nontcq(V->type)) &&
                                   is_turbo_compatible(K->type) && is_turbo_compatible(V->type);
-        if (!turbo_cross) {
+        if (!tcq_cross && !turbo_cross) {
             return BEST_FATTN_KERNEL_NONE;
         }
     }

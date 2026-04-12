@@ -14,9 +14,10 @@
 #include <cmath>
 
 // V-cache norm alpha: learned scaling applied at encode time.
-// Default 1.04f for V (spiritbuun's KLD-optimal value), 1.0f for K (no scaling).
+// Default 1.0f (no scaling) to preserve existing turbo3/turbo2 behavior.
+// TCQ types use their own d_tcq_norm_alpha_v (1.04f) in turbo-tcq.cuh.
 // Override via TURBO_NORM_ALPHA_V env var.
-static __constant__ float d_norm_alpha_v = 1.04f;
+static __constant__ float d_norm_alpha_v = 1.0f;
 
 // ---- Quantization ratios for dequantize_block template ----
 #define QR_TURBO3 1  // Each dequantize call produces 2 consecutive elements (like q8_0)

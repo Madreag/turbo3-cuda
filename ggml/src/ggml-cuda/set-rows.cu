@@ -5,6 +5,7 @@
 #include "turbo-sink.cuh"
 #include <cstring>
 #include <cerrno>
+#include <algorithm>
 
 static void load_norm_alpha_v() {
     static bool loaded = false;
@@ -53,8 +54,14 @@ static size_t    tcq_bt_buf_size = 0;
 
 static void ensure_tcq_bt_buf(size_t needed) {
     if (tcq_bt_buf_size >= needed) return;
-    if (tcq_bt_buf) cudaFree(tcq_bt_buf);
-    cudaMalloc(&tcq_bt_buf, needed);
+    if (tcq_bt_buf) { cudaFree(tcq_bt_buf); tcq_bt_buf = nullptr; tcq_bt_buf_size = 0; }
+    cudaError_t err = cudaMalloc(&tcq_bt_buf, needed);
+    if (err != cudaSuccess) {
+        tcq_bt_buf = nullptr;
+        tcq_bt_buf_size = 0;
+        GGML_ABORT("TCQ: cudaMalloc failed for Viterbi backtrace buffer (%zu bytes): %s",
+                    needed, cudaGetErrorString(err));
+    }
     tcq_bt_buf_size = needed;
 }
 
@@ -1668,21 +1675,26 @@ static void set_rows_cuda(ggml_backend_cuda_context & ctx, const ggml_tensor * s
         const int64_t s01_f = nb01/sizeof(float); const int64_t s02_f = nb02/sizeof(float); const int64_t s03_f = nb03/sizeof(float);
         const int64_t s10_i = nb10/sizeof(idx_t); const int64_t s11_i = nb11/sizeof(idx_t); const int64_t s12_i = nb12/sizeof(idx_t);
         const int iq_is_k = (dst->name && strncmp(dst->name, "cache_k_", 8) == 0) ? 1 : 0;
-        // Viterbi backtrace buffer: 128 steps × 512 states per group
-        ensure_tcq_bt_buf(ne_total_groups * 128 * 512);
+        constexpr int64_t bt_per_group = 128 * 512;
+        constexpr int64_t max_bt_buf_bytes = (int64_t)128 * 1024 * 1024;
+        const int64_t max_groups_per_batch = max_bt_buf_bytes / bt_per_group;
         if (ne_total_groups > 0) {
+            ensure_tcq_bt_buf(std::min(ne_total_groups, max_groups_per_batch) * bt_per_group);
             const uint3 ne00_fd = init_fastdiv_values((uint32_t) ne00);
             const uint3 ne01_fd = init_fastdiv_values((uint32_t) ne01);
             const uint3 ne02_fd = init_fastdiv_values((uint32_t) ne02);
             const uint3 ne11_fd = init_fastdiv_values((uint32_t) ne11);
             const uint3 ne12_fd = init_fastdiv_values((uint32_t) ne12);
-            k_set_rows_turbo3_tcq<idx_t><<<(int)ne_total_groups, 512, 0, stream>>>(
-                src0_d, src1_d, (block_turbo3_tcq *)dst->data,
-                ne_total_groups, tcq_bt_buf,
-                ne00, ne01, ne02, ne10, ne11, ne12, ne13,
-                s01_f, s02_f, s03_f, s10_i, s11_i, s12_i, iq_is_k,
-                nb1, nb2, nb3,
-                ne00_fd, ne01_fd, ne02_fd, ne11_fd, ne12_fd);
+            for (int64_t g = 0; g < ne_total_groups; g += max_groups_per_batch) {
+                const int64_t batch = std::min(max_groups_per_batch, ne_total_groups - g);
+                k_set_rows_turbo3_tcq<idx_t><<<(int)batch, 512, 0, stream>>>(
+                    src0_d, src1_d, (block_turbo3_tcq *)dst->data,
+                    ne_total_groups, tcq_bt_buf, g,
+                    ne00, ne01, ne02, ne10, ne11, ne12, ne13,
+                    s01_f, s02_f, s03_f, s10_i, s11_i, s12_i, iq_is_k,
+                    nb1, nb2, nb3,
+                    ne00_fd, ne01_fd, ne02_fd, ne11_fd, ne12_fd);
+            }
         }
     } else if (dst->type == GGML_TYPE_TURBO2_TCQ) {
         load_tcq_norm_alpha();
@@ -1691,21 +1703,26 @@ static void set_rows_cuda(ggml_backend_cuda_context & ctx, const ggml_tensor * s
         const int64_t s01_f = nb01/sizeof(float); const int64_t s02_f = nb02/sizeof(float); const int64_t s03_f = nb03/sizeof(float);
         const int64_t s10_i = nb10/sizeof(idx_t); const int64_t s11_i = nb11/sizeof(idx_t); const int64_t s12_i = nb12/sizeof(idx_t);
         const int iq_is_k = (dst->name && strncmp(dst->name, "cache_k_", 8) == 0) ? 1 : 0;
-        // Viterbi backtrace buffer: 128 steps × 256 states per group
-        ensure_tcq_bt_buf(ne_total_groups * 128 * 256);
+        constexpr int64_t bt_per_group = 128 * 256;
+        constexpr int64_t max_bt_buf_bytes = (int64_t)128 * 1024 * 1024;
+        const int64_t max_groups_per_batch = max_bt_buf_bytes / bt_per_group;
         if (ne_total_groups > 0) {
+            ensure_tcq_bt_buf(std::min(ne_total_groups, max_groups_per_batch) * bt_per_group);
             const uint3 ne00_fd = init_fastdiv_values((uint32_t) ne00);
             const uint3 ne01_fd = init_fastdiv_values((uint32_t) ne01);
             const uint3 ne02_fd = init_fastdiv_values((uint32_t) ne02);
             const uint3 ne11_fd = init_fastdiv_values((uint32_t) ne11);
             const uint3 ne12_fd = init_fastdiv_values((uint32_t) ne12);
-            k_set_rows_turbo2_tcq<idx_t><<<(int)ne_total_groups, 256, 0, stream>>>(
-                src0_d, src1_d, (block_turbo2_tcq *)dst->data,
-                ne_total_groups, tcq_bt_buf,
-                ne00, ne01, ne02, ne10, ne11, ne12, ne13,
-                s01_f, s02_f, s03_f, s10_i, s11_i, s12_i, iq_is_k,
-                nb1, nb2, nb3,
-                ne00_fd, ne01_fd, ne02_fd, ne11_fd, ne12_fd);
+            for (int64_t g = 0; g < ne_total_groups; g += max_groups_per_batch) {
+                const int64_t batch = std::min(max_groups_per_batch, ne_total_groups - g);
+                k_set_rows_turbo2_tcq<idx_t><<<(int)batch, 256, 0, stream>>>(
+                    src0_d, src1_d, (block_turbo2_tcq *)dst->data,
+                    ne_total_groups, tcq_bt_buf, g,
+                    ne00, ne01, ne02, ne10, ne11, ne12, ne13,
+                    s01_f, s02_f, s03_f, s10_i, s11_i, s12_i, iq_is_k,
+                    nb1, nb2, nb3,
+                    ne00_fd, ne01_fd, ne02_fd, ne11_fd, ne12_fd);
+            }
         }
     } else {
         GGML_ABORT("unsupported type %s", ggml_type_name(dst->type));

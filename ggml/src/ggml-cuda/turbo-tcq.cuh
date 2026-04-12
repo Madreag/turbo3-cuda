@@ -156,7 +156,7 @@ template<typename idx_t>
 static __global__ void __launch_bounds__(512, 1) k_set_rows_turbo3_tcq(
         const float * __restrict__ src0, const idx_t * __restrict__ src1,
         block_turbo3_tcq * __restrict__ dst, const int64_t ne_total_groups,
-        uint8_t * __restrict__ bt_buf,
+        uint8_t * __restrict__ bt_buf, const int64_t group_offset,
         const int64_t ne00, const int64_t ne01, const int64_t ne02,
         const int64_t ne10, const int64_t ne11, const int64_t ne12, const int64_t ne13,
         const int64_t s01, const int64_t s02, const int64_t s03,
@@ -166,7 +166,7 @@ static __global__ void __launch_bounds__(512, 1) k_set_rows_turbo3_tcq(
         const uint3 ne00_fd, const uint3 ne01_fd, const uint3 ne02_fd,
         const uint3 ne11_fd, const uint3 ne12_fd) {
 
-    const int64_t group = blockIdx.x;
+    const int64_t group = blockIdx.x + group_offset;
     if (group >= ne_total_groups) return;
 
     const int sid = threadIdx.x; // state index 0..511
@@ -423,7 +423,7 @@ template<typename idx_t>
 static __global__ void __launch_bounds__(256, 1) k_set_rows_turbo2_tcq(
         const float * __restrict__ src0, const idx_t * __restrict__ src1,
         block_turbo2_tcq * __restrict__ dst, const int64_t ne_total_groups,
-        uint8_t * __restrict__ bt_buf,
+        uint8_t * __restrict__ bt_buf, const int64_t group_offset,
         const int64_t ne00, const int64_t ne01, const int64_t ne02,
         const int64_t ne10, const int64_t ne11, const int64_t ne12, const int64_t ne13,
         const int64_t s01, const int64_t s02, const int64_t s03,
@@ -433,7 +433,7 @@ static __global__ void __launch_bounds__(256, 1) k_set_rows_turbo2_tcq(
         const uint3 ne00_fd, const uint3 ne01_fd, const uint3 ne02_fd,
         const uint3 ne11_fd, const uint3 ne12_fd) {
 
-    const int grp = blockIdx.x;
+    const int grp = blockIdx.x + group_offset;
     if (grp >= ne_total_groups) return;
     const int sid = threadIdx.x; // 0..255 = trellis state
 
