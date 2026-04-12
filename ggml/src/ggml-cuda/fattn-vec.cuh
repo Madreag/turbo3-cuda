@@ -901,9 +901,8 @@ EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_F16, GGML_TYPE_TURBO3_0)
 EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_F16, GGML_TYPE_TURBO2_0)
 EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_F16, GGML_TYPE_TURBO1_5)
 
-// TCQ types (D=64, 128, 256 only -- no D=512 instantiation)
+// TCQ types (D=128, 256 only — D=64 excluded because QK block size is 128)
 #define EXTERN_DECL_FATTN_VEC_TCQ(type_K, type_V) \
-    extern DECL_FATTN_VEC_CASE( 64, type_K, type_V); \
     extern DECL_FATTN_VEC_CASE(128, type_K, type_V); \
     extern DECL_FATTN_VEC_CASE(256, type_K, type_V);
 

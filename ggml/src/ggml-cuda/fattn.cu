@@ -330,9 +330,8 @@ static void ggml_cuda_flash_attn_ext_vec(ggml_backend_cuda_context & ctx, ggml_t
     FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_F16, GGML_TYPE_TURBO2_0)
     FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_F16, GGML_TYPE_TURBO1_5)
 
-    // TCQ types (D=64, 128, 256 only)
+    // TCQ types (D=128, 256 only — D=64 excluded because QK block size is 128)
 #define FATTN_VEC_CASES_ALL_D_TCQ(type_K, type_V) \
-    FATTN_VEC_CASE( 64, type_K, type_V)            \
     FATTN_VEC_CASE(128, type_K, type_V)            \
     FATTN_VEC_CASE(256, type_K, type_V)            \
 
@@ -476,14 +475,15 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
         }
         case GGML_TYPE_TURBO3_TCQ:
         case GGML_TYPE_TURBO2_TCQ: {
-            // TCQ VEC kernel only instantiated for D in {64, 128, 256}.
+            // TCQ VEC kernel only instantiated for D in {128, 256}.
+            // D=64 is excluded because QK_TURBO{2,3}_TCQ block size is 128.
             const int64_t D = K->ne[0];
-            if (D != 64 && D != 128 && D != 256) {
+            if (D != 128 && D != 256) {
                 static bool warned_tcq_d = false;
                 if (!warned_tcq_d) {
                     fprintf(stderr,
                         "\n[turbo-tcq] WARNING: head_dim=%lld is not supported by TCQ Flash Attention.\n"
-                        "[turbo-tcq]   Supported dimensions: 64, 128, 256.\n"
+                        "[turbo-tcq]   Supported dimensions: 128, 256.\n"
                         "[turbo-tcq]   Falling back to standard attention — performance will be reduced.\n\n",
                         (long long)D);
                     fflush(stderr);
