@@ -105,7 +105,7 @@ common_peg_arena autoparser::build_parser(const generation_params & inputs) cons
             auto response_format = p.rule("response-format", p.content(p.schema(p.json(), "response-format-schema", inputs.json_schema)));
             parser = ctx.reasoning_parser + p.space() + p.choice({
                 p.literal("```json") + p.space() + response_format + p.space() + p.literal("```"),
-                response_format
+                p.space() + response_format  + p.space()
             }) + p.end();
         } else if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE && jinja_caps.supports_tool_calls) {
             parser = tools.build_parser(ctx);
@@ -311,17 +311,15 @@ common_peg_parser analyze_tools::build_tool_parser_tag_tagged(parser_build_conte
                 }
             }
 
-            auto arg = p.tool_arg(
-                p.tool_arg_open(arguments.name_prefix + p.tool_arg_name(p.literal(param_name)) +
-                                arguments.name_suffix) +
-                arguments.value_prefix +
-                (type == "string" ? p.tool_arg_string_value(p.schema(p.until(arguments.value_suffix),
-                                                                     "tool-" + name + "-arg-" + param_name + "-schema",
-                                                                     param_schema, true)) :
-                                    p.tool_arg_json_value(p.schema(
-                                        p.json(), "tool-" + name + "-arg-" + param_name + "-schema", param_schema, false)) +
-                                        p.space()) +
-                p.tool_arg_close(p.literal(arguments.value_suffix)));
+            auto arg =
+                p.tool_arg(p.tool_arg_open(arguments.name_prefix + p.tool_arg_name(p.literal(param_name)) +
+                                           arguments.name_suffix) +
+                           arguments.value_prefix +
+                           (schema_info.resolves_to_string(param_schema) ?
+                                p.tool_arg_string_value(until_suffix) :
+                                p.tool_arg_json_value(p.schema(
+                                    p.json(), "tool-" + name + "-arg-" + param_name + "-schema", param_schema, false))) +
+                           p.tool_arg_close(p.literal(arguments.value_suffix)));
 
             auto named_arg = p.rule("tool-" + name + "-arg-" + param_name, arg);
             if (is_required) {
