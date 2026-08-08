@@ -1,5 +1,36 @@
 # GOAL: Qwen3.6-27B × Hermes — complete the integration. PERFECTLY.
 
+## PHASE 2 — RENDER TRUTH (opened 2026-07-28 after run-1 BLACK PAGE)
+Phase 1 (transport) is done and stays done: streaming, tool calls, preserve_thinking,
+all wire gates green — the user's run streamed 3,200 deltas flawlessly. The artifact
+itself rendered BLACK. Root lesson, now law: **structure proxies (file size, closed
+tags, element counts) are BANNED as render evidence. Only a headless-Chrome screenshot
+with pixel analysis (non-black, color variety) plus a clean JS console counts.**
+Current lead: artifacts use ES-module importmaps ('three' bare specifiers) — a classic
+silent-death pattern on file://.
+
+**R1 — Root cause with render evidence.** Headless-Chrome (Windows Chrome from WSL)
+render of the failing artifact class: screenshot + console errors shown in conversation.
+Name the exact break (importmap resolution, CDN fetch, WebGL init, JS error — whatever
+it truly is), reproduced and proven, not guessed.
+
+**R2 — Robust artifact recipe, 5/5 pixel-verified.** Find the generation guidance that
+makes THIS model produce voxel scenes that render correctly from a plain file:// double
+-click: run the Hermes-shaped pagoda prompt with the fix candidate 5 times; every
+artifact must pass headless render (mean brightness above black-threshold, ≥8 distinct
+hues, zero console errors). No cherry-picking; 5/5 or iterate the recipe.
+
+**R3 — Fix deployed on the Hermes path.** Whatever R2 proves (system-prompt guidance
+via the Hermes agent, prompt addendum, or template-level instruction), deployed and
+re-verified with one Hermes-shaped run rendered headless.
+
+**R4 — USER-CONFIRMED, in this conversation.** The user states that three consecutive
+Hermes pagoda runs rendered correctly in their Chrome. Nothing I announce substitutes
+for this. No WAITING-ON-USER escape: waiting is legitimate ONLY between "R1-R3 evidenced"
+and the user's verdicts, and idle turns in that window are spent hardening (more render
+verification, more soak) — never declared done.
+
+
 **Contract**: This goal is DONE when every gate below is green with run evidence
 (logs/JSON/screenshots), and not one second before. No claim without an artifact.
 If one approach fails 3×, switch approaches — do not grind. Report each gate as
