@@ -18,6 +18,15 @@ NOT escapes (renders white-text), NOT truncation, NOT Hermes's disk, NOT the use
 viewing. **The model probabilistically emits JS slips (~2 in 5 draws).** Screenshot +
 console evidence in conversation; black artifact preserved in artifacts/.
 
+**USER LAW (2026-08-08, permanent): NO model-constraining approaches. EVER.** The
+scaffold/template/cage method is BANNED — the model generates freeform with full
+creativity, untouched. The only sanctioned reliability path is **freeform + self-repair**:
+Hermes verifies its own artifact after writing (open/parse/render-check), and on error
+feeds the exact message back and fixes its own code — the behavior Hermes already
+exhibited unprompted. `quality-tests/HERMES-ARTIFACT-RULE.md` (scaffold-based) is
+WITHDRAWN. `voxel-scaffold.html` remains only as a render-verification test fixture,
+never as a generation template.
+
 **⏸ PAUSED BY USER ORDER (2026-08-08, ~73/80 turns).** State at pause: R1 closed with
 evidence. R2 in progress — recipe v1 (prompt-coaching) measured at 1/5 (failure modes:
 unbounded loop hang, shared-helper collapse ×2, whiteout); batch 2 killed mid-run at

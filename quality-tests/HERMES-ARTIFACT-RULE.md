@@ -1,3 +1,5 @@
+# WITHDRAWN by user law 2026-08-08 — NO model constraining, ever. Kept for history only.
+
 # Hermes artifact-mode rule (R3 deliverable — ready to paste, NOT yet deployed)
 
 Add to Hermes's system prompt (artifact/creative-web section):
