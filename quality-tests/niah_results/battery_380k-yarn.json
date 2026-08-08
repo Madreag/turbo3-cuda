@@ -1,0 +1,56 @@
+{
+ "label": "380k-yarn",
+ "target_tokens": 415170,
+ "probes": {
+  "N1": {
+   "answer": "7391-ALPHA-2286",
+   "thinking_len": 1764,
+   "secs": 480.4,
+   "prompt_tokens": 381781,
+   "completion_tokens": 530,
+   "finish": "stop",
+   "pass": true
+  },
+  "N2": {
+   "answer": "October 9th, 2027",
+   "thinking_len": 1189,
+   "secs": 15.1,
+   "prompt_tokens": 381783,
+   "completion_tokens": 337,
+   "finish": "stop",
+   "pass": true
+  },
+  "N3": {
+   "answer": "Based on the provided text, the catalogue reference number for Dr. Selene Varga's experimental compound is **QX-4417-DELTA**.",
+   "thinking_len": 1184,
+   "secs": 14.5,
+   "prompt_tokens": 381786,
+   "completion_tokens": 369,
+   "finish": "stop",
+   "pass": true
+  },
+  "HOP3": {
+   "answer": "Based on the provided text:\n- **Project:** Project Nightglass\n- **Director:** Dr. Tomasz Keller\n- **City:** Tromso",
+   "thinking_len": 4015,
+   "secs": 42.0,
+   "prompt_tokens": 381802,
+   "completion_tokens": 1089,
+   "finish": "stop",
+   "pass": true,
+   "partials": {
+    "nightglass": true,
+    "keller": true,
+    "tromso": true
+   }
+  },
+  "CTRL": {
+   "answer": "Based on the provided text, there is no information regarding a Zephyr facility or its vault access code.",
+   "thinking_len": 1045,
+   "secs": 12.9,
+   "prompt_tokens": 381782,
+   "completion_tokens": 288,
+   "finish": "stop",
+   "pass": true
+  }
+ }
+}

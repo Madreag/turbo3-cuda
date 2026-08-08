@@ -1,0 +1,56 @@
+{
+ "label": "300k-yarn",
+ "target_tokens": 327760,
+ "probes": {
+  "N1": {
+   "answer": "Based on the provided text, the vault access code for the Meridian facility is **7391-ALPHA-2286**.",
+   "thinking_len": 585,
+   "secs": 294.2,
+   "prompt_tokens": 300600,
+   "completion_tokens": 185,
+   "finish": "stop",
+   "pass": true
+  },
+  "N2": {
+   "answer": "Based on the provided text, the migration of the Aurelius database cluster is scheduled for **October 9th, 2027, at 03:45 UTC**.",
+   "thinking_len": 1251,
+   "secs": 14.9,
+   "prompt_tokens": 300602,
+   "completion_tokens": 396,
+   "finish": "stop",
+   "pass": true
+  },
+  "N3": {
+   "answer": "Based on the provided text, the catalogue reference number for Dr. Selene Varga's experimental compound is **QX-4417-DELTA**.",
+   "thinking_len": 1208,
+   "secs": 15.1,
+   "prompt_tokens": 300605,
+   "completion_tokens": 373,
+   "finish": "stop",
+   "pass": true
+  },
+  "HOP3": {
+   "answer": "Project: Project Nightglass\nDirector: Dr. Tomasz Keller\nCity: Tromso",
+   "thinking_len": 4112,
+   "secs": 38.9,
+   "prompt_tokens": 300621,
+   "completion_tokens": 1119,
+   "finish": "stop",
+   "pass": true,
+   "partials": {
+    "nightglass": true,
+    "keller": true,
+    "tromso": true
+   }
+  },
+  "CTRL": {
+   "answer": "Based on the provided text, there is no information regarding the vault access code for the Zephyr facility. (The text only mentions the vault access code for the Meridian facility.)",
+   "thinking_len": 1816,
+   "secs": 17.9,
+   "prompt_tokens": 300601,
+   "completion_tokens": 496,
+   "finish": "stop",
+   "pass": true
+  }
+ }
+}

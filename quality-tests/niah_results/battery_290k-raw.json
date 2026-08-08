@@ -1,0 +1,56 @@
+{
+ "label": "290k-raw",
+ "target_tokens": 290000,
+ "probes": {
+  "N1": {
+   "answer": "7391-ALPHA-2286",
+   "thinking_len": 732,
+   "secs": 237.6,
+   "prompt_tokens": 265726,
+   "completion_tokens": 227,
+   "finish": "stop",
+   "pass": true
+  },
+  "N2": {
+   "answer": "Based on the provided text, the migration of the Aurelius database cluster is scheduled for **October 9th, 2027**.",
+   "thinking_len": 629,
+   "secs": 8.5,
+   "prompt_tokens": 265728,
+   "completion_tokens": 220,
+   "finish": "stop",
+   "pass": true
+  },
+  "N3": {
+   "answer": "Based on the provided text, the catalogue reference number is **QX-4417-DELTA**.",
+   "thinking_len": 1090,
+   "secs": 13.2,
+   "prompt_tokens": 265731,
+   "completion_tokens": 327,
+   "finish": "stop",
+   "pass": true
+  },
+  "HOP3": {
+   "answer": "Project: Project Nightglass\nDirector: Dr. Tomasz Keller\nCity: Tromso",
+   "thinking_len": 4307,
+   "secs": 37.8,
+   "prompt_tokens": 265747,
+   "completion_tokens": 1148,
+   "finish": "stop",
+   "pass": true,
+   "partials": {
+    "nightglass": true,
+    "keller": true,
+    "tromso": true
+   }
+  },
+  "CTRL": {
+   "answer": "Based on the provided text, there is no information regarding the Zephyr facility or its vault access code. (The text only mentions the vault access code for the Meridian facility.)",
+   "thinking_len": 1278,
+   "secs": 12.4,
+   "prompt_tokens": 265727,
+   "completion_tokens": 353,
+   "finish": "stop",
+   "pass": true
+  }
+ }
+}
