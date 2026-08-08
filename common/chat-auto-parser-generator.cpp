@@ -279,12 +279,14 @@ common_peg_parser analyze_tools::build_tool_parser_tag_tagged(parser_build_conte
     const auto & inputs      = ctx.inputs;
     bool         force_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
 
+    auto until_suffix = p.rule("until-suffix", p.until(arguments.value_suffix));
+
     common_peg_parser tool_choice = p.choice();
 
     foreach_function(inputs.tools, [&](const json & tool) {
         const auto & func   = tool.at("function");
         std::string  name   = func.at("name");
-        const auto & params = func.at("parameters");
+        auto         params = func.at("parameters");  // mutable copy: resolve_refs rewrites $refs in place
 
         if (!params.contains("properties") || !params.at("properties").is_object()) {
             return;
@@ -295,6 +297,9 @@ common_peg_parser analyze_tools::build_tool_parser_tag_tagged(parser_build_conte
         if (params.contains("required") && params.at("required").is_array()) {
             params.at("required").get_to(required);
         }
+
+        auto schema_info = common_schema_info();
+        schema_info.resolve_refs(params);
 
         // Build parser for each argument, separating required and optional
         std::vector<common_peg_parser> required_parsers;
