@@ -9,10 +9,25 @@ with pixel analysis (non-black, color variety) plus a clean JS console counts.**
 Current lead: artifacts use ES-module importmaps ('three' bare specifiers) — a classic
 silent-death pattern on file://.
 
-**R1 — Root cause with render evidence.** Headless-Chrome (Windows Chrome from WSL)
-render of the failing artifact class: screenshot + console errors shown in conversation.
-Name the exact break (importmap resolution, CDN fetch, WebGL init, JS error — whatever
-it truly is), reproduced and proven, not guessed.
+**R1 — Root cause with render evidence.** ✅ CLOSED 2026-08-08. Reproduced on a fresh
+wire-perfect run: captured artifact (39,824 bytes, complete, clean transport) renders
+BLACK — `Uncaught ReferenceError: dy is not defined` (line 759), an undeclared variable
+in a voxel loop. Script builds 6 sections then dies pre-compose; dark CSS backdrop reads
+as a black page. NOT importmaps (class renders: pv1 113 brightness/24 hues, full 179/19),
+NOT escapes (renders white-text), NOT truncation, NOT Hermes's disk, NOT the user's
+viewing. **The model probabilistically emits JS slips (~2 in 5 draws).** Screenshot +
+console evidence in conversation; black artifact preserved in artifacts/.
+
+**⏸ PAUSED BY USER ORDER (2026-08-08, ~73/80 turns).** State at pause: R1 closed with
+evidence. R2 in progress — recipe v1 (prompt-coaching) measured at 1/5 (failure modes:
+unbounded loop hang, shared-helper collapse ×2, whiteout); batch 2 killed mid-run at
+user's stop. **Scaffold-fill chassis built and CHASSIS PROVEN rendering standalone**
+(`C:\Users\Public\render-truth\scaffold.html`, brightness 33 / 6 hues / 0 errors — the
+fix that removes the model's ability to break the page while keeping its creativity).
+Next actions on "go": (1) scaffold-fill 5/5 battery, (2) Hermes artifact-mode rule (R3),
+(3) user's 3 confirmation runs (R4). Root-cause verdict stands: model emits fatal JS
+slips in ~half of freeform 800-line one-shots — universal to this model, not this stack;
+public "successes" are survivor bias (no rigorous published result exists).
 
 **R2 — Robust artifact recipe, 5/5 pixel-verified.** Find the generation guidance that
 makes THIS model produce voxel scenes that render correctly from a plain file:// double
