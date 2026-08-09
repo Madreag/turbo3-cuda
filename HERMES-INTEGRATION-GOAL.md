@@ -15,6 +15,11 @@ controlled comparison. Find it. Fix ours. Prove it with pixels.
    single runs prove nothing at a ~50% base rate.
 4. Non-stop: a finished batch immediately triggers analysis AND the next batch.
    No idle turns, no waiting states, no "done" until the user says pagodas render.
+5. DIAGNOSTIC ARMS ARE NOT SHIP CANDIDATES. P1 flips variables (f16 KV, YaRN off,
+   etc.) only to LOCATE the cause. Production keeps the TurboQuant identity —
+   turbo KV compression and the long-context window stay, period. If a diagnostic
+   implicates one of our optimizations, the deliverable is a FIX INSIDE it
+   (kernel/calibration work — the repo's actual mission), never its removal.
 
 ## P1 — Variable isolation on OUR stack (the suspects, each n≥8, fatal-rate table)
 Same prompt, same model file, one variable flipped at a time vs current baseline
