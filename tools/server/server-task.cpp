@@ -162,10 +162,29 @@ common_chat_msg task_result_state::update_chat_msg(
     generated_text += text_added;
     auto msg_prv_copy = chat_msg;
     SRV_DBG("Parsing chat message: %s\n", generated_text.c_str());
-    auto new_msg = common_chat_parse(
-        generated_text,
-        is_partial,
-        chat_parser_params);
+    common_chat_msg new_msg;
+    try {
+        new_msg = common_chat_parse(
+            generated_text,
+            is_partial,
+            chat_parser_params);
+    } catch (const std::exception & e) {
+        if (is_partial) {
+            throw;
+        }
+        // Final-parse failure must not corpse the response: without this, the
+        // exception unwinds past the streaming path and the client sees a bare
+        // EOF with no finish_reason/[DONE] (observed when an ungrammared model
+        // emits tool syntax the parser cannot consume). Keep the last good
+        // incrementally-parsed message; for non-streamed requests (never
+        // incrementally parsed) fall back to the raw text as content.
+        SRV_WRN("final chat parse failed, degrading to last good parse: %s\n", e.what());
+        new_msg = chat_msg;
+        if (new_msg.empty()) {
+            new_msg.role    = "assistant";
+            new_msg.content = generated_text;
+        }
+    }
     if (!new_msg.empty()) {
         new_msg.set_tool_call_ids(generated_tool_call_ids, gen_tool_call_id);
         chat_msg = new_msg;

@@ -349,7 +349,12 @@ common_peg_parser analyze_tools::build_tool_parser_tag_tagged(parser_build_conte
             for (const auto & opt : optional_parsers) {
                 any_opt |= opt;
             }
-            args_seq = args_seq + p.repeat(p.space() + any_opt, 0, (int) optional_parsers.size());
+            // unbounded on purpose: repeat(x, 0, N) renders as GBNF {0,N}, whose
+            // rewrite multiplies the N-way choice's rules by N and trips the
+            // MAX_REPETITION_THRESHOLD guard for wide tools (48 optional params
+            // exist in the wild), killing the whole tool grammar. {0,N} never
+            // enforced per-arg uniqueness anyway, so * accepts the same language.
+            args_seq = args_seq + p.zero_or_more(p.space() + any_opt);
         }
 
         // Build call_id parser based on position (if supported)
