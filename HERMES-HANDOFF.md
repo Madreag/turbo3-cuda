@@ -105,8 +105,17 @@ continuations re-pay full prefill.
   (pre-G1, untouched).
 - Live profile: `~/.config/llama-tcq/start-long.sh` (409600 ctx, turbo4/turbo4,
   YaRN 1.5625, alphas 1.10/1.12, --parallel 1). Daily: `start.sh`.
-- Proxy: v6 unchanged this session (owner_lock verified to hold for the entire
-  request lifetime — proxy-mediated preemption is impossible). 37/37 unit tests.
+- Proxy: v6.1 (owner_lock verified to hold for the entire request lifetime —
+  proxy-mediated preemption is impossible). 41/41 unit tests. New in v6.1:
+  (a) TRIPWIRES — any relayed in-stream error frame or stream ending without
+  [DONE] logs `[ALERT] ...` to proxy.log + `ALERT` trace lines; validated
+  against the real 2026-08-08 corpse bytes (fires both) and a healthy stream
+  (fires neither). A future corpse announces itself instead of hiding.
+  (b) REAL-TRAFFIC CAPTURE — every tools-bearing request body is persisted
+  pre-mutation to `~/.config/llama-tcq/captures/tools_<user>_<suitehash>.json`;
+  regression gates must replay the live Hermes capture, never a hand-built
+  replica (the replica gap is what hid the grammar bomb). Soak on the patched
+  stack: 20/20 turns PASS, 0 alerts.
   KNOWN INSTR BUG unchanged: `_partial` artifact files also fire on clean runs;
   cut signal is "no END frame" — WHICH MEANS handler exception (client-leg
   reset or proxy death), NOT upstream EOF: an upstream bare-EOF still writes
