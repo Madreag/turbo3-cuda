@@ -26,8 +26,11 @@ Same prompt, same model file, one variable flipped at a time vs current baseline
 (temp 0.6, top-k 20, turbo4/turbo4 KV, YaRN 1.5625, 33K agent context):
   a. Sampling: temp 1.0 / top-p 0.95 / top-k 20 / min-p 0 (Qwen's creative preset —
      others' UIs pull THIS from GGUF metadata; we run 0.6)
-  b. KV cache: q8_0/q8_0, and f16/f16 (others run f16 — our turbo KV is a real
-     differing variable; PPL cleared it, but 800-line codegen ≠ PPL)
+  b. KV cache: q8_0/q8_0, and f16/f16 — CACHE precision only, at diagnostic ctx
+     (~36K → f16 cache ≈ 2.3GB, total ~24GB, fits 32GB fine). WEIGHTS stay Q6_K in
+     every arm; f16/bf16 weights (~54GB) do not fit this card and are never used.
+     (Others run f16 cache — our turbo KV is a real differing variable; PPL cleared
+     it, but 800-line codegen ≠ PPL.)
   c. YaRN: OFF at native ctx (others don't run rope scaling)
   d. Context shape: bare 1-turn prompt (~200 tokens, like a chat UI) vs 33K agent shape
 Output: one table — config → fatal-JS rate → verdict per variable.
