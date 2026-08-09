@@ -35,6 +35,12 @@ Same prompt, same model file, one variable flipped at a time vs current baseline
   d. Context shape: bare 1-turn prompt (~200 tokens, like a chat UI) vs 33K agent shape
 Output: one table — config → fatal-JS rate → verdict per variable.
 
+**KNOWN SERVER BUG (found by arm c, 2026-08-08):** non-STREAMING /v1/chat/completions
+on the G1 binary 500s parsing Qwen3.6 think+fenced output ("Failed to parse input at
+pos 22: <think>" — peg-native full-completion parse path). Streaming path unaffected
+(all arms + Hermes stream). Documented, not production-blocking; candidate fix rides
+the next server-code sync.
+
 ## P2 — External runtime ground truth (the "other apps" the user demanded)
 Install and run at least ONE independent runtime on this box (ollama first choice —
 scriptable; LM Studio if needed), same model family+quant class, same prompt, n≥8,
