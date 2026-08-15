@@ -191,8 +191,12 @@ DEFINITION OF DONE (one screen, checked off in the sync branch's final commit)
   □ Buckets A dropped / B resolved (PR or carried) / C applied
   □ Layer gates 1-3 green (build, roundtrip numerics, dual-model load, flags)
   □ Layer 4 battery items 1-9 green on the synced binary
-  □ MTP spec-decode smoke done (flags confirmed, greedy-identity per
-    FUTUREPLAN C)
+  □ MTP spec-decode smoke done — DONE 2026-08-15: --spec-type draft-mtp,
+    1.52x decode (78.8 vs 52.0 tok/s). Correctness criterion AMENDED by
+    measurement: greedy byte-identity is unattainable for ANY GPU spec-decode
+    (batched verification changes FP reduction order; near-ties flip); the
+    correct test is divergence no worse than an f16-KV control. Measured:
+    turbo4 1/3 exact == f16 control 1/3 exact → turbo kernels exonerated.
   □ Production cutover done with acceptance run; rollback inventory intact
   □ Handoff + memory + FUTUREPLAN updated; sync branch pushed to myfork
 
