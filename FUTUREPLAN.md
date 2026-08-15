@@ -12,7 +12,16 @@
   0.0054 vs 0.0087) that doesn't justify −70K ctx or CPU-vision today;
   data preserved for future re-evaluation. Long-ctx q8K spots skipped
   (only needed for adoption).
-- Phases C/D/E: pending (C rides UPSTREAMSYNC).
+- Phase C (MTP): RESOLVED 2026-08-15, NOT ADOPTED — fit was free (draft
+  context costs ~0 VRAM at full 409600+vision; no ctx scale-back needed) and
+  correctness clean, but at PRODUCTION SAMPLING (temp 1.0, top-k 20) draft
+  acceptance collapses: measured 29.5 and 41.5 tok/s effective on real art
+  turns vs ~49 baseline — a net slowdown. The 1.52x was greedy-only. MTP
+  stays available (--spec-type draft-mtp) for greedy/low-temp workloads;
+  future lever = acceptance-threshold tuning if upstream exposes it.
+  Post-sync render clean-rate running tally 4/7 (vs 3/4 pre-sync) — within
+  binomial noise of the 75% band; keep counting before concluding anything.
+- Phases D/E: pending (Hermes-side).
 
 Planning document. Nothing here is executed until the user says go.
 Production baseline this plan measures against: Qwen3.8-27B Q6_K, 409600 ctx
