@@ -1199,8 +1199,19 @@ private:
 
         int n_ctx_slot = llama_n_ctx_seq(ctx_tgt);
         if (n_ctx_slot > n_ctx_train) {
-            SRV_WRN("the slot context (%d) exceeds the training context of the model (%d) - capping\n", n_ctx_slot, n_ctx_train);
-            n_ctx_slot = n_ctx_train;
+            // An explicitly configured rope-scaling (YaRN etc.) is a deliberate
+            // request to run beyond the training context — capping would
+            // silently break validated long-context deployments (our 409600
+            // YaRN profile scored 5/5 NIAH at 380K). Cap only when no scaling
+            // was configured.
+            if (params_base.rope_scaling_type != LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED &&
+                params_base.rope_scaling_type != LLAMA_ROPE_SCALING_TYPE_NONE) {
+                SRV_WRN("slot context (%d) exceeds training context (%d) — allowed: explicit rope scaling configured\n",
+                        n_ctx_slot, n_ctx_train);
+            } else {
+                SRV_WRN("the slot context (%d) exceeds the training context of the model (%d) - capping\n", n_ctx_slot, n_ctx_train);
+                n_ctx_slot = n_ctx_train;
+            }
         }
 
         slots.clear();
