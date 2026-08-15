@@ -10758,8 +10758,12 @@ static void ggml_compute_forward_turbo_wht_f32(
 
     int direction;
     int group_size;
-    memcpy(&direction, dst->op_params + 0, sizeof(int));
-    memcpy(&group_size, dst->op_params + sizeof(int), sizeof(int));
+    memcpy(&direction,  (const int32_t *) dst->op_params + 0, sizeof(int));
+    memcpy(&group_size, (const int32_t *) dst->op_params + 1, sizeof(int));
+
+    // the CUDA path asserts this; the CPU path divided by it unchecked and
+    // indexed a float[128] scratch (2026-08-15 bughunt 6.6)
+    GGML_ASSERT(group_size == 64 || group_size == 128);
 
     const int64_t head_dim        = src->ne[0];
     const int64_t n_heads         = ggml_nelements(src) / head_dim;

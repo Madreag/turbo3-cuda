@@ -231,8 +231,10 @@ llama_context::llama_context(
     if (params.flash_attn_type == LLAMA_FLASH_ATTN_TYPE_DISABLED &&
         (params.type_k == GGML_TYPE_TURBO3_0 || params.type_k == GGML_TYPE_TURBO4_0 ||
          params.type_k == GGML_TYPE_TURBO2_0 || params.type_k == GGML_TYPE_TURBO1_5 ||
+         params.type_k == GGML_TYPE_TURBO3_TCQ || params.type_k == GGML_TYPE_TURBO2_TCQ ||
          params.type_v == GGML_TYPE_TURBO3_0 || params.type_v == GGML_TYPE_TURBO4_0 ||
-         params.type_v == GGML_TYPE_TURBO2_0 || params.type_v == GGML_TYPE_TURBO1_5)) {
+         params.type_v == GGML_TYPE_TURBO2_0 || params.type_v == GGML_TYPE_TURBO1_5 ||
+         params.type_v == GGML_TYPE_TURBO3_TCQ || params.type_v == GGML_TYPE_TURBO2_TCQ)) {
         LLAMA_LOG_WARN("%s: turbo cache types require flash_attn — enabling automatically\n", __func__);
         params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
     }
@@ -240,7 +242,8 @@ llama_context::llama_context(
     // GQA >8:1 vulnerability warning for turbo K types
     // High GQA ratios amplify K quantization errors through softmax.
     if (params.type_k == GGML_TYPE_TURBO3_0 || params.type_k == GGML_TYPE_TURBO4_0 ||
-        params.type_k == GGML_TYPE_TURBO2_0 || params.type_k == GGML_TYPE_TURBO1_5) {
+        params.type_k == GGML_TYPE_TURBO2_0 || params.type_k == GGML_TYPE_TURBO1_5 ||
+        params.type_k == GGML_TYPE_TURBO3_TCQ || params.type_k == GGML_TYPE_TURBO2_TCQ) {
         const uint32_t n_head    = model.hparams.n_head();
         const uint32_t n_head_kv = model.hparams.n_head_kv();
         if (n_head_kv > 0 && n_head / n_head_kv > 8) {

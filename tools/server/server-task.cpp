@@ -157,7 +157,13 @@ task_result_state::task_result_state(const common_chat_parser_params & chat_pars
     , oai_resp_message_id("msg_" + random_string()) {
     if (chat_parser_params.is_continuation && !chat_parser_params.echo) {
         // initialize chat_msg to avoid emitting a delta containing the assistant prefill
-        chat_msg = common_chat_parse("", true, chat_parser_params);
+        try {
+            chat_msg = common_chat_parse("", true, chat_parser_params);
+        } catch (const std::exception & e) {
+            // a strict-format parser can throw even on the empty seed — start
+            // empty rather than abort construction (2026-08-15 bughunt 3.2)
+            SRV_WRN("continuation seed parse failed (%s) — starting empty\n", e.what());
+        }
     }
 }
 
@@ -176,20 +182,33 @@ common_chat_msg task_result_state::update_chat_msg(
             is_partial,
             chat_parser_params);
     } catch (const std::exception & e) {
+        // Parse failure must not corpse the response: without this, the
+        // exception unwinds past the streaming path and the client sees an
+        // error frame terminating an otherwise-healthy generation (observed
+        // 2026-08-08 when an ungrammared model emitted tool syntax the parser
+        // could not consume). Degrade BOTH partial and final parses — a
+        // strict-format parser failing at offset 0 previously rethrew on
+        // every streaming delta (2026-08-15 bughunt 3.1).
         if (is_partial) {
-            throw;
-        }
-        // Final-parse failure must not corpse the response: without this, the
-        // exception unwinds past the streaming path and the client sees a bare
-        // EOF with no finish_reason/[DONE] (observed 2026-08-08 when an
-        // ungrammared model emitted tool syntax the parser could not consume).
-        // Keep the last good incrementally-parsed message; for non-streamed
-        // requests (never incrementally parsed) fall back to raw content.
-        SRV_WRN("final chat parse failed, degrading to last good parse: %s\n", e.what());
-        new_msg = chat_msg;
-        if (new_msg.empty()) {
-            new_msg.role    = "assistant";
-            new_msg.content = generated_text;
+            new_msg = chat_msg;
+            if (new_msg.empty()) {
+                new_msg.role    = "assistant";
+                new_msg.content = generated_text;
+            }
+        } else {
+            SRV_WRN("final chat parse failed, degrading to last good parse: %s\n", e.what());
+            new_msg = chat_msg;
+            // The last good incremental parse may cover only a PREFIX of the
+            // text — returning it silently dropped the un-parsed tail with a
+            // normal finish_reason (2026-08-15 bughunt 3.3). If no tool calls
+            // were parsed and coverage is visibly short, return raw content.
+            const size_t covered = new_msg.content.size() + new_msg.reasoning_content.size();
+            if (new_msg.empty() ||
+                (new_msg.tool_calls.empty() && covered + 64 < generated_text.size())) {
+                new_msg = {};
+                new_msg.role    = "assistant";
+                new_msg.content = generated_text;
+            }
         }
     }
     if (!new_msg.empty()) {

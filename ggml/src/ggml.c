@@ -6389,9 +6389,12 @@ struct ggml_tensor * ggml_turbo_wht(
     result->src[0] = a;
     result->src[1] = scale;  // InnerQ scale_inv (NULL = no scaling)
 
-    // Store direction and group_size in op_params
-    memcpy(result->op_params + 0, &direction, sizeof(int));
-    memcpy(result->op_params + sizeof(int), &group_size, sizeof(int));
+    // Store direction and group_size in op_params slots [0] and [1].
+    // (op_params is int32_t[]; the old `+ sizeof(int)` pointer arithmetic
+    // landed on slot [4] — readers matched, but it silently burned slots
+    // 1-3 and diverged from ggml_set_op_params_i32: 2026-08-15 bughunt 6.5)
+    memcpy((int32_t *) result->op_params + 0, &direction,  sizeof(int));
+    memcpy((int32_t *) result->op_params + 1, &group_size, sizeof(int));
 
     return result;
 }

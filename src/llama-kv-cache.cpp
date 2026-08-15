@@ -131,8 +131,8 @@ llama_kv_cache::llama_kv_cache(
         auto it = ctx_map.find(buft);
         if (it == ctx_map.end()) {
             ggml_init_params params = {
-                // +3 for turbo rotation matrices (turbo_rotation + turbo_rotation_inv + turbo_innerq_scale_inv)
-                /*.mem_size   =*/ size_t((2u*(1 + n_stream)*n_layer + 3)*ggml_tensor_overhead()),
+                // +1 for turbo_innerq_scale_inv
+                /*.mem_size   =*/ size_t((2u*(1 + n_stream)*n_layer + 1)*ggml_tensor_overhead()),
                 /*.mem_buffer =*/ NULL,
                 /*.no_alloc   =*/ true,
             };
@@ -183,13 +183,40 @@ llama_kv_cache::llama_kv_cache(
     // For layer-adaptive modes: use KV layer ordinals (not raw layer indices)
     // so boundary targeting works correctly on hybrid architectures where only
     // a subset of layers have KV caches (e.g., Qwen3.5-27B: 16 of 64 layers).
+    // Count with the SAME bound and skips as the construction loop below —
+    // hparams.n_layer() excludes nextn layers while the loop runs over the
+    // ctor's n_layer, and filtered/shared layers never get an ordinal
+    // (2026-08-15 bughunt 4.2: boundary modes shifted on MTP/filtered models).
     uint32_t n_kv_layers = 0;
-    for (uint32_t il = 0; il < hparams.n_layer(); il++) {
-        if (hparams.has_kv(il)) {
-            n_kv_layers++;
-        }
+    for (uint32_t il = 0; il < n_layer; il++) {
+        if (!hparams.has_kv(il)) continue;
+        if (filter && !filter(il)) continue;
+        if (share && other && share(il) >= 0) continue;
+        n_kv_layers++;
     }
     uint32_t kv_ord = 0;
+
+    // Resolved once per cache CONSTRUCTION — this was a function-local static,
+    // which leaked the first cache's decision into every later context (draft/
+    // memory-probe caches with different -ctv inherited the auto-enable:
+    // 2026-08-15 bughunt 4.4).
+    const int adaptive_mode = [&]() {
+        const char * env = getenv("TURBO_LAYER_ADAPTIVE");
+        if (env) {
+            int mode = atoi(env);
+            if (mode > 0) {
+                LLAMA_LOG_INFO("llama_kv_cache: layer-adaptive mode %d enabled (env, using KV ordinals)\n", mode);
+            }
+            return mode;
+        }
+        // Auto-enable Boundary V (mode 12) when V is turbo2 and model has enough layers
+        if (type_v == GGML_TYPE_TURBO2_0 && hparams.n_layer() >= 8) {
+            LLAMA_LOG_INFO("llama_kv_cache: Boundary V auto-enabled for turbo2-V (mode 12, opt-out: TURBO_LAYER_ADAPTIVE=0)\n");
+            return 12;
+        }
+        return 0;
+    }();
+    bool warned_headdim = false;
 
     for (uint32_t il = 0; il < n_layer; il++) {
         if (!hparams.has_kv(il)) {
@@ -264,15 +291,6 @@ llama_kv_cache::llama_kv_cache(
                                     type_v == GGML_TYPE_TURBO3_0 || type_v == GGML_TYPE_TURBO4_0 || type_v == GGML_TYPE_TURBO2_0 || type_v == GGML_TYPE_TURBO1_5 ||
                                     type_v == GGML_TYPE_TURBO3_TCQ || type_v == GGML_TYPE_TURBO2_TCQ);
         const uint32_t n_embd_head_k_il = hparams.n_embd_head_k(il);
-        if (is_turbo_type && n_embd_head_k_il % 128 != 0) {
-            if (il == 0) {
-                LLAMA_LOG_WARN("%s: turbo KV cache requires head_dim divisible by 128, "
-                               "but this model has n_embd_head_k=%u — falling back to q8_0\n",
-                               __func__, n_embd_head_k_il);
-            }
-            type_k = GGML_TYPE_Q8_0;
-            type_v = GGML_TYPE_Q8_0;
-        }
 
         const bool has_k = true;
         const bool has_v = !is_mla;
@@ -292,27 +310,25 @@ llama_kv_cache::llama_kv_cache(
         //   15=K last8 q8_0 (LA=2) + V boundary first4+last4 (LA=12 stacked)
         ggml_type layer_type_k = type_k;
         ggml_type layer_type_v = type_v;
+        bool layer_is_turbo = is_turbo_type;
+        // Per-LAYER head-dim fallback. This used to mutate the ctor parameters
+        // type_k/type_v, silently demoting every SUBSEQUENT layer to q8_0 and
+        // warning only when layer 0 triggered (2026-08-15 bughunt 4.3).
+        if (is_turbo_type && n_embd_head_k_il % 128 != 0) {
+            if (!warned_headdim) {
+                LLAMA_LOG_WARN("%s: turbo KV cache requires head_dim divisible by 128, "
+                               "but layer %u has n_embd_head_k=%u — falling back to q8_0 for such layers\n",
+                               __func__, il, n_embd_head_k_il);
+                warned_headdim = true;
+            }
+            layer_type_k = GGML_TYPE_Q8_0;
+            layer_type_v = GGML_TYPE_Q8_0;
+            layer_is_turbo = false;
+        }
         {
-            static const int adaptive_mode = [&]() {
-                const char * env = getenv("TURBO_LAYER_ADAPTIVE");
-                if (env) {
-                    int mode = atoi(env);
-                    if (mode > 0) {
-                        LLAMA_LOG_INFO("llama_kv_cache: layer-adaptive mode %d enabled (env, using KV ordinals)\n", mode);
-                    }
-                    return mode;
-                }
-                // Auto-enable Boundary V (mode 12) when V is turbo2 and model has enough layers
-                if (type_v == GGML_TYPE_TURBO2_0 && hparams.n_layer() >= 8) {
-                    LLAMA_LOG_INFO("llama_kv_cache: Boundary V auto-enabled for turbo2-V (mode 12, opt-out: TURBO_LAYER_ADAPTIVE=0)\n");
-                    return 12;
-                }
-                return 0;
-            }();
-            const bool is_turbo = is_turbo_type;
             bool promote_k = false;
             bool promote_v = false;
-            if (is_turbo && n_kv_layers >= 8) {
+            if (layer_is_turbo && n_kv_layers >= 8) {
                 switch (adaptive_mode) {
                     case  1: promote_k = promote_v = (kv_ord < 4 || kv_ord >= n_kv_layers - 4); break;
                     case  2: promote_k = promote_v = (kv_ord >= n_kv_layers - 8); break;
@@ -357,16 +373,12 @@ llama_kv_cache::llama_kv_cache(
 
         layers.push_back({ il, k, v, k_stream, v_stream, });
 
-        // TurboQuant: create rotation matrix tensors (once, shared across layers)
-        if (turbo_rotation == nullptr &&
-            (type_k == GGML_TYPE_TURBO3_0 || type_k == GGML_TYPE_TURBO4_0 || type_k == GGML_TYPE_TURBO2_0 || type_k == GGML_TYPE_TURBO1_5 ||
-             type_k == GGML_TYPE_TURBO3_TCQ || type_k == GGML_TYPE_TURBO2_TCQ)) {
-            turbo_rotation = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 128, 128);
-            ggml_format_name(turbo_rotation, "turbo_rotation");  // R^T
-            turbo_rotation_inv = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 128, 128);
-            ggml_format_name(turbo_rotation_inv, "turbo_rotation_inv");  // R
-
-            // InnerQ: per-channel scale_inv tensor (128 floats, initialized to all 1.0)
+        // TurboQuant InnerQ: per-channel scale_inv tensor (once, shared across
+        // layers; identity 1.0 until calibration writes real scales). The dead
+        // 128x128 rotation-matrix pair that used to live beside it — allocated,
+        // filled, zero graph consumers, labels inverted — was removed
+        // (2026-08-15 bughunt D1; WHT uses in-kernel sign tables, not these).
+        if (turbo_innerq_scale_inv == nullptr && layer_is_turbo) {
             turbo_innerq_scale_inv = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, INNERQ_MAX_CHANNELS);
             ggml_format_name(turbo_innerq_scale_inv, "turbo_innerq_scale_inv");
         }
@@ -415,22 +427,13 @@ llama_kv_cache::llama_kv_cache(
 
         ggml_backend_buffer_clear(buf, 0);
 
-        // Fill turbo rotation matrices AFTER buffer clear (clear zeroes everything)
-        if (turbo_rotation != nullptr && turbo_rotation->buffer != nullptr && !model.hparams.no_alloc) {
-            #include "turbo-rotation-data.h"
-            // Store R for Q forward rotation, R^T for V inverse rotation
-            // ggml_mul_mat(A,x) computes A@x for row-major stored A (verified by test)
-            ggml_backend_tensor_set(turbo_rotation, TURBO_ROTATION_R, 0, 128 * 128 * sizeof(float));
-            ggml_backend_tensor_set(turbo_rotation_inv, TURBO_ROTATION_RT, 0, 128 * 128 * sizeof(float));
-
-            // Initialize InnerQ scale_inv to all 1.0 (identity scaling)
-            if (turbo_innerq_scale_inv != nullptr && turbo_innerq_scale_inv->buffer != nullptr) {
-                float ones[INNERQ_MAX_CHANNELS];
-                for (int i = 0; i < INNERQ_MAX_CHANNELS; i++) ones[i] = 1.0f;
-                ggml_backend_tensor_set(turbo_innerq_scale_inv, ones, 0, INNERQ_MAX_CHANNELS * sizeof(float));
-            }
-
-            LLAMA_LOG_INFO("%s: TurboQuant rotation matrices initialized (128x128)\n", __func__);
+        // Initialize InnerQ scale_inv to all 1.0 AFTER buffer clear (clear
+        // zeroes everything; identity scaling until calibration)
+        if (turbo_innerq_scale_inv != nullptr && turbo_innerq_scale_inv->buffer != nullptr && !model.hparams.no_alloc) {
+            float ones[INNERQ_MAX_CHANNELS];
+            for (int i = 0; i < INNERQ_MAX_CHANNELS; i++) ones[i] = 1.0f;
+            ggml_backend_tensor_set(turbo_innerq_scale_inv, ones, 0, INNERQ_MAX_CHANNELS * sizeof(float));
+            LLAMA_LOG_INFO("%s: TurboQuant InnerQ scale initialized (identity)\n", __func__);
         }
         ctxs_bufs.emplace_back(std::move(ctx), buf);
     }
@@ -517,18 +520,11 @@ void llama_kv_cache::clear(bool data) {
             ggml_backend_buffer_clear(buf.get(), 0);
         }
 
-        // Re-initialize turbo rotation matrices after buffer clear (clear zeroes everything)
-        if (turbo_rotation != nullptr && turbo_rotation->buffer != nullptr) {
-            #include "turbo-rotation-data.h"
-            ggml_backend_tensor_set(turbo_rotation, TURBO_ROTATION_R, 0, 128 * 128 * sizeof(float));
-            ggml_backend_tensor_set(turbo_rotation_inv, TURBO_ROTATION_RT, 0, 128 * 128 * sizeof(float));
-
-            // Re-initialize InnerQ scale_inv to all 1.0
-            if (turbo_innerq_scale_inv != nullptr && turbo_innerq_scale_inv->buffer != nullptr) {
-                float ones[INNERQ_MAX_CHANNELS];
-                for (int i = 0; i < INNERQ_MAX_CHANNELS; i++) ones[i] = 1.0f;
-                ggml_backend_tensor_set(turbo_innerq_scale_inv, ones, 0, INNERQ_MAX_CHANNELS * sizeof(float));
-            }
+        // Re-initialize InnerQ scale_inv to all 1.0 after buffer clear
+        if (turbo_innerq_scale_inv != nullptr && turbo_innerq_scale_inv->buffer != nullptr) {
+            float ones[INNERQ_MAX_CHANNELS];
+            for (int i = 0; i < INNERQ_MAX_CHANNELS; i++) ones[i] = 1.0f;
+            ggml_backend_tensor_set(turbo_innerq_scale_inv, ones, 0, INNERQ_MAX_CHANNELS * sizeof(float));
         }
     }
 }
@@ -1493,7 +1489,8 @@ ggml_tensor * llama_kv_cache::cpy_k(ggml_context * ctx, ggml_tensor * k_cur, ggm
     // whether to use 128-element or 64-element WHT groups.
     if (k->type == GGML_TYPE_TURBO3_0 || k->type == GGML_TYPE_TURBO4_0 || k->type == GGML_TYPE_TURBO2_0 || k->type == GGML_TYPE_TURBO1_5 ||
         k->type == GGML_TYPE_TURBO3_TCQ || k->type == GGML_TYPE_TURBO2_TCQ) {
-        const int64_t n_embd_head = k_cur->ne[0];
+        // outer n_embd_head: k_cur was merged to 2-D above, so k_cur->ne[0] here
+        // is n_embd_gqa, not head_dim (2026-08-15 bughunt 4.1 — shadow deleted)
         int32_t wht_group = (n_embd_head % 128 == 0) ? 128 : 64;
         memcpy(result->op_params, &wht_group, sizeof(int32_t));
     }
@@ -1536,7 +1533,7 @@ ggml_tensor * llama_kv_cache::cpy_v(ggml_context * ctx, ggml_tensor * v_cur, ggm
         ggml_tensor * result = ggml_set_rows(ctx, v, v_cur, v_idxs);
         if (v->type == GGML_TYPE_TURBO3_0 || v->type == GGML_TYPE_TURBO4_0 || v->type == GGML_TYPE_TURBO2_0 || v->type == GGML_TYPE_TURBO1_5 ||
         v->type == GGML_TYPE_TURBO3_TCQ || v->type == GGML_TYPE_TURBO2_TCQ) {
-            const int64_t n_embd_head = v_cur->ne[0];
+            // outer n_embd_head: v_cur was merged to 2-D above (bughunt 4.1)
             int32_t wht_group = (n_embd_head % 128 == 0) ? 128 : 64;
             memcpy(result->op_params, &wht_group, sizeof(int32_t));
         }
@@ -2237,10 +2234,12 @@ void llama_kv_cache::state_read(llama_io_read_i & io, llama_seq_id seq_id, llama
 
         slot_info sinfo;
 
+        // meta inside the try as well: an EOF throw mid-meta (truncated or
+        // layout-incompatible state file) must take the seq_rm cleanup path
+        // below, not propagate with cells partially applied.
         bool res = true;
-        res = res && state_read_meta(io, strm, cell_count, sinfo, seq_id);
-
         try {
+            res = res && state_read_meta(io, strm, cell_count, sinfo, seq_id);
             res = res && state_read_data(io, strm, cell_count, sinfo);
         } catch (...) {
             res = false;
@@ -2397,6 +2396,15 @@ bool llama_kv_cache::state_read_meta(llama_io_read_i & io, uint32_t strm, uint32
         // single sequence
         seq_rm(dest_seq_id, -1, -1);
 
+        // a stale/corrupt state file can carry an arbitrary cell_count — bound
+        // it BEFORE reserving (the whole-cache branch below has this check;
+        // this branch aborted inside ubatch_reserve/apply instead)
+        if (cell_count > cells.size()) {
+            LLAMA_LOG_ERROR("%s: cell_count (%u) exceeds cache size (%u) — stale or corrupt state file\n",
+                    __func__, cell_count, (uint32_t) cells.size());
+            return false;
+        }
+
         llama_batch_allocr balloc(hparams.n_pos_per_embd());
 
         llama_ubatch ubatch = balloc.ubatch_reserve(cell_count, 1);
@@ -2446,13 +2454,20 @@ bool llama_kv_cache::state_read_meta(llama_io_read_i & io, uint32_t strm, uint32
 
         LLAMA_LOG_DEBUG("%s: cell_count = %d, dest_seq_id = %d\n", __func__, cell_count, dest_seq_id);
 
-        // DEBUG CHECK: verify that all cells were allocated and have correct seq_id and pos values
-        GGML_ASSERT(sinfo.n_stream() == 1);
-        GGML_ASSERT(sinfo.idxs[0].size() == cell_count);
+        // Consistency check: soft-fail instead of GGML_ASSERT — malformed input
+        // (a state file from a different build/config, possibly misaligned by
+        // the cell-ext field) must produce a clean restore error, never abort()
+        // (2026-08-15: a stale slot file aborted the production server here).
+        if (sinfo.n_stream() != 1 || sinfo.idxs[0].size() != cell_count) {
+            LLAMA_LOG_ERROR("%s: restored slot layout mismatch — stale or corrupt state file\n", __func__);
+            return false;
+        }
         for (uint32_t i = 0; i < cell_count; ++i) {
             const uint32_t idx = sinfo.idxs[0][i];
-            GGML_ASSERT(cells.pos_get(idx) == ubatch.pos[i]);
-            GGML_ASSERT(cells.seq_has(idx, dest_seq_id));
+            if (cells.pos_get(idx) != ubatch.pos[i] || !cells.seq_has(idx, dest_seq_id)) {
+                LLAMA_LOG_ERROR("%s: restored cell %u inconsistent — stale or corrupt state file\n", __func__, i);
+                return false;
+            }
         }
     } else {
         // whole KV cache restore
@@ -2727,22 +2742,6 @@ bool llama_kv_cache_context::next() {
     return true;
 }
 
-
-ggml_tensor * llama_kv_cache_context::get_turbo_rotation() const {
-    return kv->get_turbo_rotation();
-}
-
-ggml_tensor * llama_kv_cache_context::get_turbo_rotation_inv() const {
-    return kv->get_turbo_rotation_inv();
-}
-
-ggml_tensor * llama_kv_cache_context::get_turbo_rot_forward() const {
-    return kv->get_turbo_rotation();
-}
-
-ggml_tensor * llama_kv_cache_context::get_turbo_rot_inverse() const {
-    return kv->get_turbo_rotation_inv();
-}
 
 ggml_tensor * llama_kv_cache_context::get_turbo_innerq_scale_inv() const {
     return kv->get_turbo_innerq_scale_inv();

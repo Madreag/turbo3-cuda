@@ -5021,13 +5021,16 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
             } break;
         case GGML_OP_SET_ROWS:
             {
-                // turbo3/turbo2/turbo1.5 require head_dim divisible by 64 (supports 64 and 128 WHT groups)
-                if ((op->type == GGML_TYPE_TURBO3_0 || op->type == GGML_TYPE_TURBO2_0 ||
-                     op->type == GGML_TYPE_TURBO1_5) && op->src[0]->ne[0] % 64 != 0) {
+                // turbo1.5 (block size 32) requires head_dim divisible by 64 (min WHT group)
+                if (op->type == GGML_TYPE_TURBO1_5 && op->src[0]->ne[0] % 64 != 0) {
                     return false;
                 }
-                // turbo4/TCQ require head_dim divisible by 128 (block size = 128)
-                if ((op->type == GGML_TYPE_TURBO4_0 || op->type == GGML_TYPE_TURBO3_TCQ ||
+                // turbo3/turbo2/turbo4/TCQ blocks are all 128 wide — the old %64
+                // guard for turbo3/turbo2 came from a stale "block size 32"
+                // comment and under-allocated rows in Release builds
+                // (2026-08-15 bughunt 6.3)
+                if ((op->type == GGML_TYPE_TURBO3_0 || op->type == GGML_TYPE_TURBO2_0 ||
+                     op->type == GGML_TYPE_TURBO4_0 || op->type == GGML_TYPE_TURBO3_TCQ ||
                      op->type == GGML_TYPE_TURBO2_TCQ) && op->src[0]->ne[0] % 128 != 0) {
                     return false;
                 }

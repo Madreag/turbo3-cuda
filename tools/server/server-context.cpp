@@ -1203,9 +1203,14 @@ private:
             // request to run beyond the training context — capping would
             // silently break validated long-context deployments (our 409600
             // YaRN profile scored 5/5 NIAH at 380K). Cap only when no scaling
-            // was configured.
-            if (params_base.rope_scaling_type != LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED &&
-                params_base.rope_scaling_type != LLAMA_ROPE_SCALING_TYPE_NONE) {
+            // is in effect. NOTE: scaling can also come from GGUF metadata with
+            // no CLI flag — the library resolves UNSPECIFIED to the model's
+            // trained scaling, so check the trained freq_scale too.
+            const bool cli_scaling = params_base.rope_scaling_type != LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED &&
+                                     params_base.rope_scaling_type != LLAMA_ROPE_SCALING_TYPE_NONE;
+            const bool model_scaling = params_base.rope_scaling_type == LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED &&
+                                       llama_model_rope_freq_scale_train(model_tgt) != 1.0f;
+            if (cli_scaling || model_scaling) {
                 SRV_WRN("slot context (%d) exceeds training context (%d) — allowed: explicit rope scaling configured\n",
                         n_ctx_slot, n_ctx_train);
             } else {

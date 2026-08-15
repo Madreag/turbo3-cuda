@@ -19,9 +19,6 @@ struct llama_context;
 
 class llama_kv_cache : public llama_memory_i {
 public:
-    // TurboQuant: get rotation matrices (stored as row-major C arrays)
-    ggml_tensor * get_turbo_rotation() const { return turbo_rotation; }
-    ggml_tensor * get_turbo_rotation_inv() const { return turbo_rotation_inv; }
     // TurboQuant InnerQ: per-channel scale_inv for Q/V equalization
     ggml_tensor * get_turbo_innerq_scale_inv() const { return turbo_innerq_scale_inv; }
 
@@ -290,9 +287,6 @@ private:
     // pending stream copies that will be applied during the next update
     stream_copy_info sc_info;
 
-    // TurboQuant rotation matrices (128x128, row-major stored)
-    ggml_tensor * turbo_rotation = nullptr;      // R (forward rotation)
-    ggml_tensor * turbo_rotation_inv = nullptr;  // R^T = R^{-1} (inverse rotation)
     // TurboQuant InnerQ: per-channel scale_inv for Q/V equalization (128 floats)
     ggml_tensor * turbo_innerq_scale_inv = nullptr;
 
@@ -337,11 +331,7 @@ private:
 class llama_kv_cache_context : public llama_memory_context_i {
 public:
 
-    // TurboQuant rotation accessors
-    ggml_tensor * get_turbo_rotation() const;
-    ggml_tensor * get_turbo_rotation_inv() const;
-    ggml_tensor * get_turbo_rot_forward() const;
-    ggml_tensor * get_turbo_rot_inverse() const;
+    // TurboQuant InnerQ accessor
     ggml_tensor * get_turbo_innerq_scale_inv() const;
     // some shorthands
     using slot_info_vec_t  = llama_kv_cache::slot_info_vec_t;

@@ -125,8 +125,8 @@ void ggml_cuda_turbo_wht(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
 
     int direction;
     int group_size;
-    memcpy(&direction, dst->op_params + 0, sizeof(int));
-    memcpy(&group_size, dst->op_params + sizeof(int), sizeof(int));
+    memcpy(&direction,  (const int32_t *) dst->op_params + 0, sizeof(int));
+    memcpy(&group_size, (const int32_t *) dst->op_params + 1, sizeof(int));
 
     const int64_t head_dim        = src->ne[0];
     const int64_t n_heads         = ggml_nelements(src) / head_dim;

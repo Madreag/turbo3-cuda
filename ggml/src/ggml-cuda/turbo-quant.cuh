@@ -2,7 +2,7 @@
  * TurboQuant CUDA kernels for KV cache compression
  * Based on: arXiv 2504.19874 (ICLR 2026)
  *
- * Implements GGML_TYPE_TURBO3_0 (3-bit PolarQuant, block size 32)
+ * Implements GGML_TYPE_TURBO3_0 (3-bit PolarQuant, block size 128)
  * Constants, WHT rotation, quantize/dequantize device functions.
  */
 

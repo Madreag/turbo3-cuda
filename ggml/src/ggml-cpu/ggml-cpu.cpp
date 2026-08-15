@@ -449,8 +449,21 @@ static bool ggml_backend_cpu_device_supports_op(ggml_backend_dev_t dev, const st
                 op->type != GGML_TYPE_IQ2_XS  &&
                 op->type != GGML_TYPE_IQ2_S   &&
                 op->type != GGML_TYPE_IQ1_S   &&
-                op->type != GGML_TYPE_IQ1_M; // missing type_traits.from_float
+                op->type != GGML_TYPE_IQ1_M   &&
+                // turbo types without CPU traits: claiming support here sent
+                // the op into a NULL from_float call (2026-08-15 bughunt 6.1)
+                op->type != GGML_TYPE_TURBO4_0   &&
+                op->type != GGML_TYPE_TURBO1_5   &&
+                op->type != GGML_TYPE_TURBO3_TCQ &&
+                op->type != GGML_TYPE_TURBO2_TCQ; // missing type_traits.from_float
         case GGML_OP_MUL_MAT:
+            // turbo types without CPU traits have NULL vec_dot and a zero-init
+            // vec_dot_type (== F32) that made this claim support falsely —
+            // NULL call or infinite loop via nrows=0 (2026-08-15 bughunt 6.1)
+            if (src0->type == GGML_TYPE_TURBO4_0 || src0->type == GGML_TYPE_TURBO1_5 ||
+                src0->type == GGML_TYPE_TURBO3_TCQ || src0->type == GGML_TYPE_TURBO2_TCQ) {
+                return false;
+            }
             return src1->type == GGML_TYPE_F32 || src1->type == ggml_get_type_traits_cpu(src0->type)->vec_dot_type;
         case GGML_OP_SOFT_MAX_BACK: {
             if (op->src[0]->type != GGML_TYPE_F32 || op->src[1]->type != GGML_TYPE_F32) {

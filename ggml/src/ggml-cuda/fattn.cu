@@ -496,8 +496,18 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
             if (V->ne[0] != K->ne[0]) {
                 return BEST_FATTN_KERNEL_NONE;
             }
-            if (!gqa_opt_applies && !ggml_cuda_fattn_is_turbo_type(K->type) && !ggml_cuda_fattn_is_turbo_type(V->type)) {
-                return BEST_FATTN_KERNEL_NONE;
+            if (!gqa_opt_applies) {
+                // Turbo K/V may pass without the GQA opt, but ONLY for
+                // decode-sized batches that the VEC kernel serves: larger
+                // batches fall through to the MMA path, which has no DKQ=512
+                // instantiation without the GQA opt and GGML_ABORTs
+                // (2026-08-15 bughunt 5.1).
+                const bool turbo_vec_ok =
+                    (ggml_cuda_fattn_is_turbo_type(K->type) || ggml_cuda_fattn_is_turbo_type(V->type)) &&
+                    Q->ne[1] <= 2;
+                if (!turbo_vec_ok) {
+                    return BEST_FATTN_KERNEL_NONE;
+                }
             }
             break;
         case 576:
