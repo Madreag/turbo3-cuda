@@ -69,6 +69,16 @@ deploy batch. Slot files archived on config change. Rollback binaries kept.
   and IF 90% reference is real). 
 - 27106 bisect: CLOSED as parked-experiment above (not a blind bisect).
 
+## LLGUIDANCE + GRAMMAR-TAX VERDICT (closed)
+- llguidance compiled in (engine v1.8.0; plain-lark verified; json_schema on
+  the CHAT endpoint blocked by fork schema-rework gap — documented, optional).
+- REAL-SUITE MEASUREMENT (captured 38-tool body, tool-call turn, unpaged):
+  with-tools 102.8-106.7 vs free 109.3-111.6 tok/s = **~4% tax**. The art-era
+  0.6-0.85x "grammar penalty" was VRAM PAGING, not grammar. llguidance =
+  TESTED-NOT-NEEDED for production. Item 4 CLOSED.
+- Bonus verified: tool_calls emit correctly; prompt-cache reuse across
+  tool runs (25K prompt → 4 tokens on rerun).
+
 ## USER DECISION 2026-08-15: 320K LOCKED for testing phase
 Good-data-first: 320K + 1.5GB headroom guarantees no paging artifacts in any
 measurement. AFTER the testing phase: push context toward max, and offer an
