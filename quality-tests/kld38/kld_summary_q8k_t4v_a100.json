@@ -1,0 +1,10 @@
+{
+  "type": "q8k_t4v_a100",
+  "vs": "f16",
+  "kld_mean": 0.005375853742718863,
+  "top1_agreement_pct": 95.0,
+  "delta_p_rms": 0.04367665257437399,
+  "n_prompts": 60,
+  "n_skipped": 0,
+  "prompt_tokens": 2048
+}

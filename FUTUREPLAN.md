@@ -1,5 +1,19 @@
 # FUTUREPLAN — Quality & Speed Roadmap (drafted 2026-08-15)
 
+## OUTCOMES (updated 2026-08-15, A+B evening executed)
+- Phase 0: DONE (branch pushed; deploy/ versioned; scorer fixed+validated).
+- Phase A: DONE, ADOPTED — alpha 1.00/1.00 in production (was 1.10/1.12);
+  KLD 0.0087 vs 0.0200, confirmed under YaRN; gated by preverify + render
+  PASS. Methodology finding: the 3.6-era KLD runs never actually measured
+  quantized-cache readback (single-ubatch prefill) and hid a 503 cascade;
+  tool fixed (2048-tok prompts, cache_prompt off, skip-count surfaced,
+  noise floor). Full data + caveats: quality-tests/kld38/README.md.
+- Phase B: DONE, NOT ADOPTED — q8_0 K gives a real-but-modest gain (KLD
+  0.0054 vs 0.0087) that doesn't justify −70K ctx or CPU-vision today;
+  data preserved for future re-evaluation. Long-ctx q8K spots skipped
+  (only needed for adoption).
+- Phases C/D/E: pending (C rides UPSTREAMSYNC).
+
 Planning document. Nothing here is executed until the user says go.
 Production baseline this plan measures against: Qwen3.8-27B Q6_K, 409600 ctx
 YaRN 1.5625, turbo4/turbo4 KV, alphas 1.10/1.12, temp 1.0, reasoning_effort

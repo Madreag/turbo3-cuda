@@ -27,8 +27,13 @@ TCQ_KEY=$(cat /home/erol/.config/llama-tcq/api.key)
 CTX=409600
 SCALE=1.5625          # = CTX / 262144 (native), same factor as 3.6 profile
 
-export TURBO_NORM_ALPHA_V=1.10
-export TURBO4_NORM_ALPHA_V=1.12
+# Alphas re-tuned for Qwen3.8 (2026-08-15 sweep, corrected methodology:
+# 2048-tok prompts w/ cross-ubatch quantized-cache readback, f16 noise floor
+# = 0.0, n=60): alpha 1.00 is the bracketed KLD minimum (0.0087 vs 0.0200 at
+# the old 3.6-inherited 1.10/1.12; confirmed under production YaRN 0.0150 vs
+# 0.0243, top-1 96.7% vs 90.0%). Qwen3.8 wants NO V-norm correction.
+export TURBO_NORM_ALPHA_V=1.00
+export TURBO4_NORM_ALPHA_V=1.00
 
 mkdir -p /home/erol/.config/llama-tcq/slots-long
 nohup ./build-g1/bin/llama-server \

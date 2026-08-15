@@ -1,0 +1,10 @@
+{
+  "type": "turbo4_a100y",
+  "vs": "f16",
+  "kld_mean": 0.01498282767499057,
+  "top1_agreement_pct": 96.66666666666667,
+  "delta_p_rms": 0.0714204798217339,
+  "n_prompts": 60,
+  "n_skipped": 0,
+  "prompt_tokens": 2048
+}

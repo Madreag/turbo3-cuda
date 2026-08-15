@@ -57,9 +57,13 @@ def get_logprobs(base_url: str, prompt: str, top_logprobs: int = 10) -> dict:
         "max_tokens": 1,
         "temperature": 0,
         "logprobs": top_logprobs,
+        # Never accumulate prompts in the slot cache: with --no-context-shift
+        # a filling cache 503s after ~n_ctx/prompt_len requests, and cache
+        # reuse lets prompts interfere. Every probe stands alone.
+        "cache_prompt": False,
     }
     try:
-        resp = requests.post(url, json=payload, timeout=60)
+        resp = requests.post(url, json=payload, timeout=240)
         resp.raise_for_status()
         data = resp.json()
         choice = data["choices"][0]
@@ -201,6 +205,7 @@ def main():
         klds = []
         top1_matches = 0
         delta_p_sqs = []
+        n_skipped = 0
 
         for i in range(n):
             kld, match, dp_sq = compute_kl_divergence(f16_lps[i], results[i])
@@ -208,6 +213,12 @@ def main():
                 klds.append(kld)
                 top1_matches += match
                 delta_p_sqs.append(dp_sq)
+            else:
+                n_skipped += 1
+        if n_skipped:
+            # Silent exclusion once hid a 52-prompt 503 cascade behind a
+            # perfect-looking 0.0 summary. Never again.
+            print(f"  WARNING: {n_skipped}/{n} prompts skipped (empty/error responses)")
 
         if klds:
             mean_kld = sum(klds) / len(klds)
@@ -231,6 +242,8 @@ def main():
                     "top1_agreement_pct": top1_pct,
                     "delta_p_rms": rms_dp,
                     "n_prompts": len(klds),
+                    "n_skipped": n_skipped,
+                    "prompt_tokens": args.prompt_tokens,
                 }, f, indent=2)
             print(f"  Summary: {summary_path}")
     elif args.type == "f16":

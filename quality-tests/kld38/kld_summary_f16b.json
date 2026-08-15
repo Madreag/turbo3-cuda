@@ -1,0 +1,10 @@
+{
+  "type": "f16b",
+  "vs": "f16",
+  "kld_mean": 0.0,
+  "top1_agreement_pct": 100.0,
+  "delta_p_rms": 0.0,
+  "n_prompts": 60,
+  "n_skipped": 0,
+  "prompt_tokens": 2048
+}

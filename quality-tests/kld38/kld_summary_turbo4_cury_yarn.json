@@ -1,0 +1,10 @@
+{
+  "type": "turbo4_cury",
+  "vs": "f16",
+  "kld_mean": 0.02434797654644078,
+  "top1_agreement_pct": 90.0,
+  "delta_p_rms": 0.0989725249297019,
+  "n_prompts": 60,
+  "n_skipped": 0,
+  "prompt_tokens": 2048
+}
