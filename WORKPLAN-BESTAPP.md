@@ -69,6 +69,15 @@ deploy batch. Slot files archived on config change. Rollback binaries kept.
   and IF 90% reference is real). 
 - 27106 bisect: CLOSED as parked-experiment above (not a blind bisect).
 
+## GDN KERNELS VERDICT (2026-08-15 late)
+- PR 26001 chunked GDN prefill: TESTED-REGRESSIVE on SM120/Qwen3.8 — prefill
+  494 tok/s vs 752 same-shape baseline (−35%), decode unchanged. REVERTED
+  (revert of 84a01770a). Open PR, likely tuned for other HW; recheck if it
+  merges upstream with scheduler companions.
+- PR 22587 row-per-warp GDN decode: PARKED — rewrites the same kernel file
+  incompatibly with 26001-era layout; dedicated merge session if pursued.
+- Net: GDN prefill remains a future lever, not via these PRs as-is.
+
 ## (superseded pause block below, kept for history)
 ## ⏸ PAUSED 2026-08-15 — USER REBOOTING BOX (VRAM at ceiling 32162 MiB)
 
