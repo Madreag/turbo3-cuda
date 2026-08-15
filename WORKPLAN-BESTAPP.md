@@ -69,7 +69,22 @@ deploy batch. Slot files archived on config change. Rollback binaries kept.
   and IF 90% reference is real). 
 - 27106 bisect: CLOSED as parked-experiment above (not a blind bisect).
 
-## GDN KERNELS VERDICT (2026-08-15 late)
+## ENVIRONMENTAL-DRIFT FINDING (2026-08-15 night) — CHANGES TEST METHODOLOGY
+- Prefill@38K across today: morning binaries 622-752 tok/s; night binaries
+  (3 DIFFERENT builds: +GDN, GDN-reverted, no-24565) all 494-498. Decode@38K
+  stable 71-74 THROUGHOUT. Verdict: ~35% prefill drift is ENVIRONMENTAL
+  (Windows/dxg paging pressure accumulating with box uptime), selectively
+  hitting large-batch kernels; NOT the GDN pick, NOT 24565 — both were
+  wrongly suspected on stale baselines.
+- RULE CHANGE: kernel A/Bs under ±20% require paired back-to-back runs
+  alternating binaries within minutes, or reboot-fresh points. Single-arm
+  vs historical baseline = invalid on this box.
+- 24565: left reverted (neutral-measured, unproven either way; 15-line
+  re-apply anytime). GDN 26001: left reverted (unproven, confounded).
+- Ops implication: periodic reboot hygiene / VRAM-margin watchdog is the
+  real fix; decode (user-facing) is drift-immune so far.
+
+## GDN KERNELS VERDICT (2026-08-15 late) [AMENDED by drift finding above]
 - PR 26001 chunked GDN prefill: TESTED-REGRESSIVE on SM120/Qwen3.8 — prefill
   494 tok/s vs 752 same-shape baseline (−35%), decode unchanged. REVERTED
   (revert of 84a01770a). Open PR, likely tuned for other HW; recheck if it
