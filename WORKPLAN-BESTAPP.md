@@ -69,7 +69,26 @@ deploy batch. Slot files archived on config change. Rollback binaries kept.
   and IF 90% reference is real). 
 - 27106 bisect: CLOSED as parked-experiment above (not a blind bisect).
 
-## ENVIRONMENTAL-DRIFT FINDING (2026-08-15 night) — CHANGES TEST METHODOLOGY
+## VRAM AUTOPSY (2026-08-15 night) — RETRACTS THE 'DRIFT' FINDING BELOW
+USER WAS RIGHT: it was the VRAM ceiling, not environmental drift. Allocation
+table (-lv 4 probe): weights 20819 + KV 5808 + 3× compute 1828 (target/draft/
+vision scratch!) + RS 449 + draft-KV 363 + meta 248 ≈ 33.2GB vs 32.6 physical
+— overcommitted and WDDM-paged SINCE MTP ADOPTION (draft ctx f16 KV 1.5GB +
+triple scratch were never budgeted; 'zero VRAM cost' claim was the residency
+cap masking overcommit). Paging throttled prefill from day one: yesterday's
+1156 'baseline' was already paged.
+FITTED CONFIG (live): ctx 294912 (288K, YaRN 1.125), -b 512 -ub 512,
+--ctx-checkpoints 2, -ctkd/-ctvd turbo4. Result: 31364/32607 (1.24GB free,
+counter finally moves), prefill @38K = 2605 tok/s (3.5x yesterday's best),
+decode @38K = 78.6-81.9. Full 38K turn = 24s wall.
+CONSEQUENCES: (a) every A/B measured today ran under paging — ngram-wash,
+GDN-regression(acquitted), 24565 verdicts are all RE-ELIGIBLE for paired
+re-test on the fitted config; (b) checkpoint sizes scale ~8KiB/token of
+depth — cap 2 is mandatory; (c) OPEN OFFER to user: vision→CPU
+(--no-mmproj-offload) reclaims ~1.8GB scratch = context back to ~352K,
+cost = slow image ingestion only (awaiting user choice).
+
+## ENVIRONMENTAL-DRIFT FINDING (2026-08-15 night) — RETRACTED, see autopsy above
 - Prefill@38K across today: morning binaries 622-752 tok/s; night binaries
   (3 DIFFERENT builds: +GDN, GDN-reverted, no-24565) all 494-498. Decode@38K
   stable 71-74 THROUGHOUT. Verdict: ~35% prefill drift is ENVIRONMENTAL

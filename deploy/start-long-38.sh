@@ -48,8 +48,8 @@ for base in server proxy; do
     ls -t "$CONF/$base".log.* 2>/dev/null | tail -n +6 | xargs -r rm -f
 done
 
-CTX=409600
-SCALE=1.5625          # = CTX / 262144 (native)
+CTX=294912
+SCALE=1.125          # = CTX / 262144 (native)
 
 export TURBO_NORM_ALPHA_V=1.00
 export TURBO4_NORM_ALPHA_V=1.00
@@ -70,13 +70,15 @@ nohup ./build-g1/bin/llama-server \
   -m /home/erol/ai/turboquant/models/qwen38/Qwen3.8-27B-Q6_K.gguf \
   --mmproj /home/erol/ai/turboquant/models/qwen38/mmproj-F16.gguf \
   --spec-type draft-mtp --spec-draft-n-max 2 \
+  -ctkd turbo4 -ctvd turbo4 \
   -ctk turbo4 -ctv turbo4 \
   -fa on -ngl 99 -c $CTX --no-context-shift \
   --rope-scaling yarn --rope-scale $SCALE --yarn-orig-ctx 262144 \
   --jinja --reasoning-format none \
   --chat-template-kwargs '{"preserve_thinking": true}' \
-  --parallel 1 -b 2048 -ub 512 \
+  --parallel 1 -b 512 -ub 512 \
   --temp 1.0 --top-p 0.95 --top-k 20 \
+  --ctx-checkpoints 2 \
   --slot-save-path "$CONF/slots-long/" \
   --host 127.0.0.1 --port 8131 \
   --api-key-file "$CONF/api.key" \
