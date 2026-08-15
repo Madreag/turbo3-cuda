@@ -43,6 +43,21 @@ deploy batch. Slot files archived on config change. Rollback binaries kept.
 10. [PENDING] **Upstream PR submissions** (karma batch: crash hardening,
     ctx-cap, parse-degrade, checkpoint evidence).
 
+## ✅ ITEM 1 DONE 2026-08-15 (post-reboot): MMA-TURBO PORT SHIPPED, ALL GATES GREEN
+- Reboot exonerated the kernels (user's VRAM-thrash call was right): shallow
+  119 tok/s (was 84-97), 38K depth 74.1 (was 41.4 = +79%, VEC 9.8 eliminated).
+- KLD gate: 0.004728 / top1 98.3% vs 0.0150 / 96.7% baseline = **−68% KLD**
+  (corrected centroids; old table was mis-scaled). Beats q8K-hybrid arm at
+  pure turbo4 bits. Needle FOUND @39K. First gate run was FALSE-catastrophic
+  (stale Qwen3.6 f16 reference — quarantined; fresh 3.8-YaRN reference
+  captured and ARCHIVED in kld38/).
+- VRAM lesson: 32.1GB is fine when clean; Windows-side fragmentation after
+  long uptime causes uniform 4-8x collapse — reboot clears; consider VRAM
+  canary/margin later.
+- Production: MMA binary + proxy v6.4 live. q8K option now LESS attractive
+  (pure turbo4 beats old hybrid arm) — bit-allocation item deprioritized.
+
+## (superseded pause block below, kept for history)
 ## ⏸ PAUSED 2026-08-15 — USER REBOOTING BOX (VRAM at ceiling 32162 MiB)
 
 RESUME EXACTLY HERE AFTER REBOOT:
