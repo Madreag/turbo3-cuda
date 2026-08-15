@@ -114,6 +114,15 @@ continuations re-pay full prefill.
   Rollback: `stop.sh && cp build-g1/bin/llama-server.pre-nextn
   build-g1/bin/llama-server && start-long.sh` (3.6 slot saves archived in
   slots-long/pre-38-backup/).
+- **VISION IS LIVE** (2026-08-14 late): `--mmproj models/qwen38/mmproj-F16.gguf`
+  in start-long-38.sh. OpenAI `image_url` content parts work end-to-end
+  through the proxy (smoke: model read its own artifact screenshot's UI text
+  verbatim in 13s; text path regression-clean). VRAM 31.2/32.6GB (~1.4GB
+  headroom — watch Windows-side volatility; escape hatch:
+  `--no-mmproj-offload` moves the encoder to CPU). Proxy v6.2: captures strip
+  base64 image payloads (42/42 unit tests). Caveats: vision quality under
+  turbo4 KV is smoke-validated only (no battery yet); the Anthropic
+  /v1/messages translation path still drops images (OpenAI path only).
 - Previous model (rollback pair): `/home/erol/ai/turboquant/models/Qwen3.6-27B-Q6_K.gguf` (unsloth, qwen35).
 - Server: `build-g1/bin/llama-server` — G1 + tonight's two patches. Built from
   worktree `/home/erol/ai/turboquant/turboquant-g1` (branch checkout), staged
