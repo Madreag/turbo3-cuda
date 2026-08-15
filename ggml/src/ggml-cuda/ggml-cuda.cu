@@ -67,6 +67,7 @@
 #include "ggml-cuda/cumsum.cuh"
 #include "ggml-cuda/fill.cuh"
 #include "ggml-cuda/lightning-indexer.cuh"
+#include "ggml-cuda/turbo-wht.cuh"
 #include "ggml.h"
 
 #include <algorithm>
@@ -2075,6 +2076,9 @@ static bool ggml_cuda_compute_forward(ggml_backend_cuda_context & ctx, struct gg
             break;
         case GGML_OP_SET_ROWS:
             ggml_cuda_op_set_rows(ctx, dst);
+            break;
+        case GGML_OP_TURBO_WHT:
+            ggml_cuda_turbo_wht(ctx, dst);
             break;
         case GGML_OP_SET:
             ggml_cuda_op_set(ctx, dst);
@@ -4982,6 +4986,12 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
                     case GGML_TYPE_Q5_0:
                     case GGML_TYPE_Q5_1:
                     case GGML_TYPE_Q8_0:
+                    case GGML_TYPE_TURBO3_0:
+                    case GGML_TYPE_TURBO2_0:
+                    case GGML_TYPE_TURBO4_0:
+                    case GGML_TYPE_TURBO1_5:
+                    case GGML_TYPE_TURBO3_TCQ:
+                    case GGML_TYPE_TURBO2_TCQ:
                     case GGML_TYPE_Q2_K:
                     case GGML_TYPE_Q3_K:
                     case GGML_TYPE_Q4_K:
@@ -5011,11 +5021,24 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
             } break;
         case GGML_OP_SET_ROWS:
             {
+                // turbo3/turbo2/turbo1.5 require head_dim divisible by 64 (supports 64 and 128 WHT groups)
+                if ((op->type == GGML_TYPE_TURBO3_0 || op->type == GGML_TYPE_TURBO2_0 ||
+                     op->type == GGML_TYPE_TURBO1_5) && op->src[0]->ne[0] % 64 != 0) {
+                    return false;
+                }
+                // turbo4/TCQ require head_dim divisible by 128 (block size = 128)
+                if ((op->type == GGML_TYPE_TURBO4_0 || op->type == GGML_TYPE_TURBO3_TCQ ||
+                     op->type == GGML_TYPE_TURBO2_TCQ) && op->src[0]->ne[0] % 128 != 0) {
+                    return false;
+                }
                 return (
                            (
                                (op->type == GGML_TYPE_F32 || op->type == GGML_TYPE_F16 || op->type == GGML_TYPE_BF16 ||
                                op->type == GGML_TYPE_Q4_0 || op->type == GGML_TYPE_Q4_1 || op->type == GGML_TYPE_Q5_0 ||
-                               op->type == GGML_TYPE_Q5_1 || op->type == GGML_TYPE_Q8_0 || op->type == GGML_TYPE_IQ4_NL) &&
+                               op->type == GGML_TYPE_Q5_1 || op->type == GGML_TYPE_Q8_0 || op->type == GGML_TYPE_IQ4_NL ||
+                               op->type == GGML_TYPE_TURBO3_0 || op->type == GGML_TYPE_TURBO2_0 ||
+                               op->type == GGML_TYPE_TURBO4_0 || op->type == GGML_TYPE_TURBO1_5 ||
+                               op->type == GGML_TYPE_TURBO3_TCQ || op->type == GGML_TYPE_TURBO2_TCQ) &&
                                op->src[0]->type == GGML_TYPE_F32
                            ) || (
                                op->type == GGML_TYPE_F16 && op->src[0]->type == GGML_TYPE_F16
@@ -5181,6 +5204,9 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
         case GGML_OP_CLAMP:
         case GGML_OP_LOG:
             return true;
+        case GGML_OP_TURBO_WHT:
+            return op->src[0]->type == GGML_TYPE_F32 && op->type == GGML_TYPE_F32 &&
+                   op->src[0]->ne[0] % 64 == 0;  // head dim must be divisible by 64 (supports 64 and 128 WHT groups)
         case GGML_OP_ADD:
         case GGML_OP_SUB:
         case GGML_OP_MUL:
