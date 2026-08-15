@@ -1,46 +1,65 @@
 #!/bin/bash
 # LONG-CONTEXT profile — Qwen3.8-27B at 409,600 ctx via YaRN 1.5625.
-# VALIDATED 2026-08-14 battery (session f5334395):
-#   - Effort ladder: reasoning_effort=xhigh @ temp 1.0 (vendor defaults) wins:
-#     3/4 clean pixel-gated renders vs medium 2/4, low 0/2, xhigh@0.6 1/2.
-#     xhigh cost: ~87K tokens / ~30 min per pagoda-class artifact turn.
-#   - NIAH: effective 5/5 at 130K AND 380K (348,798 real ptok) through
-#     turbo4+YaRN; CTRL "FABRICATED" flags are scorer false-positives (model
-#     refuses correctly while quoting the real Meridian code).
-#   - Binary: build-g1/bin/llama-server with NextN port (commit 815b14d61) —
-#     REQUIRED for 3.8 (embedded MTP block); serves 3.6 unchanged.
-# Rollback: start-long.sh (3.6) + build-g1/bin/llama-server.pre-nextn.
-# 3.6 slot saves archived in slots-long/pre-38-backup/ (incompatible states).
 #
-# Config notes vs start-long.sh (3.6):
-#   - temp 1.0 (vendor default; 0.6 arm showed no benefit and one 131K-cap
-#     truncation from a think spiral). top-k 20 / top-p 0.95 unchanged.
-#   - reasoning_effort: xhigh is the template default — deliberately not set.
-#   - alphas 1.10/1.12 carried from 3.6 (validated empirically by ladder+NIAH;
-#     KLD spot-check deferred, geometry identical).
-#   - KNOWN TAIL RISK: xhigh think occasionally near/at Hermes's 131072
-#     max_tokens (1 of 12 ladder runs hit it) → finish=length, truncated
-#     artifact, properly terminated. Knob lives Hermes-side if it bites.
-cd /home/erol/ai/turboquant/turboquant-kv-cache
-TCQ_KEY=$(cat /home/erol/.config/llama-tcq/api.key)
+# VALIDATED (2026-08-14/15 battery, session f5334395):
+#   - reasoning_effort=xhigh @ temp 1.0 (vendor defaults) wins the effort
+#     ladder: 3/4 clean pixel-gated renders vs medium 2/4, low 0/2.
+#     xhigh is the template default — deliberately not set here.
+#   - NIAH effective 5/5 at 130K AND 380K through turbo4+YaRN.
+#   - Alphas 1.00/1.00 (2026-08-15 corrected-methodology sweep): Qwen3.8 wants
+#     NO V-norm correction — the 3.6-inherited 1.10/1.12 cost 2.3x KLD.
+#   - MTP speculative decode (2026-08-15 A/B at production sampling): coding
+#     1.55-1.71x (57→89-98 tok/s, acceptance 59-63%), general 1.66x. Cost:
+#     art/tool-grammar turns 0.6-0.85x (grammar-blind drafts + grammar turns
+#     losing GPU backend sampling) — accepted, coding-primary per user.
+#     NOTE: --spec-draft-n-max multiplies DeltaNet recurrent state x(1+N);
+#     2 is the sweet spot (no-checkpoint rollback fast path).
+#   - Binary: build-g1/bin/llama-server — 2026-08-15 bughunt build from
+#     sync/2026-08 (upstream 9d57ce456 + TurboQuant port + bughunt fixes),
+#     static/self-contained. Backup of prior build: llama-server.pre-bughunt.
+#
+# Rollback (absolute paths, run AFTER a verified stop):
+#   bash /home/erol/.config/llama-tcq/stop.sh \
+#     && cp /home/erol/ai/turboquant/turboquant-kv-cache/build-g1/bin/llama-server.pre-bughunt \
+#           /home/erol/ai/turboquant/turboquant-kv-cache/build-g1/bin/llama-server \
+#     && bash /home/erol/.config/llama-tcq/start-long-38.sh
+#
+# Slot-state files are CONFIG-SPECIFIC: changing KV types, ctx, or --spec-*
+# invalidates saved .bin files (server refuses them, then the proxy erases and
+# re-prefills). Archive slots-long/*.bin when changing config.
+CONF=/home/erol/.config/llama-tcq
+REPO=/home/erol/ai/turboquant/turboquant-kv-cache
+
+# ── Double-start guard (bughunt A5: starting over a live stack used to kill
+#    logs+pidfiles and false-green off the OLD server's /health) ──────────────
+if ss -tln 2>/dev/null | grep -qE ':(8130|8131)\s'; then
+    echo "ERROR: stack already running (8130/8131 bound) — run stop.sh first" >&2
+    ss -tlnp 2>/dev/null | grep -E ':(8130|8131)\s' >&2
+    exit 1
+fi
+
+cd "$REPO" || { echo "ERROR: repo missing at $REPO" >&2; exit 1; }
+
+# ── Log rotation (was `>` truncation — a double-start once destroyed the live
+#    proxy's log mid-write; keep history, prune to last 5) ────────────────────
+ts=$(date +%Y%m%d-%H%M%S)
+for base in server proxy; do
+    [ -s "$CONF/$base.log" ] && mv "$CONF/$base.log" "$CONF/$base.log.$ts"
+    ls -t "$CONF/$base".log.* 2>/dev/null | tail -n +6 | xargs -r rm -f
+done
 
 CTX=409600
-SCALE=1.5625          # = CTX / 262144 (native), same factor as 3.6 profile
+SCALE=1.5625          # = CTX / 262144 (native)
 
-# Alphas re-tuned for Qwen3.8 (2026-08-15 sweep, corrected methodology:
-# 2048-tok prompts w/ cross-ubatch quantized-cache readback, f16 noise floor
-# = 0.0, n=60): alpha 1.00 is the bracketed KLD minimum (0.0087 vs 0.0200 at
-# the old 3.6-inherited 1.10/1.12; confirmed under production YaRN 0.0150 vs
-# 0.0243, top-1 96.7% vs 90.0%). Qwen3.8 wants NO V-norm correction.
 export TURBO_NORM_ALPHA_V=1.00
 export TURBO4_NORM_ALPHA_V=1.00
 
-mkdir -p /home/erol/.config/llama-tcq/slots-long
-# MTP speculative decode (2026-08-15 A/B at production sampling): coding
-# 89-98 tok/s vs 57 baseline (1.55-1.71x, draft acceptance 59-63%), general
-# 1.66x. Cost: art/tool-grammar turns measured 0.6-0.85x (n=2, grammar-draft
-# interaction suspected — investigation lever). Enabled because primary use
-# is coding/general per user direction. No VRAM cost at full profile.
+mkdir -p "$CONF/slots-long"
+# Key via --api-key-file: the old --api-key "$KEY" form exposed the key in
+# /proc/*/cmdline to any local process (bughunt A5).
+# --metrics: exposes spec_decode_* acceptance counters (grammar/MTP split
+# measurement) — server-side only; the proxy does NOT forward /metrics beyond
+# its allowlist policy.
 nohup ./build-g1/bin/llama-server \
   -m /home/erol/ai/turboquant/models/qwen38/Qwen3.8-27B-Q6_K.gguf \
   --mmproj /home/erol/ai/turboquant/models/qwen38/mmproj-F16.gguf \
@@ -50,27 +69,50 @@ nohup ./build-g1/bin/llama-server \
   --rope-scaling yarn --rope-scale $SCALE --yarn-orig-ctx 262144 \
   --jinja --reasoning-format none \
   --chat-template-kwargs '{"preserve_thinking": true}' \
-  --parallel 1 --swa-full -b 2048 -ub 512 \
+  --parallel 1 -b 2048 -ub 512 \
   --temp 1.0 --top-p 0.95 --top-k 20 \
-  --slot-save-path /home/erol/.config/llama-tcq/slots-long/ \
+  --slot-save-path "$CONF/slots-long/" \
   --host 127.0.0.1 --port 8131 \
-  --api-key "$TCQ_KEY" \
-  > /home/erol/.config/llama-tcq/server.log 2>&1 &
-echo $! > /home/erol/.config/llama-tcq/server.pid
+  --api-key-file "$CONF/api.key" \
+  --metrics \
+  > "$CONF/server.log" 2>&1 &
+echo $! > "$CONF/server.pid"
 
-for i in $(seq 1 90); do
-  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 http://127.0.0.1:8131/health 2>/dev/null)
-  [ "$code" = "200" ] && break
-  sleep 2
+# ── Health wait: cold-cache load of 22.9GB + mmproj at this box's ~124MB/s
+#    can exceed 3 min; give 8. A timeout is an ERROR — the old script launched
+#    the proxy and printed success regardless (bughunt A5). ──────────────────
+code=""
+for i in $(seq 1 240); do
+    code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 http://127.0.0.1:8131/health 2>/dev/null)
+    [ "$code" = "200" ] && break
+    kill -0 "$(cat "$CONF/server.pid")" 2>/dev/null || { code="dead"; break; }
+    sleep 2
 done
-grep -m1 "new slot, n_ctx" /home/erol/.config/llama-tcq/server.log
+if [ "$code" != "200" ]; then
+    echo "ERROR: server not healthy after wait (last: ${code:-none}) — proxy NOT started" >&2
+    echo "--- server.log tail:" >&2
+    tail -5 "$CONF/server.log" >&2
+    [ "$code" = "dead" ] || echo "(process still alive — may still be loading; check status.sh)" >&2
+    exit 1
+fi
+grep -m1 "new slot, n_ctx" "$CONF/server.log"
 
-nohup python3 /home/erol/.config/llama-tcq/proxy.py \
+nohup python3 "$CONF/proxy.py" \
   --upstream http://127.0.0.1:8131 \
   --host 0.0.0.0 --port 8130 \
-  > /home/erol/.config/llama-tcq/proxy.log 2>&1 &
-echo $! > /home/erol/.config/llama-tcq/proxy.pid
+  > "$CONF/proxy.log" 2>&1 &
+echo $! > "$CONF/proxy.pid"
 
-echo "LONG-38 profile: llama-server PID $(cat /home/erol/.config/llama-tcq/server.pid) at ctx=$CTX yarn=$SCALE (Qwen3.8-27B)"
-echo "proxy PID:       $(cat /home/erol/.config/llama-tcq/proxy.pid) (0.0.0.0:8130)"
-echo "Rollback:        stop.sh && cp build-g1/bin/llama-server.pre-nextn build-g1/bin/llama-server && start-long.sh"
+for i in $(seq 1 10); do
+    pcode=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 http://127.0.0.1:8130/health 2>/dev/null)
+    [ "$pcode" = "200" ] && break
+    sleep 1
+done
+if [ "$pcode" != "200" ]; then
+    echo "ERROR: proxy did not become healthy — see proxy.log" >&2
+    tail -5 "$CONF/proxy.log" >&2
+    exit 1
+fi
+
+echo "LONG-38 profile: llama-server PID $(cat "$CONF/server.pid") at ctx=$CTX yarn=$SCALE (Qwen3.8-27B, MTP on)"
+echo "proxy PID:       $(cat "$CONF/proxy.pid") (0.0.0.0:8130, health OK)"

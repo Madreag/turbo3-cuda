@@ -718,61 +718,10 @@ def test_anthropic_stream_done_signal():
     print("OK test_anthropic_stream_done_signal")
 
 
-TESTS = [
-    test_tool_calls_preserved_in_request,
-    test_user_message_untouched,
-    test_empty_messages_no_crash,
-    test_split_thinking_basic,
-    test_split_thinking_no_think,
-    test_split_thinking_unterminated,
-    test_split_thinking_multiple_blocks,
-    test_split_thinking_claude_style_tag,
-    test_split_thinking_mixed_styles,
-    test_stream_claude_style_tag_split_chunks,
-    test_response_rename_reasoning_content,
-    test_response_extract_inline_think,
-    test_response_tool_calls_survive,
-    test_sse_rename_reasoning_content,
-    test_sse_tool_calls_delta_passthrough,
-    test_sse_inline_think_split_across_chunks,
-    test_sse_done_signal_passthrough,
-    test_sse_empty_content_dropped_when_reasoning_present,
-    test_multi_turn_tool_call_roundtrip,
-    test_extract_user_id_valid,
-    test_extract_user_id_invalid,
-    test_extract_user_id_whitespace_tolerance,
-    # Anthropic translation
-    test_anthropic_request_simple_text,
-    test_anthropic_request_system_blocks,
-    test_anthropic_request_tool_use_history,
-    test_anthropic_request_tools_translation,
-    test_anthropic_request_tool_choice_specific,
-    test_anthropic_request_sampling_params,
-    test_anthropic_response_text_only,
-    test_anthropic_response_with_cache,
-    test_anthropic_response_with_thinking_inline,
-    test_anthropic_response_tool_use,
-    test_anthropic_response_reasoning_field,
-    test_anthropic_stream_basic_text,
-    test_anthropic_stream_thinking_then_text,
-    test_anthropic_stream_tool_call,
-    test_anthropic_stream_done_signal,
-]
-
-
-if __name__ == "__main__":
-    failed = 0
-    for t in TESTS:
-        try:
-            t()
-        except AssertionError as e:
-            print(f"FAIL {t.__name__}: {e}")
-            failed += 1
-        except Exception as e:
-            print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
-            failed += 1
-    print(f"\n{len(TESTS) - failed}/{len(TESTS)} passed")
-    sys.exit(1 if failed else 0)
+# NOTE: the TESTS registry + __main__ runner live at the END of this file.
+# They used to sit here — every test defined below this point was silently
+# skipped in `python3 test_proxy.py` mode, which reported 37/37 while the
+# suite had 42 (2026-08-15 bughunt A6).
 
 
 # ─── Stream-termination tripwires + real-traffic capture (2026-08-09) ─────────
@@ -819,8 +768,186 @@ def test_capture_strips_image_payloads(tmp_path, monkeypatch):
                     {"type": "image_url", "image_url": {"url": "data:image/png;base64," + "A" * 5000}}]},
                 {"role": "user", "content": "plain text untouched"}]}
     stripped = strip_image_payloads(body)
-    assert_eq(stripped["messages"][0]["content"][1]["image_url"]["url"].startswith("data:<stripped"),
+    assert_eq(stripped["messages"][0]["content"][1]["image_url"]["url"].startswith("<stripped"),
               True, "image payload replaced")
     assert_eq(body["messages"][0]["content"][1]["image_url"]["url"][:15],
               "data:image/png;", "original body untouched")
     assert_eq(stripped["messages"][1]["content"], "plain text untouched", "string content untouched")
+
+
+# ─── 2026-08-15 bughunt regression tests ──────────────────────────────────────
+
+from proxy import strip_image_payloads, StreamState
+
+
+def test_classify_crlf_and_nospace():
+    assert_eq(classify_terminal_line("data: [DONE]\r"), "done", "CRLF-framed DONE")
+    assert_eq(classify_terminal_line('data:{"error":{"message":"x"}}'), "error",
+              "data: without space")
+
+
+def test_classify_reordered_error_object():
+    line = 'data: {"code":500,"error":{"message":"boom"}}'
+    assert_eq(classify_terminal_line(line), "error", "top-level error key, any order")
+    line2 = 'data: {"choices":[{"delta":{"content":"the \\"error\\" word"}}]}'
+    assert_eq(classify_terminal_line(line2), None, "content mentioning error not flagged")
+
+
+def test_stream_literal_think_after_content():
+    s = StreamState()
+    _, r = s.process("<think>plan</think>Here is the doc: ")
+    assert_eq(r, "plan", "leading think extracted")
+    c2, r2 = s.process("use <think> tags in your template")
+    assert_eq(r2, "", "literal tag after content produces no reasoning")
+    assert_eq(c2, "use <think> tags in your template", "literal tag stays in content")
+    c3, _ = s.process(" and <thinking> too")
+    assert_eq(c3, " and <thinking> too", "thinking-variant untouched after content")
+
+
+def test_stream_finish_flushes_partial_tag():
+    s = StreamState()
+    c, _ = s.process("answer ends with <thi")
+    assert_eq(c, "answer ends with <thi", "no silent tail hold after real content")
+    s2 = StreamState()
+    c2, _ = s2.process("<thi")
+    assert_eq(c2, "", "pure tag prefix held")
+    assert_eq(s2.finish(), "<thi", "finish() flushes the buffered prefix")
+
+
+def test_swap_has_no_filesystem_existence_check():
+    """Bughunt A1: the proxy peeked a hardcoded slots/ dir while the server
+    saved to slots-long/ — restore was silently dead. Guard the fix."""
+    import inspect
+    src = inspect.getsource(proxy_mod.maybe_swap_slot)
+    assert_eq("os.path.exists" in src, False, "no filesystem peek in swap")
+    assert_eq('join(CONFIG_DIR, "slots")' in src, False, "no hardcoded slots dir")
+
+
+def test_strip_leaves_long_text_alone():
+    long_code = "def f():\n    return 1\n" * 500  # >4 KiB, not base64/data:
+    body = {"messages": [{"role": "user", "content": long_code}]}
+    out = strip_image_payloads(body)
+    assert_eq(out["messages"][0]["content"], long_code, "real text never stripped")
+    out2 = strip_image_payloads({"m": [{"source": {"data": "A" * 5000}}]})
+    assert_eq(out2["m"][0]["source"]["data"].startswith("<stripped"), True,
+              "anthropic-shape base64 stripped")
+
+
+def test_anthropic_image_blocks_translated():
+    body = {"messages": [{"role": "user", "content": [
+        {"type": "text", "text": "what is this"},
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                     "data": "AAAA"}}]}]}
+    out = anthropic_request_to_openai(body)
+    content = out["messages"][0]["content"]
+    assert_eq(isinstance(content, list), True, "structured content for vision")
+    assert_eq(content[0]["type"], "text", "text part first")
+    assert_eq(content[1]["image_url"]["url"], "data:image/png;base64,AAAA",
+              "image translated, not dropped")
+
+
+# ─── Script-mode fixture shim (pytest supplies real fixtures under pytest) ────
+
+class _ScriptMonkeypatch:
+    def __init__(self):
+        self._saved = []
+
+    def setattr(self, obj, name, value):
+        self._saved.append((obj, name, getattr(obj, name)))
+        setattr(obj, name, value)
+
+    def undo(self):
+        for obj, name, value in reversed(self._saved):
+            setattr(obj, name, value)
+
+
+def _run_with_fixtures(test_fn):
+    import inspect
+    import pathlib
+    import tempfile
+    kwargs = {}
+    mp = _ScriptMonkeypatch()
+    tmpdir = None
+    try:
+        for pname in inspect.signature(test_fn).parameters:
+            if pname == "tmp_path":
+                tmpdir = tempfile.TemporaryDirectory()
+                kwargs["tmp_path"] = pathlib.Path(tmpdir.name)
+            elif pname == "monkeypatch":
+                kwargs["monkeypatch"] = mp
+        test_fn(**kwargs)
+    finally:
+        mp.undo()
+        if tmpdir is not None:
+            tmpdir.cleanup()
+
+
+TESTS = [
+    test_tool_calls_preserved_in_request,
+    test_user_message_untouched,
+    test_empty_messages_no_crash,
+    test_split_thinking_basic,
+    test_split_thinking_no_think,
+    test_split_thinking_unterminated,
+    test_split_thinking_multiple_blocks,
+    test_split_thinking_claude_style_tag,
+    test_split_thinking_mixed_styles,
+    test_stream_claude_style_tag_split_chunks,
+    test_response_rename_reasoning_content,
+    test_response_extract_inline_think,
+    test_response_tool_calls_survive,
+    test_sse_rename_reasoning_content,
+    test_sse_tool_calls_delta_passthrough,
+    test_sse_inline_think_split_across_chunks,
+    test_sse_done_signal_passthrough,
+    test_sse_empty_content_dropped_when_reasoning_present,
+    test_multi_turn_tool_call_roundtrip,
+    test_extract_user_id_valid,
+    test_extract_user_id_invalid,
+    test_extract_user_id_whitespace_tolerance,
+    # Anthropic translation
+    test_anthropic_request_simple_text,
+    test_anthropic_request_system_blocks,
+    test_anthropic_request_tool_use_history,
+    test_anthropic_request_tools_translation,
+    test_anthropic_request_tool_choice_specific,
+    test_anthropic_request_sampling_params,
+    test_anthropic_response_text_only,
+    test_anthropic_response_with_cache,
+    test_anthropic_response_with_thinking_inline,
+    test_anthropic_response_tool_use,
+    test_anthropic_response_reasoning_field,
+    test_anthropic_stream_basic_text,
+    test_anthropic_stream_thinking_then_text,
+    test_anthropic_stream_tool_call,
+    test_anthropic_stream_done_signal,
+    # Tripwires + capture (previously unreachable in script mode: bughunt A6)
+    test_classify_done,
+    test_classify_error_frame,
+    test_classify_normal_delta_not_flagged,
+    test_capture_tools_request_writes_per_suite_file,
+    test_capture_strips_image_payloads,
+    # 2026-08-15 bughunt regressions
+    test_classify_crlf_and_nospace,
+    test_classify_reordered_error_object,
+    test_stream_literal_think_after_content,
+    test_stream_finish_flushes_partial_tag,
+    test_swap_has_no_filesystem_existence_check,
+    test_strip_leaves_long_text_alone,
+    test_anthropic_image_blocks_translated,
+]
+
+
+if __name__ == "__main__":
+    failed = 0
+    for t in TESTS:
+        try:
+            _run_with_fixtures(t)
+        except AssertionError as e:
+            print(f"FAIL {t.__name__}: {e}")
+            failed += 1
+        except Exception as e:
+            print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
+            failed += 1
+    print(f"\n{len(TESTS) - failed}/{len(TESTS)} passed")
+    sys.exit(1 if failed else 0)

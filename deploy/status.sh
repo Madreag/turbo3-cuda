@@ -1,11 +1,22 @@
 #!/bin/bash
+# Stack status. Truth = ports + /health probes, not pidfiles — a stale or
+# missing pidfile with live processes previously read as "Not running" and
+# invited a double-start (2026-08-15 bughunt #11).
+CONF=/home/erol/.config/llama-tcq
 for name in server proxy; do
-    PID_FILE=/home/erol/.config/llama-tcq/${name}.pid
-    if [ -f "$PID_FILE" ] && kill -0 "$(cat $PID_FILE)" 2>/dev/null; then
-        echo "${name}: Running — PID $(cat $PID_FILE)"
+    PID_FILE=$CONF/$name.pid
+    if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+        echo "$name: pidfile PID $(cat "$PID_FILE") alive"
     else
-        echo "${name}: Not running"
+        echo "$name: no live pidfile"
     fi
 done
-echo ""
-nvidia-smi --query-gpu=memory.used,memory.free --format=csv,noheader 2>/dev/null
+echo "--- ports"
+ss -tlnp 2>/dev/null | grep -E ':(8130|8131)\s' || echo "none bound"
+echo "--- health"
+for p in 8131 8130; do
+    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:$p/health" 2>/dev/null)
+    echo ":$p → ${code:-no response}"
+done
+echo "--- gpu"
+nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader 2>/dev/null

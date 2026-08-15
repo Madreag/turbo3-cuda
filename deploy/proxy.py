@@ -24,6 +24,7 @@ Usage:
 
 import argparse
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
@@ -32,7 +33,8 @@ import sys
 import time
 from typing import Optional
 
-from aiohttp import web, ClientSession, ClientTimeout, ServerDisconnectedError
+from aiohttp import (web, ClientSession, ClientTimeout, ServerDisconnectedError,
+                     ClientConnectionError, ClientPayloadError, ServerTimeoutError)
 
 
 CONFIG_DIR = "/home/erol/.config/llama-tcq"
@@ -98,15 +100,26 @@ def persist_artifacts(tool_acc: dict, req_id: str) -> None:
         pass
 
 
+_trace_fh = None
+
+
 def trace_write(line: str) -> None:
-    """Per-chunk stream trace for stall diagnosis. Best-effort, size-capped."""
+    """Per-chunk stream trace for stall diagnosis. Best-effort, size-capped.
+    Holds one open handle — the previous open/stat/close per SSE chunk was
+    ~100k synchronous filesystem round-trips a day on the event loop."""
+    global _trace_fh
     try:
-        if os.path.exists(STREAM_TRACE_PATH) and os.path.getsize(STREAM_TRACE_PATH) > 50_000_000:
+        if _trace_fh is None:
+            _trace_fh = open(STREAM_TRACE_PATH, "a")
+        if _trace_fh.tell() > 50_000_000:
+            _trace_fh.close()
+            _trace_fh = None
             os.replace(STREAM_TRACE_PATH, STREAM_TRACE_PATH + ".1")
-        with open(STREAM_TRACE_PATH, "a") as f:
-            f.write(line + "\n")
-    except OSError:
-        pass
+            _trace_fh = open(STREAM_TRACE_PATH, "a")
+        _trace_fh.write(line + "\n")
+        _trace_fh.flush()
+    except (OSError, ValueError):
+        _trace_fh = None
 
 
 CAPTURES_DIR = os.path.join(CONFIG_DIR, "captures")
@@ -116,13 +129,27 @@ def classify_terminal_line(line: str) -> Optional[str]:
     """SSE line classifier for stream-termination tripwires.
     'done' = the OpenAI stream terminator. 'error' = an in-stream error frame:
     llama-server serializes exceptions into the stream as data: {"error": ...}
-    and then closes WITHOUT [DONE] — the corpse signature of 2026-08-08. Only
-    server-framed line heads can match; model text lives escaped inside
-    "choices" frames and can never start a data line."""
-    if line == "data: [DONE]":
+    and then closes WITHOUT [DONE] — the corpse signature of 2026-08-08.
+    Tolerates CRLF framing, `data:` without a space, and key-reordered error
+    objects (a real error frame must have "error" at the JSON top level; model
+    text lives escaped inside "choices" frames and cannot produce one)."""
+    line = line.rstrip("\r")
+    if not line.startswith("data:"):
+        return None
+    data = line[5:].strip()
+    if data == "[DONE]":
         return "done"
-    if line.startswith('data: {"error"'):
+    if not data:
+        return None
+    if data.startswith('{"error"'):
         return "error"
+    if '"error"' in data:
+        try:
+            obj = json.loads(data)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(obj, dict) and "error" in obj:
+            return "error"
     return None
 
 
@@ -137,36 +164,57 @@ def capture_tools_request(body_obj: dict, user_id: str) -> None:
             json.dumps(body_obj.get("tools"), sort_keys=True).encode()).hexdigest()[:8]
         os.makedirs(CAPTURES_DIR, exist_ok=True)
         path = os.path.join(CAPTURES_DIR, f"tools_{user_id}_{tools_key}.json")
+        # Same suite captured within the last hour → skip: bodies differ every
+        # turn but replay value doesn't, and this was a synchronous multi-100KB
+        # write on the event loop per request.
+        try:
+            if time.time() - os.path.getmtime(path) < 3600:
+                return
+        except OSError:
+            pass
         with open(path, "w") as f:
             json.dump({"captured_at": time.time(),
                        "body": strip_image_payloads(body_obj)}, f)
+        old = sorted(os.listdir(CAPTURES_DIR),
+                     key=lambda n: os.path.getmtime(os.path.join(CAPTURES_DIR, n)))
+        for n in old[:-40]:
+            os.remove(os.path.join(CAPTURES_DIR, n))
     except Exception as e:
         print(f"[capture] skipped: {e}", flush=True)
 
 
+_B64_BLOB_RE = re.compile(r"^[A-Za-z0-9+/=\r\n]{4096,}$")
+
+
 def strip_image_payloads(body_obj: dict) -> dict:
-    """Deep-copy the request with base64 image payloads replaced by short
-    placeholders — captures are for tool-suite/prompt replay, and a single
-    screenshot is megabytes of base64 that adds nothing to regression value."""
-    import copy
-    out = copy.deepcopy(body_obj)
-    for msg in out.get("messages") or []:
-        c = msg.get("content")
-        if not isinstance(c, list):
-            continue
-        for part in c:
-            if not isinstance(part, dict):
-                continue
-            iu = part.get("image_url")
-            if isinstance(iu, dict) and isinstance(iu.get("url"), str) \
-                    and iu["url"].startswith("data:"):
-                iu["url"] = f"data:<stripped {len(iu['url'])} chars>"
-    return out
+    """Copy of the request with binary blobs replaced by short placeholders —
+    captures are for tool-suite/prompt replay, and base64 adds nothing. Walks
+    any nesting (OpenAI image_url, Anthropic source.data, audio/file parts)
+    and only touches strings that are data: URIs or pure-base64 ≥4 KiB, so
+    real prompt text and code are never stripped. Builds a new structure; the
+    forwarded body is never mutated (and no deepcopy doubling peak memory)."""
+    def walk(node):
+        if isinstance(node, dict):
+            return {k: walk(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [walk(v) for v in node]
+        if isinstance(node, str) and len(node) >= 4096 and (
+                node.startswith("data:") or _B64_BLOB_RE.match(node)):
+            return f"<stripped {len(node)} chars>"
+        return node
+    return walk(body_obj)
 
 
 KEYS_PATH = os.path.join(CONFIG_DIR, "keys.json")
 SERVER_KEY_PATH = os.path.join(CONFIG_DIR, "api.key")
 SLOT_ID = 0  # --parallel 1, single slot
+
+# Hop-by-hop headers (RFC 9110 §7.6.1) + auth/framing headers the proxy owns.
+# Forwarding Connection/Transfer-Encoding upstream alongside aiohttp's own
+# framing produced conflicting semantics (bughunt #20).
+_HOP_HEADERS = {"host", "content-length", "authorization", "connection",
+                "keep-alive", "proxy-authenticate", "proxy-authorization",
+                "te", "trailer", "transfer-encoding", "upgrade", "expect"}
 
 THINK_OPEN = "<think>"
 THINK_CLOSE = "</think>"
@@ -225,6 +273,12 @@ class StreamState:
     def __init__(self):
         self.mode = "content"
         self.buffer = ""
+        # True once real (non-whitespace) answer content has been emitted.
+        # After that point <think>/<thinking> is treated as literal text: the
+        # template puts thinking FIRST, so a later tag is model output (e.g.
+        # an artifact documenting think tags), not a reasoning block —
+        # previously it silently rerouted the rest of the answer (bughunt #10).
+        self.content_started = False
         # Accumulated totals for the whole response — used by the
         # preserve_thinking reasoning-memory (Qwen3.6 is post-trained to keep
         # prior-turn thinking in context; clients don't echo it back, so the
@@ -238,11 +292,18 @@ class StreamState:
         # Combine with buffer, THEN normalize <thinking>/</thinking> → <think>/</think>.
         # Normalizing post-concat catches tags split across SSE chunks
         # (e.g. chunk A ends with "<think" and chunk B starts with "ing>").
+        # Only normalize while still in the leading segment — once content has
+        # started, a literal <thinking> in the answer must survive untouched.
         text = self.buffer + delta_content
-        text = normalize_think_tags(text)
+        if not self.content_started:
+            text = normalize_think_tags(text)
         self.buffer = ""
         while text:
             if self.mode == "content":
+                if self.content_started:
+                    new_content.append(text)
+                    text = ""
+                    continue
                 idx = text.find(THINK_OPEN)
                 if idx == -1:
                     tail_check = min(len(text), len(THINK_OPEN) - 1)
@@ -255,6 +316,18 @@ class StreamState:
                     else:
                         new_content.append(text)
                         text = ""
+                    if "".join(new_content).strip():
+                        self.content_started = True
+                        # A held tag-prefix after real content is literal text.
+                        if self.buffer:
+                            new_content.append(self.buffer)
+                            self.buffer = ""
+                elif text[:idx].strip():
+                    # Opener found but real content precedes it in this same
+                    # chunk → the tag is literal text, not a thinking block.
+                    self.content_started = True
+                    new_content.append(text)
+                    text = ""
                 else:
                     new_content.append(text[:idx])
                     text = text[idx + len(THINK_OPEN):]
@@ -281,6 +354,21 @@ class StreamState:
         self.full_content += out_c
         self.full_reasoning += out_r
         return out_c, out_r
+
+    def finish(self) -> str:
+        """Flush whatever the tag-matcher still buffers at stream end — a
+        trailing partial tag like '<thi' was previously dropped silently.
+        Returns residue that belongs in CONTENT (thinking residue only lands
+        in the accumulated totals)."""
+        tail = self.buffer
+        self.buffer = ""
+        if not tail:
+            return ""
+        if self.mode == "content":
+            self.full_content += tail
+            return tail
+        self.full_reasoning += tail
+        return ""
 
 
 def transform_sse_line(line: str, state: StreamState) -> list[str]:
@@ -408,11 +496,26 @@ def anthropic_request_to_openai(body: dict) -> dict:
         text_parts: list = []
         tool_calls: list = []
         tool_results: list = []
+        image_parts: list = []
 
         for block in content:
+            if not isinstance(block, dict):
+                continue
             btype = block.get("type")
             if btype == "text":
                 text_parts.append(block.get("text", ""))
+            elif btype == "image" and role == "user":
+                # Vision is live upstream (--mmproj): translate Anthropic image
+                # blocks to OpenAI image_url parts instead of dropping them
+                # (bughunt #14 — silent drop produced confidently blind answers).
+                src = block.get("source") or {}
+                if src.get("type") == "base64" and src.get("data"):
+                    media = src.get("media_type") or "image/png"
+                    image_parts.append({"type": "image_url", "image_url": {
+                        "url": f"data:{media};base64,{src['data']}"}})
+                elif src.get("type") == "url" and src.get("url"):
+                    image_parts.append({"type": "image_url",
+                                        "image_url": {"url": src["url"]}})
             elif btype == "tool_use" and role == "assistant":
                 tool_calls.append({
                     "id": block.get("id", ""),
@@ -447,7 +550,10 @@ def anthropic_request_to_openai(body: dict) -> dict:
         elif role == "user":
             # User message: any remaining text (tool_results already flushed).
             # Suppress empty user messages that had ONLY tool_result blocks.
-            if text:
+            if image_parts:
+                parts: list = ([{"type": "text", "text": text}] if text else [])
+                openai_msgs.append({"role": "user", "content": parts + image_parts})
+            elif text:
                 openai_msgs.append({"role": "user", "content": text})
 
     openai: dict = {
@@ -896,22 +1002,38 @@ async def slot_erase(session: ClientSession, upstream: str, server_key: str) -> 
 
 
 async def maybe_swap_slot(app, session, upstream, server_key, requested_user):
+    # If a previous swap was cancelled mid-flight (client disconnect), its
+    # shielded task is still running — wait for it before deciding anything.
+    prev = app.get("_swap_task")
+    if prev is not None and not prev.done():
+        await asyncio.shield(prev)
     current = app["current_owner"]
     if current == requested_user:
         return
     print(f"[slot] SWAP {current or '(empty)'} → {requested_user}", flush=True)
     start = time.time()
-    if current is not None:
-        await slot_save(session, upstream, server_key, current)
-    slots_dir = os.path.join(CONFIG_DIR, "slots")
-    target_file = os.path.join(slots_dir, f"{requested_user}.bin")
-    if os.path.exists(target_file):
+
+    async def _do_swap():
+        # Owner is unknown for the duration of the swap: a crash/cancel between
+        # save and restore must not leave the proxy believing the OLD owner's
+        # bytes are current (bughunt #11 — desync persisted the wrong user's KV).
+        app["current_owner"] = None
+        if current is not None:
+            await slot_save(session, upstream, server_key, current)
+        # Always ATTEMPT restore — no filesystem existence check. The proxy
+        # previously peeked a hardcoded `slots/` dir while the server saved to
+        # `slots-long/` (bughunt A1: restore silently dead). The server answers
+        # 400 for a missing/incompatible file and we fall back to erase.
         ok = await slot_restore(session, upstream, server_key, requested_user)
         if not ok:
             await slot_erase(session, upstream, server_key)
-    else:
-        await slot_erase(session, upstream, server_key)
-    app["current_owner"] = requested_user
+        app["current_owner"] = requested_user
+
+    task = asyncio.ensure_future(_do_swap())
+    app["_swap_task"] = task
+    # shield: if THIS request is cancelled, the swap still runs to a consistent
+    # end state (owner assigned only after the physical slot matches).
+    await asyncio.shield(task)
     print(f"[slot] swap complete in {(time.time()-start)*1000:.0f}ms", flush=True)
 
 
@@ -937,6 +1059,14 @@ async def handle_chat_completions(request: web.Request) -> web.StreamResponse:
     is_streaming = False
     try:
         body_obj = json.loads(body_bytes) if body_bytes else {}
+        if body_bytes and not isinstance(body_obj, dict):
+            # A JSON array/scalar body crashed the handler with AttributeError
+            # further down (bughunt #15) — reject it properly.
+            return web.json_response(
+                {"error": {"message": "request body must be a JSON object",
+                           "type": "invalid_request_error"}},
+                status=400,
+            )
         if isinstance(body_obj, dict) and body_obj.get("tools"):
             capture_tools_request(body_obj, user_id)
         is_streaming = bool(body_obj.get("stream"))
@@ -959,7 +1089,7 @@ async def handle_chat_completions(request: web.Request) -> web.StreamResponse:
 
         # Rewrite auth to server's internal key
         headers = {k: v for k, v in request.headers.items()
-                   if k.lower() not in ("host", "content-length", "authorization")}
+                   if k.lower() not in _HOP_HEADERS}
         headers["Authorization"] = f"Bearer {server_key}"
 
         url = upstream + request.rel_url.path
@@ -968,6 +1098,7 @@ async def handle_chat_completions(request: web.Request) -> web.StreamResponse:
 
         timeout = ClientTimeout(total=None, sock_read=600)
 
+        response_prepared = False
         for _attempt in (0, 1):
             try:
                 async with session.request(
@@ -997,6 +1128,7 @@ async def handle_chat_completions(request: web.Request) -> web.StreamResponse:
                     response = web.StreamResponse(status=upstream_resp.status, headers=resp_headers)
                     response.enable_chunked_encoding()
                     await response.prepare(request)
+                    response_prepared = True
 
                     state = StreamState()
                     line_buffer = ""
@@ -1011,6 +1143,8 @@ async def handle_chat_completions(request: web.Request) -> web.StreamResponse:
                     # arriving chunk tears down the aiohttp connection (clean
                     # EOF, no [DONE]). asyncio.wait() leaves the read pending.
                     read_task = None
+                    pump_error = None
+                    pump_ok = False
                     try:
                         while True:
                             if read_task is None:
@@ -1027,6 +1161,7 @@ async def handle_chat_completions(request: web.Request) -> web.StreamResponse:
                             chunk = read_task.result()
                             read_task = None
                             if not chunk:
+                                pump_ok = True
                                 break
                             flags = "".join(
                                 t for t, m in ((("T"), b'"tool_calls"'),
@@ -1064,12 +1199,23 @@ async def handle_chat_completions(request: web.Request) -> web.StreamResponse:
                                     out_chunk.append(out_line + "\n")
                             if out_chunk:
                                 await response.write("".join(out_chunk).encode("utf-8"))
+                    except (ClientPayloadError, ClientConnectionError,
+                            ServerTimeoutError, asyncio.TimeoutError) as e:
+                        # Upstream died mid-stream. Don't let it surface as a raw
+                        # transport drop — the client gets a real error frame +
+                        # [DONE] below (bughunt A3 / #9).
+                        pump_error = f"upstream died mid-stream: {type(e).__name__}"
                     finally:
                         if read_task is not None:
                             read_task.cancel()
-                        # Persist whatever tool content we saw even on aborted
-                        # streams — incomplete artifacts ARE the failure evidence.
-                        persist_artifacts(tool_acc, req_id + "_partial")
+                            with contextlib.suppress(BaseException):
+                                await read_task
+                        if not pump_ok:
+                            # Persist tool content from aborted streams only —
+                            # incomplete artifacts ARE the failure evidence.
+                            # (Guarded: successful streams used to persist twice,
+                            # halving the artifact retention window — bughunt #6.)
+                            persist_artifacts(tool_acc, req_id + "_partial")
                     if line_buffer.strip():
                         term = classify_terminal_line(line_buffer.strip())
                         if term == "done":
@@ -1079,25 +1225,46 @@ async def handle_chat_completions(request: web.Request) -> web.StreamResponse:
                         for out_line in transform_sse_line(line_buffer, state):
                             await response.write((out_line + "\n").encode("utf-8"))
 
+                    # Flush residue the tag-matcher still buffers (a trailing
+                    # partial tag like "<thi" was previously dropped silently).
+                    tail_content = state.finish()
+                    if tail_content:
+                        await response.write(("data: " + json.dumps(
+                            {"choices": [{"index": 0,
+                                          "delta": {"content": tail_content}}]}
+                        ) + "\n\n").encode("utf-8"))
+
                     remember_reasoning(reasoning_mem, state.full_content, state.full_reasoning)
                     persist_artifacts(tool_acc, req_id)
-                    # Tripwires: a healthy stream ends [DONE], never an error frame.
-                    # These fire loudly so a future corpse costs minutes, not days.
+                    # Tripwires + CLIENT-FACING repair: a healthy stream ends with
+                    # [DONE]. Detection alone is not enough — a truncated stream
+                    # must not look like a finished answer to the client
+                    # (bughunt A3; the 2026-08-08 corpse rode exactly this gap).
                     if saw_error_frame:
                         trace_write(f"{time.time():.3f} {req_id} ALERT in-stream-error-frame")
                         print(f"[ALERT] {req_id} relayed an in-stream error frame "
                               f"(upstream exception serialized into the stream)", flush=True)
-                    if not saw_done:
+                    if pump_error or not saw_done:
                         trace_write(f"{time.time():.3f} {req_id} ALERT end-without-DONE")
-                        print(f"[ALERT] {req_id} stream ended without [DONE]", flush=True)
+                        print(f"[ALERT] {req_id} truncated stream "
+                              f"({pump_error or 'ended without [DONE]'}) — "
+                              f"error frame delivered to client", flush=True)
+                        if not saw_error_frame:
+                            await response.write(("data: " + json.dumps(
+                                {"error": {"message": pump_error or
+                                           "upstream stream ended unexpectedly (truncated response)",
+                                           "type": "upstream_truncated", "code": 502}}
+                            ) + "\n\n").encode("utf-8"))
+                        await response.write(b"data: [DONE]\n\n")
                     trace_write(f"{time.time():.3f} {req_id} END")
                     await response.write_eof()
                     return response
             except ServerDisconnectedError:
                 # llama-server closed the pooled keepalive connection exactly as
-                # we reused it. Nothing has been sent to the client yet, so one
-                # retry on a fresh connection is safe.
-                if _attempt:
+                # we reused it. Retry once on a fresh connection — but ONLY while
+                # the client response has not started: a second prepare() would
+                # write a second HTTP status line into the SSE body (bughunt #8).
+                if _attempt or response_prepared:
                     raise
                 trace_write(f"{time.time():.3f} retry after ServerDisconnectedError")
                 await asyncio.sleep(0.2)
@@ -1132,6 +1299,12 @@ async def handle_anthropic_messages(request: web.Request) -> web.StreamResponse:
         return web.json_response(
             {"type": "error", "error": {"type": "invalid_request_error",
                                          "message": "Invalid JSON"}},
+            status=400,
+        )
+    if not isinstance(anthropic_body, dict):
+        return web.json_response(
+            {"type": "error", "error": {"type": "invalid_request_error",
+                                         "message": "request body must be a JSON object"}},
             status=400,
         )
 
@@ -1203,20 +1376,62 @@ async def handle_anthropic_messages(request: web.Request) -> web.StreamResponse:
             )
 
             line_buffer = ""
-            async for chunk in upstream_resp.content.iter_any():
-                line_buffer += chunk.decode("utf-8", errors="replace")
-                parts = line_buffer.split("\n")
-                line_buffer = parts.pop()
-                out_frames: list = []
-                for line in parts:
-                    line = line.rstrip("\r")
-                    out_frames.extend(builder.feed(line))
-                if out_frames:
-                    await response.write("".join(out_frames).encode("utf-8"))
+            pump_error = None
+            read_task = None
+            try:
+                while True:
+                    if read_task is None:
+                        read_task = asyncio.ensure_future(
+                            upstream_resp.content.readany())
+                    done, _ = await asyncio.wait({read_task}, timeout=10.0)
+                    if not done:
+                        # Protocol ping: keeps client watchdogs fed through long
+                        # prefills — parity with the OpenAI path's ": hb"
+                        # comment heartbeat (bughunt #4: this path had none, so
+                        # Claude Code saw minutes of dead silence).
+                        await response.write(
+                            b'event: ping\ndata: {"type": "ping"}\n\n')
+                        continue
+                    chunk = read_task.result()
+                    read_task = None
+                    if not chunk:
+                        break
+                    line_buffer += chunk.decode("utf-8", errors="replace")
+                    parts = line_buffer.split("\n")
+                    line_buffer = parts.pop()
+                    out_frames: list = []
+                    for line in parts:
+                        out_frames.extend(builder.feed(line.rstrip("\r")))
+                    if out_frames:
+                        await response.write("".join(out_frames).encode("utf-8"))
+            except (ClientPayloadError, ClientConnectionError,
+                    ServerTimeoutError, asyncio.TimeoutError) as e:
+                pump_error = f"upstream died mid-stream: {type(e).__name__}"
+            finally:
+                if read_task is not None:
+                    read_task.cancel()
+                    with contextlib.suppress(BaseException):
+                        await read_task
             if line_buffer.strip():
                 out_frames = builder.feed(line_buffer.rstrip("\r"))
                 if out_frames:
                     await response.write("".join(out_frames).encode("utf-8"))
+
+            # A stream that never delivered [DONE] is a corpse. Previously this
+            # path synthesized a normal end_turn + message_stop — the exact
+            # 2026-08-08 signature presented as success (bughunt A3). Tell the
+            # client before closing the message.
+            if pump_error or not builder.closed:
+                trace_write(f"{time.time():.3f} anthropic ALERT end-without-DONE")
+                print(f"[ALERT] anthropic stream truncated "
+                      f"({pump_error or 'ended without [DONE]'}) — "
+                      f"error event delivered to client", flush=True)
+                await response.write(builder._event("error", {
+                    "type": "error",
+                    "error": {"type": "api_error",
+                              "message": pump_error or
+                              "upstream stream ended unexpectedly (truncated response)"},
+                }).encode("utf-8"))
 
             # Close the message
             closing = builder.close()
@@ -1238,6 +1453,13 @@ async def handle_passthrough(request: web.Request) -> web.StreamResponse:
     path = request.rel_url.path
     # /health and /metrics are public on llama-server; allow without auth rewrite
     public_paths = {"/health", "/metrics"}
+    # Everything else must be authenticated AND allowlisted. The proxy owns
+    # /slots (save/restore/erase is slot-pinning state — a client reaching it
+    # desyncs ownership and can overwrite the other user's cache: bughunt A4),
+    # and raw completion endpoints (/completion, /v1/completions, /infill)
+    # bypass the owner lock and slot pinning entirely. None are forwardable.
+    allowed_paths = {"/v1/models", "/models", "/props", "/tokenize",
+                     "/detokenize", "/apply-template"}
 
     if path not in public_paths:
         user_id = extract_user_id(request.headers.get("Authorization", ""), keys)
@@ -1246,9 +1468,16 @@ async def handle_passthrough(request: web.Request) -> web.StreamResponse:
                 {"error": {"message": "Invalid API key", "type": "invalid_request_error"}},
                 status=401,
             )
+        if path not in allowed_paths:
+            return web.json_response(
+                {"error": {"message": f"endpoint {path} is not proxied "
+                           f"(chat: /v1/chat/completions or /v1/messages)",
+                           "type": "invalid_request_error"}},
+                status=403,
+            )
 
     headers = {k: v for k, v in request.headers.items()
-               if k.lower() not in ("host", "content-length", "authorization")}
+               if k.lower() not in _HOP_HEADERS}
     if path not in public_paths:
         headers["Authorization"] = f"Bearer {server_key}"
 
