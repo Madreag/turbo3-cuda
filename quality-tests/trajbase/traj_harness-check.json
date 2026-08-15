@@ -1,0 +1,63 @@
+{
+ "label": "harness-check",
+ "seed": 42,
+ "depths": [
+  16000
+ ],
+ "pass": 5,
+ "total": 6,
+ "results": [
+  {
+   "depth": 16000,
+   "test": "hops-2",
+   "pass": true,
+   "want": "Ludlow Spur",
+   "got": "Ludlow Spur"
+  },
+  {
+   "depth": 16000,
+   "test": "hops-3",
+   "pass": true,
+   "want": "819",
+   "got": "819"
+  },
+  {
+   "depth": 16000,
+   "test": "hops-4",
+   "pass": true,
+   "want": "65-N256",
+   "got": "65-N256"
+  },
+  {
+   "depth": 16000,
+   "test": "ledger",
+   "pass": false,
+   "score": "0/8",
+   "want": {
+    "R1": "-78",
+    "R2": "30",
+    "R3": "46",
+    "R4": "-5",
+    "R5": "27",
+    "R6": "-59",
+    "R7": "-45",
+    "R8": "-30"
+   },
+   "got": {}
+  },
+  {
+   "depth": 16000,
+   "test": "correction",
+   "pass": true,
+   "want": "4411",
+   "got": "4411"
+  },
+  {
+   "depth": 16000,
+   "test": "code-traj",
+   "pass": true,
+   "err": null
+  }
+ ],
+ "ts": "2026-08-15 16:38"
+}
