@@ -57,6 +57,18 @@ deploy batch. Slot files archived on config change. Rollback binaries kept.
 - Production: MMA binary + proxy v6.4 live. q8K option now LESS attractive
   (pure turbo4 beats old hybrid arm) — bit-allocation item deprioritized.
 
+## SOAK + ACCEPTANCE VERDICTS (2026-08-15 late)
+- B/C picks deployed (26651/26426/26771/24565). Soak on fixed binary CLEAN:
+  echoes 107-128 through burst AND 39K big-ctx episode (decode 84.7 @39K —
+  new depth best). In-session decay not reproduced post-fix; healthy shallow
+  band = 110-125. Echo singles have ±20% noise — never diagnose on n=1.
+- Acceptance: 67.5% @temp1, 72.9% @greedy (metrics-delta method). Regression
+  window = 2 commits; suspect 77918caf3 (metrics-during-decode, 400L queue
+  rework, in our pin) — could also be counter-accounting artifact. EXPERIMENT
+  PARKED behind GDN: revert-77918caf3 A/B (~+14% decode IF real regression
+  and IF 90% reference is real). 
+- 27106 bisect: CLOSED as parked-experiment above (not a blind bisect).
+
 ## (superseded pause block below, kept for history)
 ## ⏸ PAUSED 2026-08-15 — USER REBOOTING BOX (VRAM at ceiling 32162 MiB)
 
