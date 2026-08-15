@@ -20,6 +20,7 @@ Or use --auto mode which starts/stops servers automatically (requires build path
 """
 
 import argparse
+import os
 import json
 import math
 import sys
@@ -63,7 +64,9 @@ def get_logprobs(base_url: str, prompt: str, top_logprobs: int = 10) -> dict:
         "cache_prompt": False,
     }
     try:
-        resp = requests.post(url, json=payload, timeout=240)
+        _key = os.environ.get("TCQ_KEY", "")
+        _hdrs = {"Authorization": f"Bearer {_key}"} if _key else {}
+        resp = requests.post(url, json=payload, timeout=240, headers=_hdrs)
         resp.raise_for_status()
         data = resp.json()
         choice = data["choices"][0]

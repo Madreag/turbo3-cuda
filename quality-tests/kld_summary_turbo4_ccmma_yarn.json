@@ -1,0 +1,10 @@
+{
+  "type": "turbo4_ccmma_yarn",
+  "vs": "f16",
+  "kld_mean": 0.004727838101409264,
+  "top1_agreement_pct": 98.33333333333333,
+  "delta_p_rms": 0.040317109742957456,
+  "n_prompts": 60,
+  "n_skipped": 0,
+  "prompt_tokens": 2048
+}
