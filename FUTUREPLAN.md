@@ -9,6 +9,17 @@ renders; NIAH eff. 5/5 @130K+380K; acceptance 1/1, 0 tripwire alerts.
 Ordering: A+B share one box window (~5h). C depends on UPSTREAMSYNC.md.
 D and E are Hermes-side and need no server window.
 
+## Phase 0 — safety pre-flight (before ANY phase; no GPU; ~15 min)
+1. Push `hermes/server-foundation` to myfork (Madreag/turbo3-cuda) — two
+   weeks of fixes and these plans currently exist on one disk only.
+2. Version the production config: create repo `deploy/` with proxy.py,
+   test_proxy.py, start*.sh, watch.sh — KEYS EXCLUDED (api.key, keys.json
+   never enter the repo). Deployed copies in ~/.config/llama-tcq/ remain the
+   live ones; deploy/ is the versioned source of truth going forward.
+3. Note the newest real-traffic capture's date; battery replays must use the
+   newest capture, refreshed by one live Hermes turn if the tool set changed
+   since (also recorded in UPSTREAMSYNC Layer 4).
+
 ─────────────────────────────────────────────────────────────────────────────
 ## Phase A — turbo4 alpha KLD sweep on Qwen3.8            (~3-4h, one window)
 

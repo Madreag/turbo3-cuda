@@ -164,8 +164,10 @@ Layer 3 — Feature parity & config
 Layer 4 — The battery (the actual answer to the worry)
   On the synced binary, full sequence, production untouched:
   1. 42 proxy unit tests (env unchanged — sanity).
-  2. REAL-CAPTURE replay (tools_erol_8e811fec) — grammar compiles, tool
-     deltas stream, finish+[DONE]. (This exact test caught the grammar bomb.)
+  2. REAL-CAPTURE replay — use the NEWEST capture in captures/ (refresh with
+     one live Hermes turn if the tool set changed since it was taken) —
+     grammar compiles, tool deltas stream, finish+[DONE]. (This exact test
+     caught the grammar bomb.)
   3. Effort-ladder arm: xhigh ×3 + render gate — accept ≥ 2/3 clean
      (small-n guard band vs the 3/4 baseline).
   4. NIAH 130K + 380K — accept effective 5/5 both (known scorer
