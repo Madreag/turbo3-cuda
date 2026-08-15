@@ -186,19 +186,19 @@ Layer 4 — The battery (the actual answer to the worry)
   2026-08-14 cutover (backup binary → swap → acceptance run → docs).
 
 DEFINITION OF DONE (one screen, checked off in the sync branch's final commit)
-  □ CARRY-MANIFEST.md: every differing file has a written disposition
-  □ Type IDs renumbered; upstream enum tail re-verified at sync time
-  □ Buckets A dropped / B resolved (PR or carried) / C applied
-  □ Layer gates 1-3 green (build, roundtrip numerics, dual-model load, flags)
-  □ Layer 4 battery items 1-9 green on the synced binary
-  □ MTP spec-decode smoke done — DONE 2026-08-15: --spec-type draft-mtp,
+  ☑ CARRY-MANIFEST.md: every differing file has a written disposition
+  ☑ Type IDs renumbered; upstream enum tail re-verified at sync time
+  ☑ Buckets A dropped / B resolved (PR or carried) / C applied
+  ☑ Layer gates 1-3 green (build, roundtrip numerics, dual-model load, flags)
+  ☑ Layer 4 battery items 1-9 green on the synced binary
+  ☑ MTP spec-decode smoke done — DONE 2026-08-15: --spec-type draft-mtp,
     1.52x decode (78.8 vs 52.0 tok/s). Correctness criterion AMENDED by
     measurement: greedy byte-identity is unattainable for ANY GPU spec-decode
     (batched verification changes FP reduction order; near-ties flip); the
     correct test is divergence no worse than an f16-KV control. Measured:
     turbo4 1/3 exact == f16 control 1/3 exact → turbo kernels exonerated.
-  □ Production cutover done with acceptance run; rollback inventory intact
-  □ Handoff + memory + FUTUREPLAN updated; sync branch pushed to myfork
+  ☑ Production cutover done with acceptance run; rollback inventory intact
+  ☑ Handoff + memory + FUTUREPLAN updated; sync branch pushed to myfork
 
 Rollback at ANY layer: the sync lives in its own worktree + branch; production
 binaries and scripts are never touched until Layer 4 passes. Current rollback
