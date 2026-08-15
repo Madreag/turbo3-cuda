@@ -18,19 +18,28 @@ geometry but not necessarily V-norm distributions. Outcome is either written
 confirmation or a small free quality gain on every generated token.
 
 PROCEDURE
+0. DRY RUN FIRST (15 min): validate the 3.6-era kl_divergence.py pipeline
+   against 3.8 on 2 chunks — the vocab grew to 248,320, so confirm the
+   logprob-capture format and check the reference file's disk size scales
+   sanely before committing to 32 chunks. Fix-forward here, not mid-sweep.
 1. Corpus: wiki.test.raw, 32 chunks × 2048 tokens (same recipe as the 3.6-era
    kld_logprobs_*.json runs in quality-tests/).
 2. Reference pass: server at `-ctk f16 -ctv f16`, ctx 16384, vision off,
-   NO YaRN (short-context purity) → logprobs → kld_logprobs_38_f16.json.
-   REUSED BY PHASE B — run once.
+   NO YaRN (short-context purity, matching how the 3.6 alphas were tuned)
+   → logprobs → kld_logprobs_38_f16.json. REUSED BY PHASE B — run once.
 3. Sweep passes: same server config but turbo4/turbo4, one pass per alpha in
    {1.00, 1.05, 1.10 (current), 1.12, 1.15} — alphas set via env pair; keep
    the V-alpha pair moving together first; only split-tune if the best value
    disagrees with current by ≥0.05.
 4. Compute mean KLD per alpha vs reference (quality-tests/kl_divergence.py).
 5. Decision rule: adopt new alpha only if KLD improves ≥3% vs 1.10/1.12
-   (below that = noise; keep current). If adopted → edit start-long-38.sh →
-   one battery preverify + render gate before declaring done.
+   (below that = noise; keep current).
+5b. CONFIRMATION PASS: one extra KLD pass at the winning alpha with the
+   PRODUCTION config (YaRN 1.5625, ctx 409600 server settings) — the sweep
+   runs YaRN-off for method consistency with 3.6, so confirm the winner holds
+   under production RoPE conditions before adopting. If adopted → edit
+   start-long-38.sh → one battery preverify + render gate before declaring
+   done.
 6. OPTIONAL (+1h, novel data): vision-token probe — 5 image prompts, compare
    answer distributions f16-KV vs turbo4-KV. No one has this data anywhere.
 
@@ -53,9 +62,12 @@ PROCEDURE
 4. One artifact preverify + render gate on q8K config.
 5. Production trade decision (user call, data in hand):
    - q8_0 K costs +4.25 KiB/token → +1.7GB at 409600. Does NOT fit with
-     vision at current ctx.
-   - Fit option: ctx 340000 + vision (saves 1.16GB KV) → net headroom ≈
-     0.9GB — thin. Or ctx 350000 + vision-off. Or stay full-turbo4.
+     GPU-resident vision at current ctx.
+   - Fit options, best first: (a) ctx 340000 + vision moved to CPU via
+     `--no-mmproj-offload` (reclaims ~0.9GB; headroom ≈ 1.8GB — healthy;
+     image encode gets a few seconds slower); (b) ctx 340000 + GPU vision →
+     headroom ≈ 0.9GB — BELOW our volatility comfort line, not recommended;
+     (c) ctx 350000 + vision-off; (d) stay full-turbo4 at 409600.
    - Adopt only if ΔKLD is decisively better AND the artifact/NIAH spots
      show no regression; otherwise document and close.
 
@@ -71,8 +83,11 @@ PLAN: do NOT hand-port. Absorb via the upstream sync (UPSTREAMSYNC.md), then:
 1. Enable spec-decode MTP flags on a test profile (upstream flag names to be
    confirmed at sync time; community guidance: draft-n 2, acceptance drops
    hard at 4+).
-2. Verify: tok/s ladder (0K/30K/100K ctx), output-identity spot-check (MTP
-   must not change sampled distribution), one battery preverify + render.
+2. Verify: tok/s ladder (0K/30K/100K ctx); correctness via GREEDY identity —
+   temp 0 + fixed seed on N=5 prompts, MTP-on output must match MTP-off
+   byte-for-byte (spec decode is distribution-preserving; at temp 1.0 outputs
+   differ by sampling, so greedy is the only honest identity test); then one
+   battery preverify + render.
 3. VRAM: +~1GB working memory reported by community — headroom math BEFORE
    enabling with vision resident; may require ctx 380K or vision-off choice.
 
@@ -93,7 +108,9 @@ SKETCH (needs Hermes-side skill work, no server changes):
    target 75% → 90%+.
 4. Open questions for the user: where the render step runs (Hermes host has
    Chrome? or reuse our render_arm plumbing?); loop budget (1 repair max?);
-   the ~26K ctx cost per screenshot round at high detail.
+   per-screenshot context cost — roughly 1-3K tokens per image at typical
+   patching (measure exactly from usage stats on the first real run), plus
+   the repair turn's own thinking budget.
 
 ─────────────────────────────────────────────────────────────────────────────
 ## Phase E — reasoning_effort routing                      (Hermes-side, free)

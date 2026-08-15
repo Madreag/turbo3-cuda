@@ -108,11 +108,15 @@ BUCKET C — OURS FOREVER (the product) → **re-apply deliberately, layered**:
   ggml type-traits tables.
 - KV-cache type wiring in llama.cpp core (-ctk/-ctv acceptance of turbo
   names, llama-kv-cache glue).
-- Alpha env-var hooks (TURBO_NORM_ALPHA_V / TURBO4_NORM_ALPHA_V) wherever
-  the dequant reads them.
-- Server-side bits that are ours and not upstreamable: (audit at execution —
-  likely: nothing beyond the parse-degrade candidate; timeout tweak likely
-  now a flag).
+- Alpha env-var hooks (TURBO_NORM_ALPHA_V / TURBO4_NORM_ALPHA_V) — these
+  live IN the dequant kernels, so they ride Layer 1 with the kernel port,
+  not Layer 2.
+- Ours-only server files (carry verbatim, no conflict possible):
+  tools/server/server-cors-proxy.h, tools/server/webui/.../cors-proxy.ts,
+  tools/server/tests/unit/test_proxy.py.
+- Other server-side bits that are ours and not upstreamable: (audit at
+  execution — likely: nothing beyond the parse-degrade candidate; timeout
+  tweak likely now a flag).
 - NOT in the repo (immune to the sync, listed so nobody worries): proxy.py
   v6.2 + its 42 tests, start scripts, keys, harnesses in quality-tests/*
   (repo-tracked but ours-only paths — reapply trivially), HERMES docs.
@@ -146,8 +150,8 @@ Layer 1 — Types & kernels (the product)
     against the OLD binary's output on identical input (scripted, exact).
 
 Layer 2 — Model/server glue
-  - -ctk/-ctv turbo name acceptance, alpha env hooks, any Bucket B/C server
-    patches that survived the §3 audit.
+  - -ctk/-ctv turbo name acceptance and any Bucket B/C server patches that
+    survived the §3 audit (alpha hooks already landed with Layer 1 kernels).
   - Gate: server starts, loads BOTH models (3.6 GGUF and 3.8 GGUF — 3.8 needs
     no port anymore, upstream has it), text smoke each.
 
@@ -168,10 +172,27 @@ Layer 4 — The battery (the actual answer to the worry)
      false-positive on CTRL documented).
   5. Vision smoke (own-artifact screenshot read-back).
   6. 10-turn soak through proxy — 0 tripwire alerts.
-  7. 3.6 rollback-pair check: old binary + 3.6 still boots (untouched files —
+  7. Non-stream degrade check: one non-streaming request with think+fenced
+     output — must return 200 with content, never a 500 (this behavior is
+     ours via the parse-degrade patch OR upstream's equivalent; whichever
+     survived §3, the BEHAVIOR is the acceptance criterion).
+  8. Effort-kwarg check: /apply-template renders reasoning_effort
+     xhigh/medium/low correctly per-request (Phase E dependency).
+  9. 3.6 rollback-pair check: old binary + 3.6 still boots (untouched files —
      this is a 2-minute paranoia check, not a build).
   Gate: ALL green → stage binary, cut over in an idle window exactly like the
   2026-08-14 cutover (backup binary → swap → acceptance run → docs).
+
+DEFINITION OF DONE (one screen, checked off in the sync branch's final commit)
+  □ CARRY-MANIFEST.md: every differing file has a written disposition
+  □ Type IDs renumbered; upstream enum tail re-verified at sync time
+  □ Buckets A dropped / B resolved (PR or carried) / C applied
+  □ Layer gates 1-3 green (build, roundtrip numerics, dual-model load, flags)
+  □ Layer 4 battery items 1-9 green on the synced binary
+  □ MTP spec-decode smoke done (flags confirmed, greedy-identity per
+    FUTUREPLAN C)
+  □ Production cutover done with acceptance run; rollback inventory intact
+  □ Handoff + memory + FUTUREPLAN updated; sync branch pushed to myfork
 
 Rollback at ANY layer: the sync lives in its own worktree + branch; production
 binaries and scripts are never touched until Layer 4 passes. Current rollback
