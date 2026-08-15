@@ -48,8 +48,8 @@ for base in server proxy; do
     ls -t "$CONF/$base".log.* 2>/dev/null | tail -n +6 | xargs -r rm -f
 done
 
-CTX=294912
-SCALE=1.125          # = CTX / 262144 (native)
+CTX=327680
+SCALE=1.25          # = CTX / 262144 (native)
 
 export TURBO_NORM_ALPHA_V=1.00
 export TURBO4_NORM_ALPHA_V=1.00
@@ -69,6 +69,7 @@ mkdir -p "$CONF/slots-long"
 nohup ./build-g1/bin/llama-server \
   -m /home/erol/ai/turboquant/models/qwen38/Qwen3.8-27B-Q6_K.gguf \
   --mmproj /home/erol/ai/turboquant/models/qwen38/mmproj-F16.gguf \
+  --no-mmproj-offload \
   --spec-type draft-mtp --spec-draft-n-max 2 \
   -ctkd turbo4 -ctvd turbo4 \
   -ctk turbo4 -ctv turbo4 \
