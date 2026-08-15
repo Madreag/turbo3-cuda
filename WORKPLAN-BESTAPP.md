@@ -50,11 +50,15 @@ RESUME EXACTLY HERE AFTER REBOOT:
    — this launches the NEW MMA binary (staged in build-g1/bin, commit
    92df9fb24) + proxy v6.4. MMA gate is DEFAULT ON.
 2. OPEN QUESTION AT PAUSE: post-MMA-deploy smoke was content-correct but
-   **17.5 tok/s at SHALLOW ctx** (expected ~84-97). Candidate causes:
-   (a) VRAM-ceiling pressure/dxg thrash (user's theory — reboot tests this);
-   (b) MMA-turbo kernel slow on SM120 (their tracker: turbo-K VGPR spill at
-   D=256, issues #294/#295). Depth test (40K) with MMA-on was IN FLIGHT at
-   pause — result unknown, rerun it.
+   **17.5 tok/s at SHALLOW ctx** (expected ~84-97). Depth test COMPLETED
+   just before reboot: decode 14.3 tok/s @38K AND **prefill 169 tok/s
+   (vs 1156)** — prefill does NOT use the MMA-decode gate, so the uniform
+   ~4-8x collapse across prefill+decode+shallow+deep points at
+   **VRAM-ceiling/dxg thrash (user's theory), not the kernel**. VRAM was
+   32162/32.6GB. Reboot should clear it; if post-reboot numbers are healthy
+   the kernel is exonerated — still run the kill-switch A/B for a clean
+   MMA-vs-VEC comparison at depth before declaring the port a win.
+   Secondary suspect if slowness persists: SM120 VGPR spill (#294/#295).
 3. POST-REBOOT SEQUENCE: fresh smoke (shallow tok/s?) → depth_decode_test
    40000 → if still slow: restart with GGML_TURBO_MMA_FUSED=0 in env →
    re-smoke (expect VEC-speed ~84-97 shallow / 41.4 deep) → decide:
