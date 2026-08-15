@@ -3164,8 +3164,17 @@ size_t llama_context::state_seq_load_file(llama_seq_id seq_id, const char * file
             LLAMA_LOG_ERROR("%s: failed to restore sequence state\n", __func__);
             return 0;
         }
-        GGML_ASSERT(nread <= state_size);
-        GGML_ASSERT(nread + sizeof(uint32_t) * 3 + sizeof(llama_token) * *n_token_count_out == file.tell());
+        // A state file from a different context configuration (changed KV
+        // types, spec-decode contexts, ctx size, ...) must fail the RESTORE,
+        // not abort the server — a stale slot file is client data, and
+        // GGML_ASSERT here let one crash production (observed 2026-08-15).
+        if (nread > state_size ||
+            nread + sizeof(uint32_t) * 3 + sizeof(llama_token) * *n_token_count_out != file.tell()) {
+            LLAMA_LOG_ERROR("%s: sequence state size mismatch (nread=%zu, state_size=%zu) — "
+                            "stale or incompatible state file, refusing restore\n",
+                            __func__, nread, state_size);
+            return 0;
+        }
     }
 
     return file.tell();
