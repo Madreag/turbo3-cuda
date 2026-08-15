@@ -2073,6 +2073,7 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
             special_pad_id = 3;  // <|plamo:pad|>
             special_mask_id = LLAMA_TOKEN_NULL;
         } else if (tokenizer_model == "gemma4") {
+<<<<<<< ours
             type = LLAMA_VOCAB_TYPE_BPE;
 
             // read bpe merges and populate bpe ranks
@@ -2098,6 +2099,9 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
                     bpe_ranks.emplace(std::make_pair(first, second), i);
                 }
             }
+=======
+            type = LLAMA_VOCAB_TYPE_SPM;
+>>>>>>> theirs
 
             // default special tokens (to be read from GGUF)
             special_bos_id  = LLAMA_TOKEN_NULL;
@@ -2106,8 +2110,11 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
             special_sep_id  = LLAMA_TOKEN_NULL;
             special_pad_id  = LLAMA_TOKEN_NULL;
             special_mask_id = LLAMA_TOKEN_NULL;
+<<<<<<< ours
 
             tokenizer_pre = "gemma4";
+=======
+>>>>>>> theirs
         } else {
             throw std::runtime_error(format("unknown tokenizer: '%s'", tokenizer_model.c_str()));
         }
@@ -2820,9 +2827,13 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
                     || t.first == "[EOS]" // Kimi-K2
                     || t.first == "<|end_of_text|>"
                     || t.first == "<end_of_utterance>" // smoldocling
+<<<<<<< ours
                     || t.first == "<eos>"            // gemma4
                     || t.first == "<turn|>"          // gemma4
                     || t.first == "<|tool_response>" // gemma4
+=======
+                    || t.first == "<turn|>" // gemma4
+>>>>>>> theirs
                     || t.first == "<｜end▁of▁sentence｜>" // deepseek-ocr
                     || t.first == "[e~[" // minimax-m2/m3
                ) {

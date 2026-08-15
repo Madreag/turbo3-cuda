@@ -1,6 +1,15 @@
 #include "common.cuh"
 #include "fattn-common.cuh"
 
+// Per-TU sink state — in fattn-vec.cuh so kernel and host code share the same TU copy.
+// Only K sinks are used in the VEC kernel. V sinks were removed from the V accumulation
+// loop because managed memory reads in the hot loop caused -3% short / -12% 32K regression.
+// Uses __device__ + cudaMemcpyToSymbolAsync (stream-ordered, graph-capturable).
+// Previous __managed__ approach crashed on SM86 (page faults during graph replay).
+static __device__ const half * d_fattn_sink_K_buf = nullptr;
+static __device__ int          d_fattn_sink_n     = 0;
+static __device__ int64_t      d_fattn_sink_ne0   = 0;
+
 static int ggml_cuda_fattn_vec_get_nthreads_host(const int cc) {
     return 128;
     GGML_UNUSED(cc);
@@ -17,7 +26,7 @@ static constexpr __device__ int ggml_cuda_fattn_vec_get_nthreads_device() {
 #pragma clang diagnostic ignored "-Wpass-failed"
 #endif // __clang__
 template<int D, int ncols, ggml_type type_K, ggml_type type_V, bool use_logit_softcap> // D == head size
-__launch_bounds__(ggml_cuda_fattn_vec_get_nthreads_device(), 1)
+__launch_bounds__(ggml_cuda_fattn_vec_get_nthreads_device(), 3) // 3 blocks/SM = 12 warps = 25% occupancy on SM120
 static __global__ void flash_attn_ext_vec(
         const char * Q_ptr,
         const char * K_ptr,
@@ -52,7 +61,7 @@ static __global__ void flash_attn_ext_vec(
     float2     * GGML_CUDA_RESTRICT dst_meta = dst_meta_ptr;
 
     // Skip unused kernel variants for faster compilation:
-    if (use_logit_softcap && !(D == 128 || D == 256)) {
+    if (use_logit_softcap && !(D == 128 || D == 256 || D == 512)) {
         GGML_UNUSED_VARS(Q, K, V, mask, sinks, KV_max, dst, dst_meta, scale,
             max_bias, m0, m1, n_head_log2, logit_softcap,
             ne00, ne01, ne02, ne03,
@@ -84,17 +93,26 @@ static __global__ void flash_attn_ext_vec(
 #endif // GGML_USE_HIP
 
     constexpr int nthreads    = ggml_cuda_fattn_vec_get_nthreads_device();
-    constexpr int nthreads_KQ = (type_K == GGML_TYPE_F16 || type_K == GGML_TYPE_BF16) ? 128 / cpy_nb : nthreads_KQ_q;
-    constexpr int nthreads_V  = (type_V == GGML_TYPE_F16 || type_V == GGML_TYPE_BF16) ? 128 / cpy_nb : nthreads_V_q;
+    // ALL turbo types use nthreads_KQ=8 for better warp-level ILP at long context (S24B).
+    // nthreads_KQ_q=32 gives 1 KQ dot per warp; 8 gives 4 interleaved dots → better latency hiding.
+    // Dead End #19: nthreads_KQ=32 for turbo3 was -17% at 32K. turbo4/turbo1.5 had the same bug.
+    constexpr bool K_is_unquantized = (type_K == GGML_TYPE_F16 || type_K == GGML_TYPE_BF16);
+    constexpr bool V_is_unquantized = (type_V == GGML_TYPE_F16 || type_V == GGML_TYPE_BF16);
+    constexpr bool K_is_turbo       = (type_K == GGML_TYPE_TURBO3_0 || type_K == GGML_TYPE_TURBO2_0 ||
+                                       type_K == GGML_TYPE_TURBO4_0 || type_K == GGML_TYPE_TURBO1_5 ||
+                                       type_K == GGML_TYPE_TURBO3_TCQ || type_K == GGML_TYPE_TURBO2_TCQ);
+    constexpr int nthreads_KQ = K_is_unquantized ? 128 / cpy_nb : (K_is_turbo ? 128 / cpy_nb : nthreads_KQ_q);
+    constexpr int nthreads_V  = V_is_unquantized ? 128 / cpy_nb : nthreads_V_q;
 
     static_assert(WARP_SIZE % nthreads_KQ == 0, "bad nthreads_K");
     static_assert(WARP_SIZE % nthreads_V  == 0, "bad nthreads_V");
 
-    constexpr int V_rows_per_thread = (type_V == GGML_TYPE_F16 || type_V == GGML_TYPE_BF16) ? 2*cpy_ne : 4;
+    constexpr int V_rows_per_thread = V_is_unquantized ? 2*cpy_ne : 4;
     constexpr int V_cols_per_iter   = WARP_SIZE / nthreads_V;
 
     constexpr vec_dot_KQ_t vec_dot_KQ = get_vec_dot_KQ<type_K, D, nthreads_KQ>();
-    constexpr bool Q_q8_1 = type_K != GGML_TYPE_F16 && type_K != GGML_TYPE_BF16;
+    constexpr bool K_is_tcq = (type_K == GGML_TYPE_TURBO3_TCQ || type_K == GGML_TYPE_TURBO2_TCQ);
+    constexpr bool Q_q8_1 = !K_is_unquantized && !K_is_tcq;
 #ifdef V_DOT2_F32_F16_AVAILABLE
     constexpr dequantize_V_t dequantize_V = get_dequantize_V<type_V, half,  V_rows_per_thread>();
 #else
@@ -128,6 +146,48 @@ static __global__ void flash_attn_ext_vec(
     float2           VKQ[ncols][(D/2)/nthreads_V] = {{{0.0f, 0.0f}}};
     __shared__ float  KQ[ne_KQ > ne_combine ? ne_KQ : ne_combine];
 #endif // V_DOT2_F32_F16_AVAILABLE
+
+    // TCQ codebook in shared memory for K and V dequant.
+    // Constant memory serializes when threads hit different 32B cache lines;
+    // shared memory gives full 32-bank parallel access for random lookups.
+    // When K and V use different TCQ types, load both codebooks separately.
+    constexpr bool K_is_tcq3 = type_K == GGML_TYPE_TURBO3_TCQ;
+    constexpr bool K_is_tcq2 = type_K == GGML_TYPE_TURBO2_TCQ;
+    constexpr bool V_is_tcq3 = type_V == GGML_TYPE_TURBO3_TCQ;
+    constexpr bool V_is_tcq2 = type_V == GGML_TYPE_TURBO2_TCQ;
+    constexpr int smem_cb_K_size = K_is_tcq3 ? 512 : (K_is_tcq2 ? 256 : 0);
+    constexpr int smem_cb_V_size = V_is_tcq3 ? 512 : (V_is_tcq2 ? 256 : 0);
+    constexpr bool share_cb = (K_is_tcq3 && V_is_tcq3) || (K_is_tcq2 && V_is_tcq2);
+    constexpr int smem_cb_total = share_cb ? smem_cb_K_size : (smem_cb_K_size + smem_cb_V_size);
+    __shared__ float smem_codebook_buf[smem_cb_total > 0 ? smem_cb_total : 1];
+    float * smem_codebook_K = smem_codebook_buf;
+    float * smem_codebook_V = share_cb ? smem_codebook_buf : (smem_codebook_buf + smem_cb_K_size);
+    if constexpr (smem_cb_K_size > 0) {
+        const float * cb_K_src = K_is_tcq3 ? d_turbo3_tcq_codebook : d_turbo2_tcq_codebook;
+        for (int i = tid; i < smem_cb_K_size; i += nthreads) {
+            smem_codebook_K[i] = cb_K_src[i];
+        }
+    }
+    if constexpr (smem_cb_V_size > 0 && !share_cb) {
+        const float * cb_V_src = V_is_tcq3 ? d_turbo3_tcq_codebook : d_turbo2_tcq_codebook;
+        for (int i = tid; i < smem_cb_V_size; i += nthreads) {
+            smem_codebook_V[i] = cb_V_src[i];
+        }
+    }
+    if constexpr (smem_cb_total > 0) {
+        __syncthreads();
+    }
+
+    // Sparse V: skip V dequant for positions with negligible attention weights.
+    // At long context, most V positions contribute < 1e-6 to the output — skipping
+    // their dequant saves significant compute (especially for quantized V types).
+    // Lower-precision V types tolerate more aggressive thresholds (less info in skipped values).
+    constexpr bool V_is_low_bpv = (type_V == GGML_TYPE_TURBO2_0 || type_V == GGML_TYPE_TURBO1_5 ||
+                                   type_V == GGML_TYPE_TURBO2_TCQ);
+    constexpr float sparse_v_threshold_f = V_is_low_bpv ? 1e-2f : 5e-3f;
+#ifdef V_DOT2_F32_F16_AVAILABLE
+    const     half  sparse_v_threshold_h = __float2half(sparse_v_threshold_f);
+#endif
 
     float KQ_max[ncols];
     float KQ_sum[ncols];
@@ -247,6 +307,38 @@ static __global__ void flash_attn_ext_vec(
 #endif // V_DOT2_F32_F16_AVAILABLE
     }
 
+    // LUT attention: precompute Q×centroid table in shared memory.
+    // Eliminates one multiply per element in the KQ inner loop.
+    // Session 20: restored for all turbo types with [D][n+1] padding to fix bank conflicts.
+    // The +1 padding makes the row stride coprime to 32 banks, eliminating systematic aliasing.
+    // turbo4 LUT (16 centroids, 8.7KB shmem) disabled — net negative on SM120.
+    // turbo4 short: 57.36 with LUT vs 59.06 without (S18). Investigation in S21 Part 2.
+    constexpr int n_centroids_lut = (D <= 128 && type_K == GGML_TYPE_TURBO3_0) ? 8 :
+                                    (D <= 128 && type_K == GGML_TYPE_TURBO2_0) ? 4 : 0;
+    // Padded LUT: +1 column per row to avoid shared memory bank conflicts.
+    // Without padding: stride n_centroids → systematic 2-way conflicts for n=8 (-1.8% in Session 18).
+    // With padding: stride n_centroids+1, coprime to 32 banks → no conflicts.
+    constexpr int lut_stride = n_centroids_lut > 0 ? n_centroids_lut + 1 : 1;
+    __shared__ half turbo_lut[n_centroids_lut > 0 ? D : 1][lut_stride];
+
+    if constexpr (n_centroids_lut > 0 && ncols == 1) {
+        // Build LUT: Q[d] * centroid[c] for each dimension and centroid.
+        // Q is read from global memory (still float even when kernel uses q8_1 Q).
+        // One-time cost: D×n_centroids FMAs. Negligible vs scanning thousands of KV positions.
+        // Half-precision LUT: halves shmem bandwidth. Q*centroid values are approximate anyway.
+        const float * centroids_ptr = (type_K == GGML_TYPE_TURBO3_0) ? TURBO_CENTROIDS_3BIT :
+                                      (type_K == GGML_TYPE_TURBO4_0) ? TURBO_CENTROIDS_4BIT :
+                                      TURBO_CENTROIDS_2BIT;
+        const float * Q_f = (const float *)(Q + 0*nb01);
+        for (int d = tid; d < D; d += nthreads) {
+            const float q_val = Q_f[d] * scale;
+            for (int c = 0; c < n_centroids_lut; c++) {
+                turbo_lut[d][c] = __float2half(q_val * centroids_ptr[c]);
+            }
+        }
+        __syncthreads();
+    }
+
     const int k_VKQ_max = KV_max ? KV_max[sequence*gridDim.x + blockIdx.x] : ne11;
     K     += blockIdx.y*nthreads * nb11;
     V     += blockIdx.y*nthreads * nb21;
@@ -254,6 +346,21 @@ static __global__ void flash_attn_ext_vec(
     for (int k_VKQ_0 = blockIdx.y*nthreads; k_VKQ_0 < k_VKQ_max; k_VKQ_0 += gridDim.y*nthreads,
              // Increment pointers after each loop:
              K += gridDim.y*nthreads*nb11, V += gridDim.y*nthreads*nb21, maskh += gridDim.y*nthreads) {
+
+        // L2 prefetch: issue hints for the NEXT outer iteration's K and V blocks
+        // while computing the current iteration. Hides GDDR latency (~300-400 cycles).
+        // Available on SM50+, no correctness impact (hint only).
+#if __CUDA_ARCH__ >= 500
+        if (k_VKQ_0 + gridDim.y*nthreads < k_VKQ_max) {
+            const char * K_next = K + gridDim.y*nthreads*nb11;
+            const char * V_next = V + gridDim.y*nthreads*nb21;
+            // Prefetch first few K and V cache lines of next chunk (128 bytes each)
+            asm volatile("prefetch.global.L2 [%0];" :: "l"(K_next));
+            asm volatile("prefetch.global.L2 [%0];" :: "l"(K_next + nb11));
+            asm volatile("prefetch.global.L2 [%0];" :: "l"(V_next));
+            asm volatile("prefetch.global.L2 [%0];" :: "l"(V_next + nb21));
+        }
+#endif
 
         // Calculate KQ tile and keep track of new maximum KQ values:
         float KQ_reg[ncols]; // KQ in registers.
@@ -270,7 +377,80 @@ static __global__ void flash_attn_ext_vec(
 
 #pragma unroll
             for (int j = 0; j < ncols; ++j) {
-                float sum = vec_dot_KQ(K + i_KQ*nb11, Q_reg[j], Q_i32[j], Q_ds[j]);
+                float sum;
+                // Turbo attention: sinks (fp16) check, then LUT or standard vec_dot
+                if constexpr (type_K == GGML_TYPE_TURBO3_0 || type_K == GGML_TYPE_TURBO4_0 ||
+                              type_K == GGML_TYPE_TURBO2_0 || type_K == GGML_TYPE_TURBO1_5) {
+                    const int kv_pos = k_VKQ_0 + i_KQ;
+                    if (d_fattn_sink_n > 0 && kv_pos < d_fattn_sink_n && d_fattn_sink_K_buf != nullptr) {
+                        const int kv_head = head / gqa_ratio;
+                        const char * sink_K = (const char *)(d_fattn_sink_K_buf + kv_pos * d_fattn_sink_ne0 + kv_head * D);
+                        sum = vec_dot_fattn_vec_KQ_f16<D, nthreads_KQ>(sink_K, Q_reg[j], Q_i32[j], Q_ds[j]);
+                    } else if constexpr (n_centroids_lut > 0 && type_K == GGML_TYPE_TURBO3_0) {
+                        // LUT scoring for turbo3: process 8 elements at a time (2 qs bytes + 1 signs byte)
+                        // 8-wide doubles ILP vs 4-wide. d_base aligns to 8 so signs byte covers all 8 elements.
+                        const block_turbo3_0 * K_turbo = (const block_turbo3_0 *)(K + i_KQ*nb11);
+                        sum = 0.0f;
+#pragma unroll
+                        for (int d0 = 0; d0 < D; d0 += 8 * nthreads_KQ) {
+                            const int d_base = d0 + (threadIdx.x % nthreads_KQ) * 8;
+                            const int ib = d_base / QK_TURBO3;
+                            const int jj = d_base % QK_TURBO3;
+                            const float norm = __half2float(K_turbo[ib].norm);
+                            const uint8_t qs0 = K_turbo[ib].qs[jj / 4];
+                            const uint8_t qs1 = K_turbo[ib].qs[jj / 4 + 1];
+                            const uint8_t sgn = K_turbo[ib].signs[jj / 8];
+                            const uint8_t idx0 = ((qs0 >> 0) & 0x3) | (((sgn >> 0) & 0x1) << 2);
+                            const uint8_t idx1 = ((qs0 >> 2) & 0x3) | (((sgn >> 1) & 0x1) << 2);
+                            const uint8_t idx2 = ((qs0 >> 4) & 0x3) | (((sgn >> 2) & 0x1) << 2);
+                            const uint8_t idx3 = ((qs0 >> 6) & 0x3) | (((sgn >> 3) & 0x1) << 2);
+                            const uint8_t idx4 = ((qs1 >> 0) & 0x3) | (((sgn >> 4) & 0x1) << 2);
+                            const uint8_t idx5 = ((qs1 >> 2) & 0x3) | (((sgn >> 5) & 0x1) << 2);
+                            const uint8_t idx6 = ((qs1 >> 4) & 0x3) | (((sgn >> 6) & 0x1) << 2);
+                            const uint8_t idx7 = ((qs1 >> 6) & 0x3) | (((sgn >> 7) & 0x1) << 2);
+                            sum += (__half2float(turbo_lut[d_base  ][idx0]) + __half2float(turbo_lut[d_base+1][idx1]) +
+                                    __half2float(turbo_lut[d_base+2][idx2]) + __half2float(turbo_lut[d_base+3][idx3]) +
+                                    __half2float(turbo_lut[d_base+4][idx4]) + __half2float(turbo_lut[d_base+5][idx5]) +
+                                    __half2float(turbo_lut[d_base+6][idx6]) + __half2float(turbo_lut[d_base+7][idx7])) * norm;
+                        }
+                    // turbo4 LUT removed (Dead End #17: 8.7KB shmem net negative, S21)
+                    } else if constexpr (n_centroids_lut > 0 && type_K == GGML_TYPE_TURBO2_0) {
+                        // LUT scoring for turbo2: process 8 elements at a time (2 qs bytes, no signs)
+                        const block_turbo2_0 * K_turbo = (const block_turbo2_0 *)(K + i_KQ*nb11);
+                        sum = 0.0f;
+#pragma unroll
+                        for (int d0 = 0; d0 < D; d0 += 8 * nthreads_KQ) {
+                            const int d_base = d0 + (threadIdx.x % nthreads_KQ) * 8;
+                            const int ib = d_base / QK_TURBO2;
+                            const int jj = d_base % QK_TURBO2;
+                            const float norm = __half2float(K_turbo[ib].norm);
+                            const uint8_t qs0 = K_turbo[ib].qs[jj / 4];
+                            const uint8_t qs1 = K_turbo[ib].qs[jj / 4 + 1];
+                            const uint8_t idx0 = (qs0 >> 0) & 0x3;
+                            const uint8_t idx1 = (qs0 >> 2) & 0x3;
+                            const uint8_t idx2 = (qs0 >> 4) & 0x3;
+                            const uint8_t idx3 = (qs0 >> 6) & 0x3;
+                            const uint8_t idx4 = (qs1 >> 0) & 0x3;
+                            const uint8_t idx5 = (qs1 >> 2) & 0x3;
+                            const uint8_t idx6 = (qs1 >> 4) & 0x3;
+                            const uint8_t idx7 = (qs1 >> 6) & 0x3;
+                            sum += (__half2float(turbo_lut[d_base  ][idx0]) + __half2float(turbo_lut[d_base+1][idx1]) +
+                                    __half2float(turbo_lut[d_base+2][idx2]) + __half2float(turbo_lut[d_base+3][idx3]) +
+                                    __half2float(turbo_lut[d_base+4][idx4]) + __half2float(turbo_lut[d_base+5][idx5]) +
+                                    __half2float(turbo_lut[d_base+6][idx6]) + __half2float(turbo_lut[d_base+7][idx7])) * norm;
+                        }
+                    } else {
+                        sum = vec_dot_KQ(K + i_KQ*nb11, Q_reg[j], Q_i32[j], Q_ds[j]);
+                    }
+                } else if constexpr (type_K == GGML_TYPE_TURBO3_TCQ) {
+                    sum = vec_dot_fattn_vec_KQ_turbo3_tcq_cb<D, nthreads_KQ>(
+                        K + i_KQ*nb11, Q_reg[j], Q_i32[j], Q_ds[j], smem_codebook_K);
+                } else if constexpr (type_K == GGML_TYPE_TURBO2_TCQ) {
+                    sum = vec_dot_fattn_vec_KQ_turbo2_tcq_cb<D, nthreads_KQ>(
+                        K + i_KQ*nb11, Q_reg[j], Q_i32[j], Q_ds[j], smem_codebook_K);
+                } else {
+                    sum = vec_dot_KQ(K + i_KQ*nb11, Q_reg[j], Q_i32[j], Q_ds[j]);
+                }
                 sum = warp_reduce_sum<nthreads_KQ>(sum);
 
                 if (use_logit_softcap) {
@@ -295,10 +475,10 @@ static __global__ void flash_attn_ext_vec(
             for (int offset = nthreads_KQ; offset < WARP_SIZE; offset <<= 1) {
                 KQ_max_new[j] = fmaxf(KQ_max_new[j], __shfl_xor_sync(0xFFFFFFFF, KQ_max_new[j], offset, WARP_SIZE));
             }
-            const float KQ_max_scale = expf(KQ_max[j] - KQ_max_new[j]);
+            const float KQ_max_scale = __expf(KQ_max[j] - KQ_max_new[j]);
             KQ_max[j] = KQ_max_new[j];
 
-            KQ_reg[j] = expf(KQ_reg[j] - KQ_max[j]);
+            KQ_reg[j] = __expf(KQ_reg[j] - KQ_max[j]);
             KQ_sum[j] = KQ_sum[j]*KQ_max_scale + KQ_reg[j];
             KQ[j*nthreads + tid] = KQ_reg[j];
 
@@ -331,6 +511,17 @@ static __global__ void flash_attn_ext_vec(
             for (int j = 0; j < ncols; ++j) {
                 KQ_k[j] = __half2half2(KQ[j*nthreads + k]);
             }
+
+            // Sparse V: skip V dequant if all attention weights for this position are negligible
+            {
+                bool dominated = true;
+#pragma unroll
+                for (int j = 0; j < ncols; ++j) {
+                    if (__hgt(__low2half(KQ_k[j]), sparse_v_threshold_h)) { dominated = false; break; }
+                }
+                if (dominated) { continue; }
+            }
+
 #pragma unroll
             for (int i_VKQ_0 = 0; i_VKQ_0 < D/2; i_VKQ_0 += nthreads_V*V_rows_per_thread/2) {
                 half2 tmp[V_rows_per_thread/2];
@@ -342,6 +533,12 @@ static __global__ void flash_attn_ext_vec(
                     for (int i_VKQ_1 = 0; i_VKQ_1 < V_rows_per_thread/2; ++i_VKQ_1) {
                         tmp[i_VKQ_1] = __float22half2_rn(tmp_f[i_VKQ_1]);
                     }
+                } else if constexpr (type_V == GGML_TYPE_TURBO3_TCQ) {
+                    dequantize_V_turbo3_tcq_cb<half, V_rows_per_thread>(V + k*nb21, tmp,
+                        2*i_VKQ_0 + (nthreads_V == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads_V)*V_rows_per_thread, smem_codebook_V);
+                } else if constexpr (type_V == GGML_TYPE_TURBO2_TCQ) {
+                    dequantize_V_turbo2_tcq_cb<half, V_rows_per_thread>(V + k*nb21, tmp,
+                        2*i_VKQ_0 + (nthreads_V == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads_V)*V_rows_per_thread, smem_codebook_V);
                 } else {
                     dequantize_V(V + k*nb21, tmp,
                         2*i_VKQ_0 + (nthreads_V == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads_V)*V_rows_per_thread);
@@ -360,11 +557,30 @@ static __global__ void flash_attn_ext_vec(
             for (int j = 0; j < ncols; ++j) {
                 KQ_k[j] = KQ[j*nthreads + k];
             }
+
+            // Sparse V: skip V dequant if all attention weights for this position are negligible
+            {
+                bool dominated = true;
+#pragma unroll
+                for (int j = 0; j < ncols; ++j) {
+                    if (KQ_k[j] >= sparse_v_threshold_f) { dominated = false; break; }
+                }
+                if (dominated) { continue; }
+            }
+
 #pragma unroll
             for (int i_VKQ_0 = 0; i_VKQ_0 < D/2; i_VKQ_0 += nthreads_V*V_rows_per_thread/2) {
                 float2 tmp[V_rows_per_thread/2];
-                dequantize_V(V + k*nb21, tmp,
-                    2*i_VKQ_0 + (nthreads_V == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads_V)*V_rows_per_thread);
+                if constexpr (type_V == GGML_TYPE_TURBO3_TCQ) {
+                    dequantize_V_turbo3_tcq_cb<float, V_rows_per_thread>(V + k*nb21, tmp,
+                        2*i_VKQ_0 + (nthreads_V == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads_V)*V_rows_per_thread, smem_codebook_V);
+                } else if constexpr (type_V == GGML_TYPE_TURBO2_TCQ) {
+                    dequantize_V_turbo2_tcq_cb<float, V_rows_per_thread>(V + k*nb21, tmp,
+                        2*i_VKQ_0 + (nthreads_V == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads_V)*V_rows_per_thread, smem_codebook_V);
+                } else {
+                    dequantize_V(V + k*nb21, tmp,
+                        2*i_VKQ_0 + (nthreads_V == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads_V)*V_rows_per_thread);
+                }
 #pragma unroll
                 for (int i_VKQ_1 = 0; i_VKQ_1 < V_rows_per_thread/2; ++i_VKQ_1) {
 #pragma unroll
@@ -390,10 +606,10 @@ static __global__ void flash_attn_ext_vec(
             }
 
             const float kqmax_new_j = fmaxf(sink, KQ_max[j]);
-            const float KQ_max_scale = expf(KQ_max[j] - kqmax_new_j);
+            const float KQ_max_scale = __expf(KQ_max[j] - kqmax_new_j);
             KQ_max[j] = kqmax_new_j;
 
-            KQ_sum[j] = KQ_sum[j]*KQ_max_scale + (threadIdx.x == 0 ? expf(sink - KQ_max[j]) : 0.0f);
+            KQ_sum[j] = KQ_sum[j]*KQ_max_scale + (threadIdx.x == 0 ? __expf(sink - KQ_max[j]) : 0.0f);
 
 #ifdef V_DOT2_F32_F16_AVAILABLE
             const half2 KQ_max_scale_h2 = make_half2(KQ_max_scale, KQ_max_scale);
@@ -439,7 +655,7 @@ static __global__ void flash_attn_ext_vec(
 
         float kqmax_new = KQ_max_shared[j_VKQ][threadIdx.x];
         kqmax_new = warp_reduce_max(kqmax_new);
-        const float kqmax_scale = expf(KQ_max[j_VKQ] - kqmax_new);
+        const float kqmax_scale = __expf(KQ_max[j_VKQ] - kqmax_new);
         KQ_max[j_VKQ] = kqmax_new;
 
 #ifdef V_DOT2_F32_F16_AVAILABLE
@@ -532,6 +748,44 @@ static __global__ void flash_attn_ext_vec(
 
 template <int D, int cols_per_block, ggml_type type_K, ggml_type type_V, bool use_logit_softcap>
 void ggml_cuda_flash_attn_ext_vec_case_impl(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+    // Turbo attention sinks: set device memory state for K scoring in VEC kernel.
+    // Uses __device__ variables updated via cudaGetSymbolAddress + cudaMemcpyAsync
+    // (graph-capturable). Previous __managed__ approach crashed on SM86.
+    if constexpr (type_K == GGML_TYPE_TURBO3_0 || type_K == GGML_TYPE_TURBO4_0 ||
+                  type_K == GGML_TYPE_TURBO2_0 || type_K == GGML_TYPE_TURBO1_5) {
+        const int ss = turbo_sink_size();
+        if (ss > 0) {
+            const ggml_tensor * K = dst->src[1];
+            int64_t k_ne0_full = 0;
+            half * k_buf = turbo_sink_lookup_buf((void *)K->data, &k_ne0_full);
+            const half * k_buf_const = k_buf;
+
+            // Get device addresses once (cached per TU via static locals)
+            static void * d_addr_buf = nullptr;
+            static void * d_addr_n   = nullptr;
+            static void * d_addr_ne0 = nullptr;
+            if (!d_addr_buf) {
+                CUDA_CHECK(cudaGetSymbolAddress(&d_addr_buf, d_fattn_sink_K_buf));
+                CUDA_CHECK(cudaGetSymbolAddress(&d_addr_n,   d_fattn_sink_n));
+                CUDA_CHECK(cudaGetSymbolAddress(&d_addr_ne0, d_fattn_sink_ne0));
+            }
+
+            // cudaMemcpyAsync is graph-capturable (unlike cudaMemcpyToSymbolAsync).
+            // Use aligned struct — unaligned stack vars cause segfault on SM89 (Ada)
+            // for certain sink sizes {1, 4, 16} due to L1 cache coherency issues.
+            struct __align__(16) sink_async_state {
+                const half * buf;
+                int64_t      ne0;
+                int          n;
+            };
+            static __attribute__((aligned(16))) sink_async_state sink_state;
+            sink_state = {k_buf_const, k_ne0_full, ss};
+            CUDA_CHECK(cudaMemcpyAsync(d_addr_buf, &sink_state.buf, sizeof(const half *), cudaMemcpyHostToDevice, ctx.stream()));
+            CUDA_CHECK(cudaMemcpyAsync(d_addr_ne0, &sink_state.ne0, sizeof(int64_t),      cudaMemcpyHostToDevice, ctx.stream()));
+            CUDA_CHECK(cudaMemcpyAsync(d_addr_n,   &sink_state.n,   sizeof(int),          cudaMemcpyHostToDevice, ctx.stream()));
+        }
+    }
+
     const int cc = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;
 
     const int nthreads = ggml_cuda_fattn_vec_get_nthreads_host(cc);
@@ -609,3 +863,63 @@ EXTERN_DECL_FATTN_VEC_CASES(256, GGML_TYPE_Q5_0)
 EXTERN_DECL_FATTN_VEC_CASES(256, GGML_TYPE_Q5_1)
 EXTERN_DECL_FATTN_VEC_CASES(256, GGML_TYPE_Q8_0)
 EXTERN_DECL_FATTN_VEC_CASES(256, GGML_TYPE_BF16)
+
+// Macro for extern declarations with D=64, 128, 256, 512
+#define EXTERN_DECL_FATTN_VEC_TURBO(type_K, type_V) \
+    extern DECL_FATTN_VEC_CASE( 64, type_K, type_V); \
+    extern DECL_FATTN_VEC_CASE(128, type_K, type_V); \
+    extern DECL_FATTN_VEC_CASE(256, type_K, type_V); \
+    extern DECL_FATTN_VEC_CASE(512, type_K, type_V);
+
+// Symmetric turbo types
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO3_0, GGML_TYPE_TURBO3_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO4_0, GGML_TYPE_TURBO4_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO2_0, GGML_TYPE_TURBO2_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO1_5, GGML_TYPE_TURBO1_5)
+
+// turbo × q8_0 cross-types
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO3_0, GGML_TYPE_Q8_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_Q8_0,     GGML_TYPE_TURBO3_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO4_0, GGML_TYPE_Q8_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_Q8_0,     GGML_TYPE_TURBO4_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO2_0, GGML_TYPE_Q8_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_Q8_0,     GGML_TYPE_TURBO2_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO1_5, GGML_TYPE_Q8_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_Q8_0,     GGML_TYPE_TURBO1_5)
+
+// turbo × turbo cross-types (all permutations)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO4_0, GGML_TYPE_TURBO3_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO4_0, GGML_TYPE_TURBO2_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO4_0, GGML_TYPE_TURBO1_5)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO3_0, GGML_TYPE_TURBO4_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO3_0, GGML_TYPE_TURBO2_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO3_0, GGML_TYPE_TURBO1_5)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO2_0, GGML_TYPE_TURBO4_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO2_0, GGML_TYPE_TURBO3_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO2_0, GGML_TYPE_TURBO1_5)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO1_5, GGML_TYPE_TURBO4_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO1_5, GGML_TYPE_TURBO3_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO1_5, GGML_TYPE_TURBO2_0)
+
+// turbo × f16 cross-types
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO4_0, GGML_TYPE_F16)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO3_0, GGML_TYPE_F16)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO2_0, GGML_TYPE_F16)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_TURBO1_5, GGML_TYPE_F16)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_F16, GGML_TYPE_TURBO4_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_F16, GGML_TYPE_TURBO3_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_F16, GGML_TYPE_TURBO2_0)
+EXTERN_DECL_FATTN_VEC_TURBO(GGML_TYPE_F16, GGML_TYPE_TURBO1_5)
+
+// TCQ types (D=128, 256 only — D=64 excluded because QK block size is 128)
+#define EXTERN_DECL_FATTN_VEC_TCQ(type_K, type_V) \
+    extern DECL_FATTN_VEC_CASE(128, type_K, type_V); \
+    extern DECL_FATTN_VEC_CASE(256, type_K, type_V);
+
+// Symmetric TCQ types
+EXTERN_DECL_FATTN_VEC_TCQ(GGML_TYPE_TURBO3_TCQ, GGML_TYPE_TURBO3_TCQ)
+EXTERN_DECL_FATTN_VEC_TCQ(GGML_TYPE_TURBO2_TCQ, GGML_TYPE_TURBO2_TCQ)
+
+// TCQ cross-types (turbo3_tcq x turbo2_tcq)
+EXTERN_DECL_FATTN_VEC_TCQ(GGML_TYPE_TURBO3_TCQ, GGML_TYPE_TURBO2_TCQ)
+EXTERN_DECL_FATTN_VEC_TCQ(GGML_TYPE_TURBO2_TCQ, GGML_TYPE_TURBO3_TCQ)

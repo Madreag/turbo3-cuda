@@ -92,6 +92,13 @@
 !/examples/sycl/*.bat
 !/examples/sycl/*.sh
 
+<<<<<<< ours
+=======
+# Server Web UI temporary files
+/tools/server/webui/node_modules
+/tools/server/webui/dist
+
+>>>>>>> theirs
 # Python
 
 /.venv
@@ -149,7 +156,20 @@ flake.lock
 # emscripten
 a.out.*
 
+<<<<<<< ours
 # AGENTS
 
 AGENTS.local.md
 .pi/SYSTEM.md
+=======
+# Project-specific
+/.trash/
+/AGENTS.md
+/CLAUDE.md
+/[Ss]ession*
+/SESSION*
+PROFILE_RESULTS.md
+COMP_TEST_RESULTS.md
+DISCUSSION_DRAFT.md
+model-specs.md
+>>>>>>> theirs

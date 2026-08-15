@@ -256,6 +256,12 @@ static void ggml_cuda_flash_attn_ext_mma_f16(ggml_backend_cuda_context & ctx, gg
     FATTN_VEC_CASE(128, type_K, type_V)       \
     FATTN_VEC_CASE(256, type_K, type_V)       \
 
+#define FATTN_VEC_CASES_ALL_D_TURBO(type_K, type_V) \
+    FATTN_VEC_CASE( 64, type_K, type_V)              \
+    FATTN_VEC_CASE(128, type_K, type_V)              \
+    FATTN_VEC_CASE(256, type_K, type_V)              \
+    FATTN_VEC_CASE(512, type_K, type_V)              \
+
 static void ggml_cuda_flash_attn_ext_vec(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
     ggml_tensor * Q = dst->src[0];
     ggml_tensor * K = dst->src[1];
@@ -323,6 +329,59 @@ static void ggml_cuda_flash_attn_ext_vec(ggml_backend_cuda_context & ctx, ggml_t
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_BF16, GGML_TYPE_BF16)
 #endif // GGML_CUDA_FA_ALL_QUANTS
+
+    // TurboQuant symmetric KV cache types (always enabled)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO3_0, GGML_TYPE_TURBO3_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO4_0, GGML_TYPE_TURBO4_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO2_0, GGML_TYPE_TURBO2_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO1_5, GGML_TYPE_TURBO1_5)
+
+    // turbo × q8_0 cross-types
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO3_0, GGML_TYPE_Q8_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_Q8_0,     GGML_TYPE_TURBO3_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO4_0, GGML_TYPE_Q8_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_Q8_0,     GGML_TYPE_TURBO4_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO2_0, GGML_TYPE_Q8_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_Q8_0,     GGML_TYPE_TURBO2_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO1_5, GGML_TYPE_Q8_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_Q8_0,     GGML_TYPE_TURBO1_5)
+
+    // turbo × turbo cross-types (all permutations)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO4_0, GGML_TYPE_TURBO3_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO4_0, GGML_TYPE_TURBO2_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO4_0, GGML_TYPE_TURBO1_5)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO3_0, GGML_TYPE_TURBO4_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO3_0, GGML_TYPE_TURBO2_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO3_0, GGML_TYPE_TURBO1_5)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO2_0, GGML_TYPE_TURBO4_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO2_0, GGML_TYPE_TURBO3_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO2_0, GGML_TYPE_TURBO1_5)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO1_5, GGML_TYPE_TURBO4_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO1_5, GGML_TYPE_TURBO3_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO1_5, GGML_TYPE_TURBO2_0)
+
+    // turbo × f16 cross-types
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO4_0, GGML_TYPE_F16)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO3_0, GGML_TYPE_F16)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO2_0, GGML_TYPE_F16)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_TURBO1_5, GGML_TYPE_F16)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_F16, GGML_TYPE_TURBO4_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_F16, GGML_TYPE_TURBO3_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_F16, GGML_TYPE_TURBO2_0)
+    FATTN_VEC_CASES_ALL_D_TURBO(GGML_TYPE_F16, GGML_TYPE_TURBO1_5)
+
+    // TCQ types (D=128, 256 only — D=64 excluded because QK block size is 128)
+#define FATTN_VEC_CASES_ALL_D_TCQ(type_K, type_V) \
+    FATTN_VEC_CASE(128, type_K, type_V)            \
+    FATTN_VEC_CASE(256, type_K, type_V)            \
+
+    // Symmetric TCQ types
+    FATTN_VEC_CASES_ALL_D_TCQ(GGML_TYPE_TURBO3_TCQ, GGML_TYPE_TURBO3_TCQ)
+    FATTN_VEC_CASES_ALL_D_TCQ(GGML_TYPE_TURBO2_TCQ, GGML_TYPE_TURBO2_TCQ)
+
+    // TCQ cross-types (turbo3_tcq x turbo2_tcq)
+    FATTN_VEC_CASES_ALL_D_TCQ(GGML_TYPE_TURBO3_TCQ, GGML_TYPE_TURBO2_TCQ)
+    FATTN_VEC_CASES_ALL_D_TCQ(GGML_TYPE_TURBO2_TCQ, GGML_TYPE_TURBO3_TCQ)
 
     GGML_ABORT("fatal error");
 }
@@ -399,6 +458,7 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
         case 128:
         case 112:
         case 256:
+<<<<<<< ours
             if (V->ne[0] != K->ne[0]) {
                 return BEST_FATTN_KERNEL_NONE;
             }
@@ -419,11 +479,10 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
                 return BEST_FATTN_KERNEL_NONE;
             }
             break;
+=======
+>>>>>>> theirs
         case 512:
             if (V->ne[0] != K->ne[0]) {
-                return BEST_FATTN_KERNEL_NONE;
-            }
-            if (!gqa_opt_applies) {
                 return BEST_FATTN_KERNEL_NONE;
             }
             break;
@@ -441,12 +500,88 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
 
 #ifndef GGML_CUDA_FA_ALL_QUANTS
     if (K->type != V->type) {
-        return BEST_FATTN_KERNEL_NONE;
+        // Allow turbo cross-type KV combinations, but never mix TCQ with non-TCQ
+        auto is_turbo_nontcq = [](ggml_type t) {
+            return t == GGML_TYPE_TURBO3_0 || t == GGML_TYPE_TURBO4_0 ||
+                   t == GGML_TYPE_TURBO2_0 || t == GGML_TYPE_TURBO1_5;
+        };
+        auto is_tcq = [](ggml_type t) {
+            return t == GGML_TYPE_TURBO3_TCQ || t == GGML_TYPE_TURBO2_TCQ;
+        };
+        auto is_turbo_compatible = [&](ggml_type t) {
+            return is_turbo_nontcq(t) || t == GGML_TYPE_Q8_0 || t == GGML_TYPE_F16;
+        };
+        const bool tcq_cross = is_tcq(K->type) && is_tcq(V->type);
+        const bool turbo_cross = (is_turbo_nontcq(K->type) || is_turbo_nontcq(V->type)) &&
+                                  is_turbo_compatible(K->type) && is_turbo_compatible(V->type);
+        if (!tcq_cross && !turbo_cross) {
+            return BEST_FATTN_KERNEL_NONE;
+        }
     }
 #endif // GGML_CUDA_FA_ALL_QUANTS
 
+<<<<<<< ours
     if (!ggml_cuda_fattn_kv_type_supported(K->type) || !ggml_cuda_fattn_kv_type_supported(V->type)) {
         return BEST_FATTN_KERNEL_NONE;
+=======
+    switch (K->type) {
+        case GGML_TYPE_F32:
+        case GGML_TYPE_F16:
+            break;
+        case GGML_TYPE_Q4_1:
+        case GGML_TYPE_Q5_0:
+        case GGML_TYPE_Q5_1:
+#ifndef GGML_CUDA_FA_ALL_QUANTS
+            return BEST_FATTN_KERNEL_NONE;
+#endif // GGML_CUDA_FA_ALL_QUANTS
+        case GGML_TYPE_Q4_0:
+        case GGML_TYPE_Q8_0:
+        case GGML_TYPE_BF16:
+            break;
+        case GGML_TYPE_TURBO3_0:
+        case GGML_TYPE_TURBO2_0:
+        case GGML_TYPE_TURBO4_0:
+        case GGML_TYPE_TURBO1_5: {
+            // TurboQuant VEC kernel only instantiated for D in {64, 128, 256, 512}.
+            const int64_t D = K->ne[0];
+            if (D != 64 && D != 128 && D != 256 && D != 512) {
+                static bool warned_turbo_d = false;
+                if (!warned_turbo_d) {
+                    fprintf(stderr,
+                        "\n[turbo] WARNING: head_dim=%lld is not supported by TurboQuant Flash Attention.\n"
+                        "[turbo]   Supported dimensions: 64, 128, 256, 512.\n"
+                        "[turbo]   Falling back to standard attention — performance will be reduced.\n\n",
+                        (long long)D);
+                    fflush(stderr);
+                    warned_turbo_d = true;
+                }
+                return BEST_FATTN_KERNEL_NONE;
+            }
+            break;
+        }
+        case GGML_TYPE_TURBO3_TCQ:
+        case GGML_TYPE_TURBO2_TCQ: {
+            // TCQ VEC kernel only instantiated for D in {128, 256}.
+            // D=64 is excluded because QK_TURBO{2,3}_TCQ block size is 128.
+            const int64_t D = K->ne[0];
+            if (D != 128 && D != 256) {
+                static bool warned_tcq_d = false;
+                if (!warned_tcq_d) {
+                    fprintf(stderr,
+                        "\n[turbo-tcq] WARNING: head_dim=%lld is not supported by TCQ Flash Attention.\n"
+                        "[turbo-tcq]   Supported dimensions: 128, 256.\n"
+                        "[turbo-tcq]   Falling back to standard attention — performance will be reduced.\n\n",
+                        (long long)D);
+                    fflush(stderr);
+                    warned_tcq_d = true;
+                }
+                return BEST_FATTN_KERNEL_NONE;
+            }
+            break;
+        }
+        default:
+            return BEST_FATTN_KERNEL_NONE;
+>>>>>>> theirs
     }
 
     if (mask && mask->ne[2] != 1) {
@@ -454,8 +589,20 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
     }
 
     // For small batch sizes the vector kernel may be preferable over the kernels optimized for large batch sizes:
+<<<<<<< ours
     // 192 satisfies % 64 == 0 but has no vec instance (DKQ != DV); force it onto the MMA path.
     const bool can_use_vector_kernel = Q->ne[0] <= 256 && Q->ne[0] % 64 == 0 && Q->ne[0] != 192 && K->ne[1] % FATTN_KQ_STRIDE == 0;
+=======
+    // D=512 VEC kernels only instantiated for turbo/TCQ types; non-turbo caps at 256
+    auto is_turbo_or_tcq = [](ggml_type t) {
+        return t == GGML_TYPE_TURBO3_0 || t == GGML_TYPE_TURBO4_0 ||
+               t == GGML_TYPE_TURBO2_0 || t == GGML_TYPE_TURBO1_5 ||
+               t == GGML_TYPE_TURBO3_TCQ || t == GGML_TYPE_TURBO2_TCQ;
+    };
+    const bool is_turbo_kv = is_turbo_or_tcq(K->type) || is_turbo_or_tcq(V->type);
+    const int max_D_vec = is_turbo_kv ? 512 : 256;
+    const bool can_use_vector_kernel = Q->ne[0] <= max_D_vec && Q->ne[0] % 64 == 0 && K->ne[1] % FATTN_KQ_STRIDE == 0;
+>>>>>>> theirs
 
     // If Turing tensor cores are available, use them:
     if (turing_mma_available(cc) && Q->ne[0] != 40 && Q->ne[0] != 72) {
@@ -498,10 +645,34 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
         return BEST_FATTN_KERNEL_MMA_F16;
     }
 
+<<<<<<< ours
     // AMD MFMA needs a certain minimum batch size to outscale the tile kernel for large head sizes.
     if ((amd_mfma_available(cc) && Q->ne[0] <= 256) && Q->ne[0] != 40 && Q->ne[0] != 72) {
         if ((Q->ne[0] <= 64 && Q->ne[1] * gqa_ratio_eff > 8)) {
             return BEST_FATTN_KERNEL_MMA_F16;
+=======
+    // Use the WMMA kernel if possible:
+    if (ggml_cuda_should_use_wmma_fattn(cc) && K->ne[1] % FATTN_KQ_STRIDE == 0 && Q->ne[0] != 40 && Q->ne[0] != 72 && Q->ne[0] != 576) {
+        if (can_use_vector_kernel && Q->ne[1] <= 2) {
+            return BEST_FATTN_KERNEL_VEC;
+        }
+        return BEST_FATTN_KERNEL_WMMA_F16;
+    }
+
+    if (amd_wmma_available(cc) && GGML_CUDA_CC_IS_RDNA4(cc) && gqa_opt_applies && Q->ne[0] <= 128 && Q->ne[0] != 40 && Q->ne[0] != 72) {
+        if (can_use_vector_kernel) {
+            if (!ggml_is_quantized(K->type) && !ggml_is_quantized(V->type)) {
+                if (Q->ne[1] == 1) {
+                    if (!gqa_opt_applies) {
+                        return BEST_FATTN_KERNEL_VEC;
+                    }
+                }
+            } else {
+                if (Q->ne[1] <= 2) {
+                    return BEST_FATTN_KERNEL_VEC;
+                }
+            }
+>>>>>>> theirs
         }
         if ((Q->ne[0] <= 128 && Q->ne[1] * gqa_ratio_eff > 16)) {
             return BEST_FATTN_KERNEL_MMA_F16;
@@ -511,9 +682,22 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
         }
     }
 
+<<<<<<< ours
     // AMD WMMA is always faster than the tile kernel if the full tile width of 16 can be utilized.
     if ((amd_wmma_available(cc) && gqa_opt_applies && Q->ne[0] <= 128) && Q->ne[0] != 40 && Q->ne[0] != 72 && Q->ne[1] * gqa_ratio_eff > 8) {
         return BEST_FATTN_KERNEL_MMA_F16;
+=======
+    // Use MFMA flash attention for CDNA (MI100+):
+    if (amd_mfma_available(cc) && Q->ne[0] != 40 && Q->ne[0] != 72 && Q->ne[0] != 256 && Q->ne[0] != 576) {
+        const int64_t eff_nq = Q->ne[1] * (gqa_opt_applies ? gqa_ratio : 1);
+        // MMA vs tile crossover benchmarked on MI300X @ d32768:
+        //   hsk=64  (gqa=4): MMA wins at eff >= 128 (+11%)
+        //   hsk=128 (gqa=4): MMA wins at eff >= 128 (+4%)
+        if (eff_nq >= (GGML_CUDA_CC_IS_CDNA1(cc) && Q->ne[0] == 64 ? 64 : 128)) {
+            return BEST_FATTN_KERNEL_MMA_F16;
+        }
+        // Fall through to tile kernel for small effective batch sizes.
+>>>>>>> theirs
     }
 
     // If there are no tensor cores available, use the generic tile kernel:

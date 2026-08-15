@@ -661,7 +661,7 @@ void llama_context::sched_reserve() {
 
     // reserve again with pp graph to avoid ggml-alloc reallocations during inference
     {
-        // TODO: not sure if the following graph would be worst case for multi-stream KV caches:
+        // TODO: not sure if the following graph would be worster case for multi-stream KV caches:
         //
         // auto * gf = graph_reserve(n_tokens, 1, n_tokens, mctx.get());
         //
@@ -3622,6 +3622,38 @@ llama_context * llama_init_from_model(
         }
     }
 
+<<<<<<< ours
+=======
+    // TurboQuant cache types require flash attention — auto-enable if disabled
+    if (params.flash_attn_type == LLAMA_FLASH_ATTN_TYPE_DISABLED &&
+        (params.type_k == GGML_TYPE_TURBO3_0 || params.type_k == GGML_TYPE_TURBO4_0 ||
+         params.type_k == GGML_TYPE_TURBO2_0 || params.type_k == GGML_TYPE_TURBO1_5 ||
+         params.type_v == GGML_TYPE_TURBO3_0 || params.type_v == GGML_TYPE_TURBO4_0 ||
+         params.type_v == GGML_TYPE_TURBO2_0 || params.type_v == GGML_TYPE_TURBO1_5)) {
+        LLAMA_LOG_WARN("%s: turbo cache types require flash_attn — enabling automatically\n", __func__);
+        params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+    }
+
+    // GQA >8:1 vulnerability warning for turbo K types
+    // HyperionMS2040 found GLM4 (GQA-16) degrades +19.6% with turbo3 K.
+    // High GQA ratios amplify K quantization errors through softmax.
+    if (params.type_k == GGML_TYPE_TURBO3_0 || params.type_k == GGML_TYPE_TURBO4_0 ||
+        params.type_k == GGML_TYPE_TURBO2_0 || params.type_k == GGML_TYPE_TURBO1_5) {
+        const uint32_t n_head    = model->hparams.n_head();
+        const uint32_t n_head_kv = model->hparams.n_head_kv();
+        if (n_head_kv > 0 && n_head / n_head_kv > 8) {
+            LLAMA_LOG_WARN("%s: high GQA ratio (%u:%u). Turbo K may degrade quality — "
+                           "consider -ctk q8_0 -ctv %s for better PPL\n",
+                           __func__, n_head, n_head_kv, ggml_type_name(params.type_v));
+        }
+    }
+
+    if (ggml_is_quantized(params.type_v) && params.flash_attn_type == LLAMA_FLASH_ATTN_TYPE_DISABLED) {
+        LLAMA_LOG_ERROR("%s: V cache quantization requires flash_attn\n", __func__);
+        return nullptr;
+    }
+
+>>>>>>> theirs
     if (params.pooling_type != LLAMA_POOLING_TYPE_UNSPECIFIED &&
         params.pooling_type != model->hparams.pooling_type) {
         //user-specified pooling-type is different from the model default

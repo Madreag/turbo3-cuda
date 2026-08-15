@@ -312,6 +312,12 @@ const std::vector<ggml_type> kv_cache_types = {
     GGML_TYPE_IQ4_NL,
     GGML_TYPE_Q5_0,
     GGML_TYPE_Q5_1,
+    GGML_TYPE_TURBO2_0,
+    GGML_TYPE_TURBO3_0,
+    GGML_TYPE_TURBO4_0,
+    GGML_TYPE_TURBO1_5,
+    GGML_TYPE_TURBO3_TCQ,
+    GGML_TYPE_TURBO2_TCQ,
 };
 
 static ggml_type kv_cache_type_from_str(const std::string & s) {
@@ -1485,7 +1491,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params) {
             params.verbose_prompt = true;
         }
-    ).set_examples({LLAMA_EXAMPLE_COMPLETION, LLAMA_EXAMPLE_CLI, LLAMA_EXAMPLE_EMBEDDING, LLAMA_EXAMPLE_RETRIEVAL}));
+    ));
     add_opt(common_arg(
         {"--display-prompt"},
         {"--no-display-prompt"},
@@ -3280,13 +3286,6 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_examples({LLAMA_EXAMPLE_SERVER}).set_env("LLAMA_ARG_PORT"));
     add_opt(common_arg(
-        {"--reuse-port"},
-        string_format("allow multiple sockets to bind to the same port (default: %s)", params.reuse_port ? "enabled" : "disabled"),
-        [](common_params & params) {
-            params.reuse_port = true;
-        }
-    ).set_examples({LLAMA_EXAMPLE_SERVER}).set_env("LLAMA_ARG_REUSE_PORT"));
-    add_opt(common_arg(
         {"--path"}, "PATH",
         string_format("path to serve static files from (default: %s)", params.public_path.c_str()),
         [](common_params & params, const std::string & value) {
@@ -3359,6 +3358,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_examples({LLAMA_EXAMPLE_SERVER}).set_env("LLAMA_ARG_UI_MCP_PROXY"));
     add_opt(common_arg(
+<<<<<<< ours
         {"--tools"}, "TOOL1,TOOL2,...",
         "experimental: whether to enable built-in tools for AI agents - do not enable in untrusted environments (default: no tools)\n"
         "specify \"all\" to enable all tools\n"
@@ -3400,6 +3400,11 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         {"-no-ag", "--no-agent"},
         "whether to enable CORS proxy and all built-in tools - do not enable in untrusted environments (default: disabled)\n"
         "note: for security reasons, this will limit --cors-origins to localhost by default",
+=======
+        {"--webui"},
+        {"--no-webui"},
+        string_format("whether to enable the Web UI (default: %s)", params.webui ? "enabled" : "disabled"),
+>>>>>>> theirs
         [](common_params & params, bool value) {
             if (value) {
                 params.server_tools = {"all"};
