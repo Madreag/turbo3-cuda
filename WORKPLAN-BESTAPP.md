@@ -43,10 +43,98 @@ deploy batch. Slot files archived on config change. Rollback binaries kept.
 10. [PENDING] **Upstream PR submissions** (karma batch: crash hardening,
     ctx-cap, parse-degrade, checkpoint evidence).
 
+## ⏸ PAUSED 2026-08-15 — USER REBOOTING BOX (VRAM at ceiling 32162 MiB)
+
+RESUME EXACTLY HERE AFTER REBOOT:
+1. Stack is DOWN (reboot). Start: `bash ~/.config/llama-tcq/start-long-38.sh`
+   — this launches the NEW MMA binary (staged in build-g1/bin, commit
+   92df9fb24) + proxy v6.4. MMA gate is DEFAULT ON.
+2. OPEN QUESTION AT PAUSE: post-MMA-deploy smoke was content-correct but
+   **17.5 tok/s at SHALLOW ctx** (expected ~84-97). Candidate causes:
+   (a) VRAM-ceiling pressure/dxg thrash (user's theory — reboot tests this);
+   (b) MMA-turbo kernel slow on SM120 (their tracker: turbo-K VGPR spill at
+   D=256, issues #294/#295). Depth test (40K) with MMA-on was IN FLIGHT at
+   pause — result unknown, rerun it.
+3. POST-REBOOT SEQUENCE: fresh smoke (shallow tok/s?) → depth_decode_test
+   40000 → if still slow: restart with GGML_TURBO_MMA_FUSED=0 in env →
+   re-smoke (expect VEC-speed ~84-97 shallow / 41.4 deep) → decide:
+   depth-threshold gate patch vs kill-switch-off deploy. EITHER WAY the
+   corrected centroids stay (independent of MMA path) → then KLD gate
+   (expect ~-33% vs 0.0087 baseline; alphas tuned on OLD centroids — 3-pt
+   recheck if off) + NIAH 130K needle.
+4. VRAM watch: 32162 near 32.6 ceiling. Levers if pressure persists:
+   --ctx-checkpoints (default 8 → 4), ctx trim, checkpoint count.
+5. Then continue queue: B-list crash picks (26651 first), C-list perf picks
+   (24565 SM120 FA config, GPU top-k 26812/25575), issue 27106 acceptance
+   bisect (possibly biggest decode win), GDN kernels (26001/22587), then
+   remaining board items per queue above.
+
 ## STATE LOG
+- MMA PORT APPLIED (5 cherry-picks, conflicts resolved): b3e51cf3d (MMA
+  turbo4) + 77ab7e988 (corrected 4-bit centroids + 66B block — kept OUR
+  binary-search encode with THEIR values; deduped double table) + 4e223ee9a
+  (turbo3/2 extend) + 545092c36 (3-bit centroids, kept constexpr) +
+  539ce5de9 (gate: DEFAULT ON, GGML_TURBO_MMA_FUSED=0 kill-switch).
+  CMake glob covers instances. Active 4-bit struct 66B asserted; legacy
+  #else branch untouched. CPU tables corrected (6 value-hits verified).
+  BUILD IN FLIGHT. Gate battery for deploy: (1) smoke; (2) KLD-quick vs
+  baseline 0.0087@2048/alpha1.00 — expect ~-33%; alphas were tuned on OLD
+  centroids → if KLD off, 3-point alpha recheck queued; (3) depth A/B 40K:
+  MMA-on vs GGML_TURBO_MMA_FUSED=0 (env, same binary) vs old 41.4 baseline;
+  (4) NIAH 130K single-needle; (5) deploy w/ proxy v6.4 (circuit breaker)
+  + archive slot files (66B format change invalidates).
 - 2026-08-15 eve: Tier-0 done (see RESEARCH-2026-08.md header). Production:
   checkpoint binary, draft-mtp n_max=2, VRAM 32039. Baselines for gates:
   shallow decode ~84-97 tok/s, 38K-depth decode 41.4, prefill@38K 1156 tok/s,
   restore-reuse 49 tok. KLD tool: quality-tests/kl_divergence.py (2048-tok
   prompts, cache_prompt false). Depth probe: scratchpad/depth_decode_test.py.
-- MMA port: starting — locating TheTom impl.
+- MMA port MAP (recon done): source origin/feature/turboquant-kv-cache,
+  commits b3e51cf3d^..539ce5de9 span (5 commits: MMA turbo4 +445, extend
+  turbo3/2 +147, turbo2 gate D128, corrected 4-bit centroids + rnorm drop
+  68→66B, turbo3 centroids). Files: fattn-mma-f16.cuh loaders,
+  fattn-mma-turbo.cuh (118L), fattn.cu gate, 14 template instances
+  (dkq128/256). Coverage: turbo4/3 D{128,256}, turbo2 D128, decode-only
+  Q<=4, K==V, turing_mma. Type remap THEIRS default-branch 43/44/47
+  (t2/t3/t4) → OURS 82/80/81. CRITICAL: our 4-bit centroid table is
+  MIS-SCALED (0.174 max vs corrected 0.242; PR#197: KLD −33%) — adopt
+  their tables + 66B block IN the port; update VEC+set_rows+convert tables
+  same commit (runtime-only format: archive slot files, no model requant).
+  Keep graph-level inverse WHT (skip OSCAR2 in-loader variant). nstages=0,
+  raw byte pitch, need_f16=false — the 3 gotchas. TCQ/T1.5 stay VEC.
+  Gates after: KLD quick (expect improvement), depth A/B vs 41.4@38K,
+  NIAH quick, smokes.
+- NEW QUEUE ITEMS from crawl: TheTom PR#267 LUT register hoist (+9.9%
+  turbo4 decode, take after base port); TheTom PR#271 batched checkpoint-
+  restore prefill (40→1115 t/s, UNVERIFIED — evaluate); spiritbuun
+  0461612ba TCQ codebook in smem for MMA (+32% tg@32k — only if we adopt
+  TCQ in prod); spiritbuun 7a7dfc7e2 cooperative FWHT128 encode
+  (set_rows 131→9.9ms — prefill lever, evaluate after MMA); OSCAR2
+  6ea6a2cd0 D512+cp.async, 4622556dc nbatch_fa long-ctx scaling (mine
+  later if depth perf still lacking).
+- Item 5 ops round 3: DONE in commit 74cc9b578 (circuit breaker both paths,
+  coredump env, graph-reuse fallback doc; resume-tokens closed not-needed —
+  checkpoint fix makes retry ~1s; tool-salvage deferred to battery arc).
+  Proxy 49/49. Deploys at next restart window (batch with MMA).
+- Re-sweep DONE (both agents). Upstream sweep verdict: merged-side clean
+  (12-commit gap touches nothing of ours) — misses are OPEN PRs/issues.
+  QUEUE INSERTIONS (priority order after MMA batch):
+  A. **issue 27106 acceptance regression** — draft acceptance collapses on
+     Qwen3.8 from b10430; WE ARE b10435. Vulkan 92% vs CUDA ~36-50%
+     (also 26750). Our 59-63% may be regressed. Bisect b10428..b10430,
+     fix/revert → potentially biggest decode win. DO AFTER MMA BATCH.
+  B. Cheap crash/correctness picks: PR 26651 (sampler abort w/ draft-mtp
+     30K+ — likely bites us), 26426 (dry sampler heap), 26771 (CUDA graph
+     recapture after pool flush), 25636 (K-shift null rotation buffer).
+  C. Cheap perf picks: PR 24565 (SM120 FA MMA config, 15 lines), 26812+
+     25575 (GPU top-k/argmax — we pay full-logits D2H per token at
+     top-k 20), 25635 (XOR-swizzle FA smem tiles), 26079 (mvq→MMQ
+     crossover tunable).
+  D. GDN kernels: PR 26001 chunked prefill (+939L, DeltaNet prefill =
+     bottleneck), 22587 row-per-warp GDN decode (bench'd on 5090-class).
+  E. Watchlist issues (our shape): 27090 (520K prefill death), 27102
+     (sustained-decode XID8 lockup), 26609 (FA IMA on qwen35), 25717
+     (vision mmproj IMA w/ FA), 23606 (NaN >80K on 3.6-hybrid, stale).
+  F. VRAM smalls: PR 25465 (spec ctx overalloc under fit-params), 26574,
+     26487 (blocking sync kills 100% CPU busy-wait), 26130 (VRAM in
+     /metrics). Plus 21551 (warn-only unsupported KV types — helps our
+     upstreaming). NOT running --cache-ram (27148 cross-restore bug).
