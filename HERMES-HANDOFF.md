@@ -95,9 +95,26 @@ and is what cracked it. Their two upstream nits stand: the "~8K" continuation
 nudge teaches write-splitting for a failure class where it can't help, and
 continuations re-pay full prefill.
 
-## STACK STATE (live now)
+## STACK STATE (live now — updated 2026-08-14, Qwen3.8 cutover)
 
-- Model: `/home/erol/ai/turboquant/models/Qwen3.6-27B-Q6_K.gguf` (unsloth, qwen35).
+- **PRODUCTION IS NOW Qwen3.8-27B** (`models/qwen38/Qwen3.8-27B-Q6_K.gguf`,
+  arch qwen35, embedded NextN/MTP block — needs binary ≥ commit 815b14d61).
+  Profile: `start-long-38.sh` (409600 / YaRN 1.5625 / turbo4 / alphas
+  1.10-1.12 / temp 1.0 / reasoning_effort xhigh by default). Validated
+  2026-08-14: effort ladder xhigh 3/4 clean renders (medium 2/4, low 0/2,
+  xhigh@t0.6 1/2 with one 131K-cap truncation); NIAH effective 5/5 at 130K
+  and 380K (scorer's CTRL "FABRICATED" = false-positive, model refuses
+  correctly while quoting the Meridian code — fix the scorer someday);
+  proxy-path acceptance 1/1 clean render, 0 tripwire alerts. Costs to know:
+  xhigh art turns ≈ 40-100K tokens / 20-40 min; ~1/12 runs brushes Hermes's
+  131072 max_tokens mid-think (finish=length, properly terminated — knob is
+  Hermes-side); 3.8 detours to skill_view/bash before write_file (real
+  Hermes loops handle this; single-shot harnesses must be loop-tolerant).
+  Battery harness max_tokens raised 30000→131072 to match the real wire.
+  Rollback: `stop.sh && cp build-g1/bin/llama-server.pre-nextn
+  build-g1/bin/llama-server && start-long.sh` (3.6 slot saves archived in
+  slots-long/pre-38-backup/).
+- Previous model (rollback pair): `/home/erol/ai/turboquant/models/Qwen3.6-27B-Q6_K.gguf` (unsloth, qwen35).
 - Server: `build-g1/bin/llama-server` — G1 + tonight's two patches. Built from
   worktree `/home/erol/ai/turboquant/turboquant-g1` (branch checkout), staged
   into `turboquant-kv-cache/build-g1/bin/`. Rollbacks:

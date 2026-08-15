@@ -156,7 +156,7 @@ def mode_preverify(port, runs):
     for run in range(1, runs + 1):
         print(f"[preverify run {run}/{runs}] sending pagoda prompt (33K sys + 38 tools)...", flush=True)
         msgs = [{"role": "system", "content": sysp}, {"role": "user", "content": PAGODA}]
-        content, tcs, finish, stats = stream_request(port, msgs, tools, 30000)
+        content, tcs, finish, stats = stream_request(port, msgs, tools, 131072)
         ok, problems = check_turn(f"run{run}", content, tcs, finish, stats, expect_tool="write_file")
         wf = next((t for t in tcs if t["name"] == "write_file"), None)
         if wf:
@@ -186,7 +186,7 @@ def mode_soak(port, rounds):
                  "3 files (config.json, main.py, README.md), track progress with todos, finish with a summary. "
                  "For main.py write a complete 200-line voxel-scene generator script in ONE write_file call."}]
         for turn in range(1, 11):
-            content, tcs, finish, stats = stream_request(port, msgs, tools, 30000)
+            content, tcs, finish, stats = stream_request(port, msgs, tools, 131072)
             ok, _ = check_turn(f"r{rnd}t{turn}", content, tcs, finish, stats)
             all_ok &= ok
             if tcs:
