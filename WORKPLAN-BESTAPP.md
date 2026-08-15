@@ -69,6 +69,16 @@ deploy batch. Slot files archived on config change. Rollback binaries kept.
   and IF 90% reference is real). 
 - 27106 bisect: CLOSED as parked-experiment above (not a blind bisect).
 
+## MICRO-SYNC b10448 DONE (2026-08-15 night) — acceptance regression fixed
+- Merged upstream master (12 commits) CLEAN, zero conflicts. Key: #27133
+  yield_to_queue redesign → **greedy acceptance 72.9% → 82.5%**, greedy
+  coding decode 122.2 tok/s (best ever). Parked 77918caf3-revert experiment
+  CLOSED-BY-UPSTREAM. Residual vs ~90% Vulkan reference = watchlist only.
+- Depth gate: prefill 2670 / decode 78.9 @38K — band held. Deployed.
+- Remaining queue: trajectory/multi-hop battery (next, big), sparse-decode
+  design arc, upstream PR karma batch, small parked re-tests (24565, GDN
+  pair, DSpark draft prototype).
+
 ## LLGUIDANCE + GRAMMAR-TAX VERDICT (closed)
 - llguidance compiled in (engine v1.8.0; plain-lark verified; json_schema on
   the CHAT endpoint blocked by fork schema-rework gap — documented, optional).
