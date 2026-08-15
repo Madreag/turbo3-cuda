@@ -1221,7 +1221,6 @@ static __global__ void k_set_rows_turbo4(
     // ---- Step 8: Write norm (thread 0 only) ----
     if (j == 0) {
         blk->norm  = __float2half(corrected_norm);
-        blk->rnorm = __float2half(0.0f);  // unused in 4-bit mode
     }
 
     GGML_UNUSED(ne10);

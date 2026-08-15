@@ -41,15 +41,15 @@ static __constant__ float TURBO_MID_2BIT[3] = {
 // ---- 3-bit centroids (Lloyd-Max for N(0, 1/128)) ----
 
 static constexpr __device__ float TURBO_CENTROIDS_3BIT[8] = {
-    -0.190685f, -0.117832f, -0.065717f, -0.021460f,
-     0.021460f,  0.065717f,  0.117832f,  0.190685f
+    -0.190207f, -0.118786f, -0.066822f, -0.021663f,
+     0.021663f,  0.066822f,  0.118786f,  0.190207f
 };
 
 // ---- Midpoints for nearest centroid lookup ----
 
 static __constant__ float TURBO_MID_3BIT[7] = {
-    -0.154259f, -0.091775f, -0.043589f, 0.0f,
-     0.043589f,  0.091775f,  0.154259f
+    -0.154496f, -0.092804f, -0.044243f, 0.0f,
+     0.044243f,  0.092804f,  0.154496f
 };
 
 // ---- WHT sign arrays (seed=42) ----
@@ -378,19 +378,23 @@ static __device__ __forceinline__ float turbo2_dequant_element(
 // 16 Lloyd-Max optimal centroids for N(0, 1/sqrt(128))
 // Must match CPU reference in ggml-turbo-quant.c
 // constexpr → register allocation (0 latency vs ~30 cycle __constant__/__device__ memory)
+// CORRECTED 2026-08-15 (TheTom PR #197 port): the previous table was
+// mis-scaled by exactly 0.064/0.0884 — ~4.9% tail clipping, ~2.1x excess
+// MSE, mean KLD −33% after correction. Encode+decode swap together;
+// existing slot files invalidated (archived).
 static constexpr __device__ float TURBO_CENTROIDS_4BIT[16] = {
-    -0.173926f, -0.117195f, -0.089527f, -0.068756f,
-    -0.051262f, -0.035597f, -0.020989f, -0.006938f,
-     0.006938f,  0.020989f,  0.035597f,  0.051262f,
-     0.068756f,  0.089527f,  0.117195f,  0.173926f,
+    -0.241529f, -0.182877f, -0.143016f, -0.111036f,
+    -0.083292f, -0.058050f, -0.034299f, -0.011349f,
+     0.011349f,  0.034299f,  0.058050f,  0.083292f,
+     0.111036f,  0.143016f,  0.182877f,  0.241529f,
 };
 
 // 15 midpoints for binary search quantization
 // Must match CPU reference nearest_centroid_4bit() in ggml-turbo-quant.c
 static __device__ const float TURBO_MID_4BIT[15] = {
-    -0.145560f, -0.103361f, -0.079142f, -0.060009f, -0.043430f,
-    -0.028293f, -0.013963f,  0.000000f,  0.013963f,  0.028293f,
-     0.043430f,  0.060009f,  0.079142f,  0.103361f,  0.145560f,
+    -0.212203f, -0.162947f, -0.127026f, -0.097164f, -0.070671f,
+    -0.046174f, -0.022824f,  0.000000f,  0.022824f,  0.046174f,
+     0.070671f,  0.097164f,  0.127026f,  0.162947f,  0.212203f,
 };
 
 // ---- Nearest 4-bit centroid index (binary search tree, 4 comparisons) ----
