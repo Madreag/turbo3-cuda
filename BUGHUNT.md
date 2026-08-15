@@ -1,5 +1,23 @@
 # Bug Hunt — 2026-08-15
 
+> **STATUS (2026-08-15 EOD): Batches 1+2 SHIPPED and verified in production.**
+> Batch 1 (proxy v6.3 + scripts): commit b6b480dff. Batch 2 (C++, 18 files):
+> commit 16b7f9272 on sync/2026-08; binary deployed (102.9MB static).
+> Every finding in sections A, C, D fixed except: C7 (upstream draft-KV note,
+> accepted), Anthropic thinking-memory/#5 + lock-timeout/#13 + key-reload/#21
+> (documented as by-design/deferred). Batch 3 shelved by user.
+> **Verification:** the exact stale slot file that aborted production this
+> morning now returns clean HTTP 400 with the server healthy (the A2 money
+> test); slot save/restore round-trips 158MB in 185/64ms; proxy 403s /slots
+> and raw completion paths; generation smoke 109.1 tok/s finish=stop;
+> test suite 49/49; VRAM 31534 MiB stable.
+> **Two corrections from deploy evidence:** D2 is REFUTED — GGML_USE_CUDA IS
+> defined for the llama lib in this build (flags.make), so the InnerQ hook is
+> real and inert only because uncalibrated. And the InnerQ identity-fill INFO
+> line does not appear in the live server.log — output verified coherent
+> (109 tok/s, exact-match smoke), consistent with the scale tensor not being
+> multiplicatively consumed on the current graph path; cosmetic follow-up.
+
 Four parallel read-only audits over the production stack (ops scripts, proxy.py, carried
 C++ patches in turboquant-sync, server flag/speculative semantics), findings verified
 against primary sources before recording. Production config for triage: Qwen3.8-27B

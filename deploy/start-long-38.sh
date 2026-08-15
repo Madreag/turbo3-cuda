@@ -95,7 +95,7 @@ if [ "$code" != "200" ]; then
     [ "$code" = "dead" ] || echo "(process still alive — may still be loading; check status.sh)" >&2
     exit 1
 fi
-grep -m1 "new slot, n_ctx" "$CONF/server.log"
+grep -m1 "n_ctx_slot" "$CONF/server.log"
 
 nohup python3 "$CONF/proxy.py" \
   --upstream http://127.0.0.1:8131 \
