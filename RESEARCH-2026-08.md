@@ -1,5 +1,27 @@
 # Research Campaign — 2026-08-15
 
+> **TIER 0 EXECUTED same evening — measured outcomes:**
+> - Checkpoint cherry-picks (#26885, #25592×2, #24891, #26004) applied,
+>   built, deployed. **Restore-reuse hole CLOSED and verified**: post-restore
+>   turn now processes 49 tokens (was 4,166). Owner swaps at depth: minutes →
+>   ~1s. Conflicts resolved: 24891's n_past_common clamp kept; its
+>   invalidation condition subsumed by 25592's.
+> - **ngram-mod cascade: WASH on our model** (same-day same-prompt: 85.5 vs
+>   83.8 pure) — ngram drafts don't beat the trained MTP head on fresh code.
+>   Not adopted. `--spec-draft-backend-sampling`: also wash (83.0). Not
+>   adopted. Yesterday's 89-98 band was prompt-set variance.
+> - **Verify-batch cliff hypothesis INVERTED by measurement** at 38K depth:
+>   n_max=2 (batch 3 → MMA+F16-dequant) = 41.4 tok/s; n_max=1 (batch 2 →
+>   VEC) = **9.8 tok/s**. The F16-dequant MMA path is the FAST path at depth;
+>   VEC in-kernel dequant is the bottleneck. Implication: MTP-off (batch 1 =
+>   VEC) ≈ ≤10 tok/s at depth → MTP is ~4× at depth, and the **MMA-turbo
+>   kernel port (T1-6) is promoted to top strategic priority** (native turbo
+>   MMA skips the per-step F16 conversion). n_max=2 kept.
+> - Production final: checkpoint binary + unchanged validated flags, smoke
+>   96.7 tok/s finish=stop, VRAM 32039 MiB (+~500MB vs pre-checkpoint —
+>   in-memory checkpoints; monitor, reduce --ctx-checkpoints if WSL dxg
+>   squeezes reappear).
+
 Five parallel research tracks (fork ecosystem, upstream movement, KV-compression
 frontier, decode-speed frontier, serving/reliability) + local verification
 probes against the production tree. Full agent evidence in session; this file
