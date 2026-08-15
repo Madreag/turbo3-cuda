@@ -36,9 +36,15 @@ export TURBO_NORM_ALPHA_V=1.00
 export TURBO4_NORM_ALPHA_V=1.00
 
 mkdir -p /home/erol/.config/llama-tcq/slots-long
+# MTP speculative decode (2026-08-15 A/B at production sampling): coding
+# 89-98 tok/s vs 57 baseline (1.55-1.71x, draft acceptance 59-63%), general
+# 1.66x. Cost: art/tool-grammar turns measured 0.6-0.85x (n=2, grammar-draft
+# interaction suspected — investigation lever). Enabled because primary use
+# is coding/general per user direction. No VRAM cost at full profile.
 nohup ./build-g1/bin/llama-server \
   -m /home/erol/ai/turboquant/models/qwen38/Qwen3.8-27B-Q6_K.gguf \
   --mmproj /home/erol/ai/turboquant/models/qwen38/mmproj-F16.gguf \
+  --spec-type draft-mtp --spec-draft-n-max 2 \
   -ctk turbo4 -ctv turbo4 \
   -fa on -ngl 99 -c $CTX --no-context-shift \
   --rope-scaling yarn --rope-scale $SCALE --yarn-orig-ctx 262144 \

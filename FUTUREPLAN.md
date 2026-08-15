@@ -12,15 +12,15 @@
   0.0054 vs 0.0087) that doesn't justify −70K ctx or CPU-vision today;
   data preserved for future re-evaluation. Long-ctx q8K spots skipped
   (only needed for adoption).
-- Phase C (MTP): RESOLVED 2026-08-15, NOT ADOPTED — fit was free (draft
-  context costs ~0 VRAM at full 409600+vision; no ctx scale-back needed) and
-  correctness clean, but at PRODUCTION SAMPLING (temp 1.0, top-k 20) draft
-  acceptance collapses: measured 29.5 and 41.5 tok/s effective on real art
-  turns vs ~49 baseline — a net slowdown. The 1.52x was greedy-only. MTP
-  stays available (--spec-type draft-mtp) for greedy/low-temp workloads;
-  future lever = acceptance-threshold tuning if upstream exposes it.
-  Post-sync render clean-rate running tally 4/7 (vs 3/4 pre-sync) — within
-  binomial noise of the 75% band; keep counting before concluding anything.
+- Phase C (MTP): ADOPTED 2026-08-15 (verdict REVERSED by coding A/B after
+  user challenge — the first rejection sampled only art turns). At production
+  sampling: coding 89-98 tok/s vs 57.4 baseline (1.55-1.71x, acceptance
+  59-63%), general 95.4 vs 57.5 (1.66x); art/tool-grammar turns 0.6-0.85x
+  (n=2, grammar-draft interaction suspected — investigation lever). Enabled
+  globally (no per-request toggle exists) per coding-primary usage. Zero VRAM
+  cost at full profile. Bonus fix: stale slot-state files from config changes
+  crashed the server via GGML_ASSERT in state_seq_load_file — now refuses
+  gracefully (upstreamable). Slot saves archived on config change as ops rule.
 - Phases D/E: pending (Hermes-side).
 
 Planning document. Nothing here is executed until the user says go.
