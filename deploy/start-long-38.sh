@@ -53,6 +53,12 @@ SCALE=1.5625          # = CTX / 262144 (native)
 
 export TURBO_NORM_ALPHA_V=1.00
 export TURBO4_NORM_ALPHA_V=1.00
+# CUDA crash forensics (ops round 3): on a CUDA abort, write a coredump
+# instead of losing the evidence (WSL CaptureCrash dumps land Windows-side).
+export CUDA_ENABLE_COREDUMP_ON_EXCEPTION=1
+# KNOWN UPSTREAM RISK (#26558): MTP + CUDA-graph reuse can hard-crash
+# (cuBLAS status 7) under KV saturation. If that signature appears in
+# server.log, relaunch with:  export LLAMA_GRAPH_REUSE_DISABLE=1  (perf cost)
 
 mkdir -p "$CONF/slots-long"
 # Key via --api-key-file: the old --api-key "$KEY" form exposed the key in

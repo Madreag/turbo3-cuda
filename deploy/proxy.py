@@ -1054,6 +1054,26 @@ async def handle_chat_completions(request: web.Request) -> web.StreamResponse:
             status=401,
         )
 
+    # Circuit breaker (2026-08-15 ops round 3): while the upstream server is
+    # down/restarting, fail FAST with 503 instead of queueing on the owner
+    # lock behind a request that will only error after connect-retries. Cleared
+    # by any successful upstream contact.
+    down_since = request.app.get("_upstream_down_since")
+    if down_since is not None and time.time() - down_since < 120:
+        try:
+            async with session.get(f"{upstream}/health",
+                                   timeout=ClientTimeout(total=2)) as hr:
+                if hr.status == 200:
+                    request.app["_upstream_down_since"] = None
+                else:
+                    raise ClientConnectionError()
+        except Exception:
+            return web.json_response(
+                {"error": {"message": "upstream llama-server is restarting — retry shortly",
+                           "type": "service_unavailable"}},
+                status=503,
+            )
+
     reasoning_mem = request.app.setdefault("reasoning_memory", {}).setdefault(user_id, {})
     body_bytes = await request.read()
     is_streaming = False
@@ -1104,6 +1124,7 @@ async def handle_chat_completions(request: web.Request) -> web.StreamResponse:
                 async with session.request(
                     request.method, url, headers=headers, data=body_bytes, timeout=timeout
                 ) as upstream_resp:
+                    request.app["_upstream_down_since"] = None
                     resp_headers = {
                         k: v for k, v in upstream_resp.headers.items()
                         if k.lower() not in ("content-length", "content-encoding", "transfer-encoding")
@@ -1268,6 +1289,18 @@ async def handle_chat_completions(request: web.Request) -> web.StreamResponse:
                     raise
                 trace_write(f"{time.time():.3f} retry after ServerDisconnectedError")
                 await asyncio.sleep(0.2)
+            except ClientConnectionError:
+                # Upstream unreachable (restart window / crash). Trip the
+                # circuit breaker and answer cleanly instead of a raw 500;
+                # mid-stream deaths are handled inside the pump.
+                request.app["_upstream_down_since"] = time.time()
+                if response_prepared:
+                    raise
+                return web.json_response(
+                    {"error": {"message": "upstream llama-server unreachable — retry shortly",
+                               "type": "service_unavailable"}},
+                    status=503,
+                )
 
 
 async def handle_anthropic_messages(request: web.Request) -> web.StreamResponse:
@@ -1308,6 +1341,23 @@ async def handle_anthropic_messages(request: web.Request) -> web.StreamResponse:
             status=400,
         )
 
+    # Circuit breaker — mirror of the OpenAI path's fast-fail during restarts.
+    down_since = request.app.get("_upstream_down_since")
+    if down_since is not None and time.time() - down_since < 120:
+        try:
+            async with session.get(f"{upstream}/health",
+                                   timeout=ClientTimeout(total=2)) as hr:
+                if hr.status == 200:
+                    request.app["_upstream_down_since"] = None
+                else:
+                    raise ClientConnectionError()
+        except Exception:
+            return web.json_response(
+                {"type": "error", "error": {"type": "overloaded_error",
+                                             "message": "upstream llama-server is restarting — retry shortly"}},
+                status=503,
+            )
+
     is_streaming = bool(anthropic_body.get("stream"))
     requested_model = anthropic_body.get("model", "qwopus-v3")
 
@@ -1327,8 +1377,19 @@ async def handle_anthropic_messages(request: web.Request) -> web.StreamResponse:
         }
         timeout = ClientTimeout(total=None, sock_read=600)
 
-        async with session.post(url, headers=headers, data=openai_bytes,
-                                timeout=timeout) as upstream_resp:
+        try:
+            upstream_cm = session.post(url, headers=headers, data=openai_bytes,
+                                       timeout=timeout)
+            upstream_resp = await upstream_cm.__aenter__()
+        except ClientConnectionError:
+            request.app["_upstream_down_since"] = time.time()
+            return web.json_response(
+                {"type": "error", "error": {"type": "overloaded_error",
+                                             "message": "upstream llama-server unreachable — retry shortly"}},
+                status=503,
+            )
+        request.app["_upstream_down_since"] = None
+        try:
             resp_headers = {
                 "Content-Type": "application/json",
             }
@@ -1439,6 +1500,8 @@ async def handle_anthropic_messages(request: web.Request) -> web.StreamResponse:
                 await response.write("".join(closing).encode("utf-8"))
             await response.write_eof()
             return response
+        finally:
+            await upstream_cm.__aexit__(None, None, None)
 
 
 async def handle_passthrough(request: web.Request) -> web.StreamResponse:
