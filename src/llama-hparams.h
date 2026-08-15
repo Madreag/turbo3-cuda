@@ -261,14 +261,11 @@ struct llama_hparams {
     // TODO: can be expressed via the `new n_embd_inp_impl` and remove this param
     uint32_t n_deepstack_layers = 0;
 
-<<<<<<< ours
     // deepstack layer array (Granite4 Vision)
     // -1  => no deepstack
     // >=0 => input embedding index for deepstack injection
     std::array<int32_t, LLAMA_MAX_LAYERS> deepstack_mapping_arr;
 
-=======
->>>>>>> theirs
     // gemma4 per-layer embedding
     uint32_t n_embd_per_layer = 0;
 

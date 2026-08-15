@@ -61,7 +61,6 @@
 #include "ggml-cuda/dsv4-hc.cuh"
 #include "ggml-cuda/set.cuh"
 #include "ggml-cuda/set-rows.cuh"
-#include "ggml-cuda/turbo-wht.cuh"
 #include "ggml-cuda/pad_reflect_1d.cuh"
 #include "ggml-cuda/solve_tri.cuh"
 #include "ggml-cuda/tri.cuh"
@@ -1914,7 +1913,8 @@ static void ggml_cuda_mul_mat_id(ggml_backend_cuda_context & ctx, ggml_tensor * 
         static_assert(MMVQ_MAX_BATCH_SIZE == MMVF_MAX_BATCH_SIZE);
         if (ne2 <= MMVQ_MAX_BATCH_SIZE) {
             if (ggml_is_quantized(src0->type)) {
-                if (ne2 <= MMVQ_MMID_MAX_BATCH_SIZE) {
+                const int mmvq_mmid_max = get_mmvq_mmid_max_batch(src0->type, cc);
+                if (ne2 <= mmvq_mmid_max) {
                     ggml_cuda_mul_mat_vec_q(ctx, src0, src1, ids, dst);
                     return;
                 }
@@ -2075,9 +2075,6 @@ static bool ggml_cuda_compute_forward(ggml_backend_cuda_context & ctx, struct gg
             break;
         case GGML_OP_SET_ROWS:
             ggml_cuda_op_set_rows(ctx, dst);
-            break;
-        case GGML_OP_TURBO_WHT:
-            ggml_cuda_turbo_wht(ctx, dst);
             break;
         case GGML_OP_SET:
             ggml_cuda_op_set(ctx, dst);
@@ -2554,23 +2551,16 @@ static bool ggml_cuda_graph_check_compability(ggml_cgraph * cgraph) {
         }
 
         // [TAG_MUL_MAT_ID_CUDA_GRAPHS]
-<<<<<<< ours
         if (node->op == GGML_OP_MUL_MAT_ID) {
             const int cc = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;
             if (ggml_cuda_mul_mat_id_needs_sync(node, cc)) {
                 // the mul_mat_id fallback path synchronizes the stream, so we cannot use CUDA graphs
                 // ref: https://github.com/ggml-org/llama.cpp/pull/18958
                 use_cuda_graph = false;
-=======
-        if (node->op == GGML_OP_MUL_MAT_ID && (!ggml_is_quantized(node->src[0]->type) || node->ne[2] > MMVQ_MMID_MAX_BATCH_SIZE)) {
-            // under these conditions, the mul_mat_id operation will need to synchronize the stream, so we cannot use CUDA graphs
-            // TODO: figure out a way to enable for larger batch sizes, without hurting performance
-            // ref: https://github.com/ggml-org/llama.cpp/pull/18958
-            use_cuda_graph = false;
->>>>>>> theirs
 #ifndef NDEBUG
-            GGML_LOG_DEBUG("%s: disabling CUDA graphs due to unsupported node type\n", __func__);
+                GGML_LOG_DEBUG("%s: disabling CUDA graphs due to unsupported node type\n", __func__);
 #endif
+            }
         }
 
         if (!use_cuda_graph) {
@@ -4954,9 +4944,7 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
                     case GGML_TYPE_Q5_1:
                     case GGML_TYPE_Q8_0:
                     case GGML_TYPE_MXFP4:
-#ifdef FP8_AVAILABLE
                     case GGML_TYPE_NVFP4:
-#endif // FP8_AVAILABLE
                     case GGML_TYPE_Q2_K:
                     case GGML_TYPE_Q3_K:
                     case GGML_TYPE_Q4_K:
@@ -4994,7 +4982,6 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
                     case GGML_TYPE_Q5_0:
                     case GGML_TYPE_Q5_1:
                     case GGML_TYPE_Q8_0:
-<<<<<<< ours
                     case GGML_TYPE_Q2_K:
                     case GGML_TYPE_Q3_K:
                     case GGML_TYPE_Q4_K:
@@ -5008,14 +4995,6 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
                     case GGML_TYPE_IQ1_S:
                     case GGML_TYPE_IQ1_M:
                     case GGML_TYPE_IQ4_XS:
-=======
-                    case GGML_TYPE_TURBO3_0:
-                    case GGML_TYPE_TURBO2_0:
-                    case GGML_TYPE_TURBO4_0:
-                    case GGML_TYPE_TURBO1_5:
-                    case GGML_TYPE_TURBO3_TCQ:
-                    case GGML_TYPE_TURBO2_TCQ:
->>>>>>> theirs
                         return true;
                     case GGML_TYPE_IQ4_NL:
                     case GGML_TYPE_MXFP4:
@@ -5032,7 +5011,6 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
             } break;
         case GGML_OP_SET_ROWS:
             {
-<<<<<<< ours
                 return (
                            (
                                (op->type == GGML_TYPE_F32 || op->type == GGML_TYPE_F16 || op->type == GGML_TYPE_BF16 ||
@@ -5043,25 +5021,6 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
                                op->type == GGML_TYPE_F16 && op->src[0]->type == GGML_TYPE_F16
                            )
                        ) &&
-=======
-                // turbo3/turbo2/turbo1.5 require head_dim divisible by 64 (supports 64 and 128 WHT groups)
-                if ((op->type == GGML_TYPE_TURBO3_0 || op->type == GGML_TYPE_TURBO2_0 ||
-                     op->type == GGML_TYPE_TURBO1_5) && op->src[0]->ne[0] % 64 != 0) {
-                    return false;
-                }
-                // turbo4/TCQ require head_dim divisible by 128 (block size = 128)
-                if ((op->type == GGML_TYPE_TURBO4_0 || op->type == GGML_TYPE_TURBO3_TCQ ||
-                     op->type == GGML_TYPE_TURBO2_TCQ) && op->src[0]->ne[0] % 128 != 0) {
-                    return false;
-                }
-                return (op->type == GGML_TYPE_F32 || op->type == GGML_TYPE_F16 || op->type == GGML_TYPE_BF16 ||
-                       op->type == GGML_TYPE_Q4_0 || op->type == GGML_TYPE_Q4_1 || op->type == GGML_TYPE_Q5_0 ||
-                       op->type == GGML_TYPE_Q5_1 || op->type == GGML_TYPE_Q8_0 || op->type == GGML_TYPE_IQ4_NL ||
-                       op->type == GGML_TYPE_TURBO3_0 || op->type == GGML_TYPE_TURBO2_0 ||
-                       op->type == GGML_TYPE_TURBO4_0 || op->type == GGML_TYPE_TURBO1_5 ||
-                       op->type == GGML_TYPE_TURBO3_TCQ || op->type == GGML_TYPE_TURBO2_TCQ) &&
-                       op->src[0]->type == GGML_TYPE_F32 &&
->>>>>>> theirs
                        (op->src[1]->type == GGML_TYPE_I64 || op->src[1]->type == GGML_TYPE_I32);
             } break;
         case GGML_OP_SET:
@@ -5222,7 +5181,6 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
         case GGML_OP_CLAMP:
         case GGML_OP_LOG:
             return true;
-<<<<<<< ours
         case GGML_OP_ADD:
         case GGML_OP_SUB:
         case GGML_OP_MUL:
@@ -5230,11 +5188,6 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
             return (op->src[0]->type == GGML_TYPE_F32 || op->src[0]->type == GGML_TYPE_F16) &&
                    (op->src[1]->type == GGML_TYPE_F32 || op->src[1]->type == GGML_TYPE_F16) &&
                    (op->type         == GGML_TYPE_F32 || op->type         == GGML_TYPE_F16);
-=======
-        case GGML_OP_TURBO_WHT:
-            return op->src[0]->type == GGML_TYPE_F32 && op->type == GGML_TYPE_F32 &&
-                   op->src[0]->ne[0] % 64 == 0;  // head dim must be divisible by 64 (supports 64 and 128 WHT groups)
->>>>>>> theirs
         case GGML_OP_SSM_SCAN: {
             const int32_t K = ggml_get_op_params_i32(op, 0);
 

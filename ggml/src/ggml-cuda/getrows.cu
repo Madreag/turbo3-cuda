@@ -344,7 +344,6 @@ static void ggml_cuda_get_rows_switch_src0_type(
             get_rows_cuda_q<QK8_0, QR8_0, dequantize_q8_0>(src0_d, src1_d, dst_d,
                 ne00, nb01, nb02, nb03, ne10, ne11, ne12, nb10, nb11, nb12, nb1, nb2, nb3, stream);
             break;
-<<<<<<< ours
         case GGML_TYPE_Q2_K:
             get_rows_cuda_kq<64, dst_t, dequantize_q2_K<dst_t>>(src0_d, src1_d, dst_d,
                 ne00, nb01, nb02, nb03, ne10, ne11, ne12, nb10, nb11, nb12, nb1, nb2, nb3, stream);
@@ -403,30 +402,6 @@ static void ggml_cuda_get_rows_switch_src0_type(
             break;
         case GGML_TYPE_MXFP4:
             get_rows_cuda_kq<32, dst_t, dequantize_mxfp4<dst_t>>(src0_d, src1_d, dst_d,
-=======
-        case GGML_TYPE_TURBO3_0:
-            get_rows_cuda_q<QK_TURBO3, 2, dequantize_turbo3_0>(src0_d, src1_d, dst_d,
-                ne00, nb01, nb02, nb03, ne10, ne11, ne12, nb10, nb11, nb12, nb1, nb2, nb3, stream);
-            break;
-        case GGML_TYPE_TURBO2_0:
-            get_rows_cuda_q<QK_TURBO2, 2, dequantize_turbo2_0>(src0_d, src1_d, dst_d,
-                ne00, nb01, nb02, nb03, ne10, ne11, ne12, nb10, nb11, nb12, nb1, nb2, nb3, stream);
-            break;
-        case GGML_TYPE_TURBO4_0:
-            get_rows_cuda_q<QK_TURBO4, QR_TURBO4, dequantize_turbo4_0>(src0_d, src1_d, dst_d,
-                ne00, nb01, nb02, nb03, ne10, ne11, ne12, nb10, nb11, nb12, nb1, nb2, nb3, stream);
-            break;
-        case GGML_TYPE_TURBO1_5:
-            get_rows_cuda_q<QK_TURBO1_5, QR_TURBO1_5, dequantize_turbo1_5>(src0_d, src1_d, dst_d,
-                ne00, nb01, nb02, nb03, ne10, ne11, ne12, nb10, nb11, nb12, nb1, nb2, nb3, stream);
-            break;
-        case GGML_TYPE_TURBO3_TCQ:
-            get_rows_cuda_q<QK_TURBO3_TCQ, QR_TURBO3_TCQ, dequantize_turbo3_tcq>(src0_d, src1_d, dst_d,
-                ne00, nb01, nb02, nb03, ne10, ne11, ne12, nb10, nb11, nb12, nb1, nb2, nb3, stream);
-            break;
-        case GGML_TYPE_TURBO2_TCQ:
-            get_rows_cuda_q<QK_TURBO2_TCQ, QR_TURBO2_TCQ, dequantize_turbo2_tcq>(src0_d, src1_d, dst_d,
->>>>>>> theirs
                 ne00, nb01, nb02, nb03, ne10, ne11, ne12, nb10, nb11, nb12, nb1, nb2, nb3, stream);
             break;
         default:
