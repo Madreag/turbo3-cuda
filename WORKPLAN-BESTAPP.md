@@ -69,6 +69,13 @@ deploy batch. Slot files archived on config change. Rollback binaries kept.
   and IF 90% reference is real). 
 - 27106 bisect: CLOSED as parked-experiment above (not a blind bisect).
 
+## USER DECISION 2026-08-15: 320K LOCKED for testing phase
+Good-data-first: 320K + 1.5GB headroom guarantees no paging artifacts in any
+measurement. AFTER the testing phase: push context toward max, and offer an
+MTP-OFF profile (frees ~0.8GB draft ctx + scratch → more context) as a
+user-selectable trade. Queue continues: llguidance → micro-sync → trajectory
+battery → sparse decode; paged-era A/B re-tests woven in where cheap.
+
 ## VRAM AUTOPSY (2026-08-15 night) — RETRACTS THE 'DRIFT' FINDING BELOW
 USER WAS RIGHT: it was the VRAM ceiling, not environmental drift. Allocation
 table (-lv 4 probe): weights 20819 + KV 5808 + 3× compute 1828 (target/draft/
