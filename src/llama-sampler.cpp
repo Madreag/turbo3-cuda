@@ -1183,6 +1183,13 @@ static void llama_sampler_dist_apply(struct llama_sampler * smpl, llama_token_da
         sum_cum += p;
     }
 
+    // degenerate logits (e.g. all -inf/NaN, seen with MTP draft heads on long contexts)
+    // - sample the last candidate instead of aborting
+    if (!std::isfinite(sum_cum) || sum_cum <= 0.0f) {
+        cur_p->selected = cur_p->size - 1;
+        return;
+    }
+
 #if 1
     // sample from the obtained probabilities and normalize the probs in a single pass
     // this is ~3x faster on Mac with full gpt-oss vocab than the version below
@@ -1207,8 +1214,7 @@ static void llama_sampler_dist_apply(struct llama_sampler * smpl, llama_token_da
         cur_p->data[i].p /= sum_cum;
     }
 
-    // fallback to the last token (don't think this can happen)
-    assert(found);
+    // fallback to the last token (can happen with degenerate logits)
     if (!found) {
         cur_p->selected = cur_p->size - 1;
     }
@@ -3690,6 +3696,12 @@ struct llama_sampler * llama_sampler_init_dry(const struct llama_vocab * vocab, 
 struct llama_sampler * llama_sampler_init_dry_testing(float dry_multiplier, float dry_base, int32_t dry_allowed_length, int32_t dry_penalty_last_n, const std::vector<std::vector<llama_token>>& seq_breakers) {
     llama_vocab dummy_vocab;
     auto * result = llama_sampler_init_dry(&dummy_vocab, dry_multiplier, dry_base, dry_allowed_length, dry_penalty_last_n, NULL, 0);
+
+    // when DRY is disabled, llama_sampler_init_dry() returns a no-op sampler whose ctx is not a llama_sampler_dry
+    if (result->iface != &llama_sampler_dry_i) {
+        return result;
+    }
+
     auto * ctx = (llama_sampler_dry *) result->ctx;
 
     // Process the token-based sequence breakers

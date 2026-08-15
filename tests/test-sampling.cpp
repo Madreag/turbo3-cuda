@@ -165,6 +165,26 @@ static void test_typical(const std::vector<float> & probs, const std::vector<flo
     tester.check();
 }
 
+static void test_dist_degenerate() {
+    // degenerate distributions (all logits -inf or NaN) must fall back to the last
+    // candidate instead of aborting via assert(found), see llama_sampler_dist_apply
+    for (int mode = 0; mode < 2; mode++) {
+        std::vector<llama_token_data> data(4);
+        for (size_t i = 0; i < data.size(); i++) {
+            const float logit = mode == 0 ? -INFINITY : NAN;
+            data[i] = { (llama_token) i, logit, 0.0f };
+        }
+        llama_token_data_array cur_p = { data.data(), data.size(), -1, false };
+
+        llama_sampler * sampler = llama_sampler_init_dist(0);
+        llama_sampler_apply(sampler, &cur_p);
+        llama_sampler_free(sampler);
+
+        GGML_ASSERT(cur_p.selected == (llama_token) cur_p.size - 1);
+        printf("Degenerate dist distribution (%s) OK\n", mode == 0 ? "-inf" : "NaN");
+    }
+}
+
 static void test_penalties(
     const std::vector<float> & probs, const std::vector<llama_token> & last_tokens,
     const std::vector<float> & probs_expected, float repeat_penalty, float alpha_frequency, float alpha_presence
@@ -376,6 +396,8 @@ int main(void) {
     test_typical({0.97f, 0.01f, 0.01f, 0.01f}, {0.97f},            0.5f);
     test_typical({0.4f, 0.2f, 0.2f, 0.2f},     {0.2f, 0.2f, 0.2f}, 0.5f);
 
+    test_dist_degenerate();
+
     test_penalties({0.2f, 0.2f, 0.2f, 0.2f, 0.2f}, {0}, {0, 0.25f, 0.25f, 0.25f, 0.25f},   50.0f, 0.0f, 0.0f);
     test_penalties({0.2f, 0.2f, 0.2f, 0.2f, 0.2f}, {0, 1, 2}, {0, 0, 0, 0.5f, 0.5f},       50.0f, 0.0f, 0.0f);
     test_penalties({0.2f, 0.2f, 0.2f, 0.2f, 0.2f}, {0, 1, 2, 0, 0}, {0, 0, 0, 0.5f, 0.5f}, 50.0f, 0.0f, 0.0f);
@@ -390,6 +412,10 @@ int main(void) {
     test_dry({0.2f, 0.2f, 0.2f, 0.2f, 0.2f}, {0, 1, 3, 4, 0, 1}, {0.2f, 0.2f, 0.2f, 0.2f, 0.2f}, 1.0f, 1.1f, 2, 6, {{3}});
     test_dry({0.2f, 0.2f, 0.2f, 0.2f, 0.2f}, {0, 1, 2, 0, 1}, {0.241818f, 0.241818f, 0.032727f, 0.241818f, 0.241818f}, 2.0f, 1.1f, 2, 5, {});
     test_dry({0.2f, 0.2f, 0.2f, 0.2f, 0.2f}, {0, 1, 2, 3, 4, 0, 1}, {0.2f, 0.2f, 0.2f, 0.2f, 0.2f}, 1.0f, 1.1f, 4, 7, {});
+    // disabled DRY configurations must be no-ops (multiplier == 0, base < 1, penalty_last_n == 0)
+    test_dry({0.2f, 0.2f, 0.2f, 0.2f, 0.2f}, {0, 1, 2, 0, 1}, {0.2f, 0.2f, 0.2f, 0.2f, 0.2f}, 0.0f, 1.1f, 2, 5, {{3}});
+    test_dry({0.2f, 0.2f, 0.2f, 0.2f, 0.2f}, {0, 1, 2, 0, 1}, {0.2f, 0.2f, 0.2f, 0.2f, 0.2f}, 1.0f, 0.0f, 2, 5, {{3}});
+    test_dry({0.2f, 0.2f, 0.2f, 0.2f, 0.2f}, {0, 1, 2, 0, 1}, {0.2f, 0.2f, 0.2f, 0.2f, 0.2f}, 1.0f, 1.1f, 2, 0, {{3}});
 
     test_top_n_sigma({0.1f, 0.2f, 0.3f, 0.4f}, {0.0f, 0.0f, 0.428571f, 0.571429f}, 1.00f);
     test_top_n_sigma({0.1f, 0.2f, 0.3f, 0.4f}, {0.1f, 0.2f, 0.3f, 0.4f}, 0.00f); // top_n_sigma == 0 now represents a no-op rather than greedy decoding as of PR#13345
