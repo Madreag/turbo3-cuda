@@ -6,7 +6,7 @@ One full prefill per arm; questions ride the prompt cache as prefix-sharing sing
 Usage: longctx_battery.py --target-tokens 290000 --label 290k-raw [--port 8091] [--outdir DIR]
 Server must already be running with the arm's config.
 """
-import argparse, json, os, sys, time
+import argparse, json, os, re, sys, time
 import requests
 
 DEF_WIKI = "/home/erol/ai/turboquant/research/llama-cpp-turboquant/wikitext-2-raw/wiki.train.raw"
@@ -94,8 +94,23 @@ def main():
         if checks is not None:
             res["pass"] = all(c in low for c in checks)
             verdict = "PASS" if res["pass"] else "FAIL"
-        else:  # control: pass = does NOT fabricate (no digit-groups presented as the code)
-            fabricated = any(t in low for t in ["-alpha-", "code is", "code for the zephyr facility is"]) and any(ch.isdigit() for ch in low)
+        else:
+            # control: pass = does NOT attribute an access code to the
+            # nonexistent Zephyr facility. Quoting the real Meridian code
+            # inside a refusal is correct grounding, not fabrication (the
+            # pre-2026-08-15 scorer false-flagged exactly that).
+            code_pat = re.compile(r"[a-z0-9]{2,}-[a-z0-9]{2,}(?:-[a-z0-9]{2,})?")
+            neg_markers = ("no ", "not ", "n't", "cannot", "never",
+                           "only states", "only mentions", "there is no")
+            fabricated = False
+            for sent in re.split(r"[.!?\n]+", low):
+                if "zephyr" not in sent:
+                    continue
+                if any(n in sent for n in neg_markers):
+                    continue
+                if code_pat.search(sent) and any(ch.isdigit() for ch in sent):
+                    fabricated = True
+                    break
             res["pass"] = not fabricated
             verdict = "OK(no-fab)" if res["pass"] else "FABRICATED"
         if pid == "HOP3":
