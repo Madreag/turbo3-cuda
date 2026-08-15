@@ -95,7 +95,26 @@ and is what cracked it. Their two upstream nits stand: the "~8K" continuation
 nudge teaches write-splitting for a failure class where it can't help, and
 continuations re-pay full prefill.
 
-## STACK STATE (live now — updated 2026-08-14, Qwen3.8 cutover)
+
+## STACK STATE UPDATE — 2026-08-15: UPSTREAM SYNC LIVE
+- Production binary is now the SYNC BUILD (branch sync/2026-08, based on
+  upstream 9d57ce456 of 2026-08-14 + TurboQuant port; pushed to myfork).
+  Types renumbered 80-85. Full battery passed: 42/42 unit, ladder 3/3
+  complete (2/3 clean renders — gate met), NIAH 130K 5/5 + 380K 5/5 (after
+  fixing upstream's new n_ctx_train slot cap to respect explicit rope
+  scaling — commit dc6f94ef2, upstreamable), vision verbatim, non-stream
+  think+fenced now returns 200 (upstream parser + our degrade net), effort
+  kwargs verified. MTP measured 1.52x decode, correctness = f16-control
+  equivalent; NOT yet enabled in production (fit check at full profile
+  pending — the next decision).
+- Binary lineage in build-g1/bin: llama-server (sync, 103MB self-contained),
+  .pre-sync (Aug-14 NextN build), .pre-nextn, .pre-grammar-fix. Old 7.9MB
+  binaries were RPATH-dependent on their build trees; the sync binary has no
+  build-tree deps.
+- Rollback: stop.sh && cp build-g1/bin/llama-server.pre-sync
+  build-g1/bin/llama-server && start-long-38.sh
+
+## STACK STATE (2026-08-14, Qwen3.8 cutover — superseded above)
 
 - **PRODUCTION IS NOW Qwen3.8-27B** (`models/qwen38/Qwen3.8-27B-Q6_K.gguf`,
   arch qwen35, embedded NextN/MTP block — needs binary ≥ commit 815b14d61).
