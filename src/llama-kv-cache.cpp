@@ -183,7 +183,12 @@ llama_kv_cache::llama_kv_cache(
     // For layer-adaptive modes: use KV layer ordinals (not raw layer indices)
     // so boundary targeting works correctly on hybrid architectures where only
     // a subset of layers have KV caches (e.g., Qwen3.5-27B: 16 of 64 layers).
-    const uint32_t n_kv_layers = hparams.n_layer_kv();
+    uint32_t n_kv_layers = 0;
+    for (uint32_t il = 0; il < hparams.n_layer(); il++) {
+        if (hparams.has_kv(il)) {
+            n_kv_layers++;
+        }
+    }
     uint32_t kv_ord = 0;
 
     for (uint32_t il = 0; il < n_layer; il++) {
@@ -298,7 +303,7 @@ llama_kv_cache::llama_kv_cache(
                     return mode;
                 }
                 // Auto-enable Boundary V (mode 12) when V is turbo2 and model has enough layers
-                if (type_v == GGML_TYPE_TURBO2_0 && hparams.n_layer >= 8) {
+                if (type_v == GGML_TYPE_TURBO2_0 && hparams.n_layer() >= 8) {
                     LLAMA_LOG_INFO("llama_kv_cache: Boundary V auto-enabled for turbo2-V (mode 12, opt-out: TURBO_LAYER_ADAPTIVE=0)\n");
                     return 12;
                 }
