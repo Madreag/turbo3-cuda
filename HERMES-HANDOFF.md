@@ -85,6 +85,39 @@ Rollback: stop → `cp build-g1/bin/llama-server.pre-gdn22587 build-g1/bin/llama
 **Slot files are config-specific** — archive `slots-long/*.bin` on any config
 change (server refuses stale ones gracefully; proxy erases and re-prefills).
 
+## HERMES CLIENT SETTINGS (3.8-era, 2026-08-16 — supersedes 3.5 tuning)
+
+- **Context to declare**: 320,000 (speed profile). Max profile: 400,000.
+- **Compaction: trigger ~120K tokens, compact down to ~40K.** Rationale:
+  exact state-tracking (ledger axis) is clean through the ~128K tier and
+  spirals at the 256K tier — an agent's edit-loops NEED the state axis, so
+  keep working context inside it; decode is also ~65-77 t/s at 128K vs ~40
+  at 260K. Post-compaction re-prefill of a ~40K prefix ≈ 15-25 s.
+- **Sampler: DO NOT change.** temp 1.0 / top-p 0.95 / top-k 20 (client
+  already sends 1.0 ✓). Lower temps measured: no shallow benefit on our
+  instruments, think-spirals at depth (0.6 @128K-tier, 0.4 @64K).
+- **No reasoning_effort override** — template default (xhigh) won the
+  ladder; "low" scored 0/2 on renders.
+- **max_tokens: 49,152 recommended** (was 131,072). Bounds a runaway
+  think's blast radius (spiral at 40 t/s: 131K cap = ~55 min burn, 49K =
+  ~20 min) while clearing every healthy deep think we've measured (battery
+  budgets 32K). Ceiling is graceful (finish_reason: length).
+- **Streaming ON, per-request client timeout ≥ 20 min** (deep 32K-token
+  thinks at depth take ~13 min; proxy heartbeats keep streams alive).
+- **Prefix stability**: never mutate the system prompt mid-session; keep
+  tool outputs append-only. Per-turn TTFT tracks the DELTA (~0.8 ms/token)
+  as long as the prefix is stable — compaction is the ONE intentional
+  prefix rewrite per cycle.
+- **One request at a time** — the proxy serializes per-slot; parallel
+  fan-out just queues.
+- **Images**: ~21 s first-encode each (mmproj on CPU), then cached in
+  context — batch/crop judiciously.
+- **Max profile** (`start-max-38.sh`, 400K): for reference-heavy work that
+  genuinely needs >280K of un-compactable material; decode ~28-31 t/s deep
+  and NO MTP; recall axes (hops/needle) hold at depth but exact
+  state-tracking does not — treat it as read-heavy, reason-shallow mode,
+  and raise the compaction trigger to ~250K there.
+
 ## THE VRAM LAW (hard-won 2026-08-15)
 
 Budget = weights (20.8 GB) + KV (17.5 KiB/token incl. draft) + recurrent ×(1+n_max)
