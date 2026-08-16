@@ -68,12 +68,16 @@ Ceiling behavior is graceful: `finish_reason: length`, over-cap prompts → 400.
   same-model reference `kld38/kld_logprobs_f16_qwen38_yarn.json` (a stale
   cross-model reference produces false-catastrophic numbers — 3.6-era file is
   quarantined). Baseline: 0.00473 / 98.3%.
-- `trajectory_battery.py` — the agentic axis. Baseline
-  (`trajbase/traj_b10448-320k-baseline2.json`, seed 42): hops-2/3/4,
-  correction, executable code-traj = PASS at 64K/128K/256K; **ledger
-  (state-tracking) is the discriminative cliff: 8/8@64K → spiral@128K →
-  4/8@256K**. Any quant/kernel change must hold the perfect columns and not
-  lower ledger.
+- `trajectory_battery.py` — the agentic axis. Supports `--temp` (default 0
+  = greedy, the historical baseline mode). SERVING-TEMP baseline
+  (2026-08-15, temp 1.0, seeds 42/43, fused+GDN binary): hops-2/3/4,
+  correction, code-traj PASS at 64K/128K/256K; **ledger 8/8 clean through
+  128K (envelope doubled vs the stale greedy record "spiral@128K"), full
+  spiral at 256K**. Historical greedy baseline
+  (`trajbase/traj_b10448-320k-baseline2.json`) kept for greedy-mode
+  comparisons. Gate rule unchanged: changes must hold the perfect columns
+  and not lower ledger at matched temp/seed. Temp policy: 1.0 LOCKED (see
+  TEMP-STUDY.md — lower temps spiral at depth; 0.4 already at 64K).
 - Depth probe: `scratchpad/depth_decode_test.py` (recreate from WORKPLAN if
   /tmp wiped). **Paired-run law:** single-arm vs historical baseline is
   invalid on this box (echo noise ±20%, environmental confounds); A/B =
@@ -117,16 +121,18 @@ lock-acquire has no timeout (by design: two-user serialization).
   GGML_TURBO_MMA_FUSED=1 (in-tree default also flipped on branch
   feature/sparse-decode). Re-run the P0 probe (~30 min) before believing
   the sparse verdict for any future model swap.
-- **NEXT ARC = TEMP-STUDY.md** (user directive 2026-08-15: inference
-  first): temperature × MTP-acceptance double lever — community claim
-  "temp 0.6 beats 1.0 agentic, 0.4-0.5 for coding" tested with multi-seed
-  battery gates + acceptance/decode curves. Key facts feeding it: battery
-  baselines were GREEDY all along; live prod acceptance reads 0.79-0.90;
-  effort ladder already decided (xhigh@1.0; low = 0/2 renders).
-- THEN: **CLUB3090-PORT-BOARD.md** waves (two-stage ngram+MTP depth sweep
-  P1 with the fused-Q≤4 × draft-depth interaction, tail-KLD three-way P2,
-  rollback audit P5, launcher hardening P6; Wave 2 = fill-ladder P3 before
-  any ctx push, VRAM calculator P8, agentic-turns probe P7).
+- **TEMP-STUDY: CLOSED 2026-08-15 — KEEP temp 1.0** (community 0.6 claim
+  real at 64K, INVERTS at 128K — 0.6 spirals; 0.4 spirals at 64K; the
+  MTP-acceptance "gap" closed as entropy, +12-18 pts greedy vs 1.0, no
+  anomaly). Serving-temp envelope re-baselined: ledger clean through 128K
+  now (was spiral), 256K spiral. Zero config change. Full data:
+  TEMP-STUDY.md.
+- **NEXT: CLUB3090-PORT-BOARD.md** waves. Wave-1 progress: P5 rollback
+  audit DONE-clean (triple-guarded); P2 tail-KLD three-way IN PROGRESS;
+  remaining: P1 ngram+MTP depth sweep (with the fused-Q≤4 × draft-depth
+  interaction) + P4 n_max=3, P6 launcher hardening, F-doc fixes. Wave 2 =
+  fill-ladder P3 before any ctx push, VRAM calculator P8, agentic-turns
+  probe P7.
 - Post-testing-phase: context push + optional MTP-off profile (gated on P3).
 - **GDN #22587: ADOPTED 2026-08-15** (un-parked, merged with b10448
   snapshot-slot semantics, all gates green — see WORKPLAN GDN section).

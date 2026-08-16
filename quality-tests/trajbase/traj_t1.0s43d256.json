@@ -1,0 +1,63 @@
+{
+ "label": "t1.0s43d256",
+ "seed": 43,
+ "depths": [
+  256000
+ ],
+ "pass": 5,
+ "total": 6,
+ "results": [
+  {
+   "depth": 256000,
+   "test": "hops-2",
+   "pass": true,
+   "want": "Mirren Flats",
+   "got": "Mirren Flats"
+  },
+  {
+   "depth": 256000,
+   "test": "hops-3",
+   "pass": true,
+   "want": "365",
+   "got": "365"
+  },
+  {
+   "depth": 256000,
+   "test": "hops-4",
+   "pass": true,
+   "want": "33-L609",
+   "got": "33-L609"
+  },
+  {
+   "depth": 256000,
+   "test": "ledger",
+   "pass": false,
+   "score": "0/8",
+   "want": {
+    "R1": "16",
+    "R2": "-78",
+    "R3": "-31",
+    "R4": "1",
+    "R5": "-77",
+    "R6": "62",
+    "R7": "65",
+    "R8": "16"
+   },
+   "got": {}
+  },
+  {
+   "depth": 256000,
+   "test": "correction",
+   "pass": true,
+   "want": "6964",
+   "got": "6964"
+  },
+  {
+   "depth": 256000,
+   "test": "code-traj",
+   "pass": true,
+   "err": null
+  }
+ ],
+ "ts": "2026-08-15 23:03"
+}

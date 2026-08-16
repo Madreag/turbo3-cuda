@@ -139,7 +139,55 @@ stability, not sampling variance):
 - hops/correction/code-traj: 18/18 PASS at every temp — temperature does
   not touch the recall/override/executable axes at 64K.
 
-## Explicitly out of scope
+### Phase B @128K finals (2026-08-15): the claim INVERTS at depth
+
+| seed | T=1.0 | T=0.6 |
+|---|---|---|
+| 42 | **6/6, ledger 8/8** | 5/6, ledger **0/8 (empty answers — spiral)** |
+| 43 | **6/6, ledger 8/8** | 6/6, ledger 8/8 |
+
+- **Spiral risk climbs the temp scale with depth**: 64K → 0.4 spirals,
+  0.6 perfect; 128K → 0.6 spirals (1/2 seeds), 1.0 clean. The community
+  claim is real at shallow depth and inverts where our workload lives —
+  consistent with their "preliminary, surface-level" caveat. Qwen's 1.0
+  recommendation wins for long-context thinking serving, mechanism now
+  understood (temp entropy is the anti-loop guard; the guard matters more
+  the deeper the think).
+- hops/correction/code-traj: PASS at 128K for BOTH temps, all seeds.
+- **BONUS: the recorded 128K ledger cliff is STALE.** Old baseline
+  (greedy, pre-fused/GDN binary): 8/8@64K → spiral@128K → 4/8@256K.
+  Today at serving temp: **ledger 8/8@128K × 2 seeds.** Attribution
+  (temp-mode vs binary evolution) not isolated — practically irrelevant:
+  production serves at 1.0 on this binary. 256K tier re-run in flight to
+  update the envelope.
+
+### Phase B @256K (2026-08-15): cliff relocated, envelope doubled
+T=1.0 × seeds {42,43}: hops/correction/code-traj PASS, **ledger 0/8 both
+seeds, `got:{}`** = think-budget exhaustion even at 1.0. New serving-temp
+envelope: **ledger clean through 128K (was: spiral@128K on the stale greedy
+record — usable state-tracking depth DOUBLED), spiral at 256K** (old greedy
+4/8@256K got partial answers; today's mode is full spiral — tier remains
+beyond capability either way).
+
+## VERDICT (Phase C, 2026-08-15) — KEEP T=1.0. Item CLOSED.
+
+- **Sampler unchanged**: production stays temp 1.0 / top-p 0.95 / top-k 20
+  (clients already send 1.0; zero config change ships this verdict).
+- Community claim adjudicated with multi-seed evidence at 3 depths:
+  REAL at shallow depth (0.6 swept 9/9 at 64K, the only perfect temp),
+  **INVERTED at our working depths** (0.6 spirals at 128K 1/2 seeds; 0.4
+  spirals at 64K). Mechanism: temperature entropy is the anti-loop guard
+  for long thinking; the guard's value grows with depth. Qwen's 1.0
+  recommendation is correct for long-context thinking serving.
+- Low-temp-for-coding (0.4-0.5): usable only with thinking off — not our
+  serving shape; anyone doing it per-request should know the spiral risk.
+- MTP-acceptance "gap": CLOSED as entropy (Phase A curve, +12-18 pts
+  greedy vs 1.0, no anomaly). Adopting a lower temp would have bought
+  +5-9% code decode — the quality data says don't.
+- Bonus deliverables: battery --temp flag (greedy default preserved);
+  serving-temp envelope re-baselined (the handoff's cliff table updated);
+  live-traffic acceptance context (0.79-0.90 per-task readings are real,
+  workload-dependent).
 reasoning_effort re-test (decided; renders 0/2 at low), NVFP4 weights
 (vLLM/Blackwell path, not our stack), sampler shape changes (top-p/top-k
 stay 0.95/20 — one variable at a time), club-3090 port waves (queued
