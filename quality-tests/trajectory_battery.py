@@ -182,7 +182,7 @@ def run_depth(port, depth, rng, results):
         ("hops-4", f"What is the seal code on the locker used by the office of the Calder dossier custodian? Code only.", ans["code"]),
     ]
     for name, q, want in hop_qs:
-        c, t = ask(port, [sysmsg, {"role": "user", "content": q}], 500)
+        c, t = ask(port, [sysmsg, {"role": "user", "content": q}], 2048)
         ok = want.lower() in c.lower()
         results.append({"depth": depth, "test": name, "pass": ok,
                         "want": want, "got": c[:90]})
@@ -191,7 +191,7 @@ def run_depth(port, depth, rng, results):
     q = ("Compute the final values of registers R1..R8 from all LEDGER lines "
          "(SET replaces, ADD adds, SUB subtracts, starting at 0). "
          "Answer as lines 'R1=<n>' .. 'R8=<n>'.")
-    c, _ = ask(port, [sysmsg, {"role": "user", "content": q}], 16384)
+    c, _ = ask(port, [sysmsg, {"role": "user", "content": q}], 32768)
     got = dict(re.findall(r"(R[1-8])\s*=\s*(-?\d+)", c))
     n_ok = sum(1 for k, v in ans["regs"].items() if got.get(k) == v)
     results.append({"depth": depth, "test": "ledger", "pass": n_ok == 8,

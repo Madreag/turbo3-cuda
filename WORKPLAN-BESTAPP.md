@@ -69,6 +69,19 @@ deploy batch. Slot files archived on config change. Rollback binaries kept.
   and IF 90% reference is real). 
 - 27106 bisect: CLOSED as parked-experiment above (not a blind bisect).
 
+## TRAJECTORY BATTERY DONE — baseline recorded (traj_b10448-320k-baseline2)
+- hops-2/3/4, correction, code-traj: **PASS at 64K/128K/256K, all clean** —
+  chained recall, correction-override, and executable coding trajectories
+  survive full-depth quantized cache.
+- ledger (exact state-tracking) = THE discriminative axis: 8/8 @64K →
+  thought-spiral (>32K think, no answer) @128K → 4/8 @256K. Matches the
+  July prediction "multi-hop, not recall, is the cliff". GATE RULE: fixed
+  seed; future changes must hold hops/corr/code-traj perfect and not lower
+  ledger scores. Budgets: hops 2048, ledger 32768 (two budget-confound traps
+  fixed during bring-up — empty `got` = budget, not quality).
+- DSpark draft prototype: CLOSED-NOT-FITTING — 0.8-1.5GB draft weights vs
+  1.5GB total headroom at 320K; revisit only in an MTP-off/smaller-ctx era.
+
 ## MICRO-SYNC b10448 DONE (2026-08-15 night) — acceptance regression fixed
 - Merged upstream master (12 commits) CLEAN, zero conflicts. Key: #27133
   yield_to_queue redesign → **greedy acceptance 72.9% → 82.5%**, greedy
