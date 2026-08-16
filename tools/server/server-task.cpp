@@ -157,7 +157,13 @@ task_result_state::task_result_state(const common_chat_parser_params & chat_pars
     , oai_resp_message_id("msg_" + random_string()) {
     if (chat_parser_params.is_continuation && !chat_parser_params.echo) {
         // initialize chat_msg to avoid emitting a delta containing the assistant prefill
-        chat_msg = common_chat_parse("", true, chat_parser_params);
+        try {
+            chat_msg = common_chat_parse("", true, chat_parser_params);
+        } catch (const std::exception & e) {
+            // a strict-format parser can throw even on the empty seed —
+            // start empty rather than abort construction
+            SRV_WRN("continuation seed parse failed (%s) — starting empty\n", e.what());
+        }
     }
 }
 
@@ -169,10 +175,41 @@ common_chat_msg task_result_state::update_chat_msg(
     generated_text += text_added;
     auto msg_prv_copy = chat_msg;
     //SRV_DBG("Parsing chat message: %s\n", generated_text.c_str());
-    auto new_msg = common_chat_parse(
-        generated_text,
-        is_partial,
-        chat_parser_params);
+    common_chat_msg new_msg;
+    try {
+        new_msg = common_chat_parse(
+            generated_text,
+            is_partial,
+            chat_parser_params);
+    } catch (const std::exception & e) {
+        // A parse failure must not corpse the response. Without this, the
+        // exception unwinds into the SSE layer and terminates an otherwise
+        // healthy generation with an in-stream error frame (observed in
+        // production when an ungrammared model emitted tool syntax the
+        // strict-format parser could not consume; a parser failing at
+        // offset 0 previously threw on EVERY streaming delta).
+        if (is_partial) {
+            new_msg = chat_msg;
+            if (new_msg.empty()) {
+                new_msg.role    = "assistant";
+                new_msg.content = generated_text;
+            }
+        } else {
+            SRV_WRN("final chat parse failed, degrading to last good parse: %s\n", e.what());
+            new_msg = chat_msg;
+            // The last good incremental parse may cover only a PREFIX of the
+            // text — returning it would silently drop the un-parsed tail with
+            // a normal finish_reason. If no tool calls were parsed and
+            // coverage is visibly short, return the raw content instead.
+            const size_t covered = new_msg.content.size() + new_msg.reasoning_content.size();
+            if (new_msg.empty() ||
+                (new_msg.tool_calls.empty() && covered + 64 < generated_text.size())) {
+                new_msg = {};
+                new_msg.role    = "assistant";
+                new_msg.content = generated_text;
+            }
+        }
+    }
     if (!new_msg.empty()) {
         new_msg.set_tool_call_ids(generated_tool_call_ids, gen_tool_call_id);
         chat_msg = new_msg;
