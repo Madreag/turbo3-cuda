@@ -3961,6 +3961,30 @@ struct ggml_tensor * ggml_get_rows(
     return result;
 }
 
+// ggml_get_rows_keep: gather rows WITHOUT dequantizing — dst type == src type.
+// TurboQuant sparse decode: raw row copy of quantized (turbo) K/V pages and
+// f16 mask rows. Rows of a must be contiguous (nb[0] == type size) and ne[0]
+// a whole number of blocks. CUDA-only fast path; CPU denies.
+struct ggml_tensor * ggml_get_rows_keep(
+        struct ggml_context * ctx,
+        struct ggml_tensor  * a,
+        struct ggml_tensor  * b) {
+    GGML_ASSERT(a->ne[2] == b->ne[1]);
+    GGML_ASSERT(a->ne[3] == b->ne[2]);
+    GGML_ASSERT(b->ne[3] == 1);
+    GGML_ASSERT(b->type == GGML_TYPE_I32);
+    GGML_ASSERT(a->nb[0] == ggml_type_size(a->type));
+    GGML_ASSERT(a->ne[0] % ggml_blck_size(a->type) == 0);
+
+    struct ggml_tensor * result = ggml_new_tensor_4d(ctx, a->type, a->ne[0], b->ne[0], b->ne[1], b->ne[2]);
+
+    result->op     = GGML_OP_GET_ROWS;
+    result->src[0] = a;
+    result->src[1] = b;
+
+    return result;
+}
+
 // ggml_get_rows_back
 
 struct ggml_tensor * ggml_get_rows_back(

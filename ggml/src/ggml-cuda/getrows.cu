@@ -129,6 +129,46 @@ static __global__ void k_get_rows_float_vec(
     }
 }
 
+// TurboQuant sparse decode: same-type RAW row gather (quantized src, e.g.
+// turbo4 KV pages). Copies row_bytes per gathered row; int4 fast path when
+// 16B-aligned, byte tail otherwise. No dequantization.
+static __global__ void k_get_rows_raw(
+        const char * __restrict__ src0_ptr, const int32_t * __restrict__ src1_ptr, char * __restrict__ dst_ptr,
+        const int64_t row_bytes,
+        const int64_t ne11, const uint3 ne12_fdv,
+        const size_t s1, const size_t s2, const size_t s3,      // dst strides in BYTES
+        const size_t nb01, const size_t nb02, const size_t nb03,
+        const size_t s10, const size_t s11, const size_t s12) {
+    ggml_cuda_pdl_lc();
+    ggml_cuda_pdl_sync();
+    for (int64_t z = blockIdx.z; z < ne11*(int64_t)ne12_fdv.z; z += gridDim.z) {
+        const int i10 = blockIdx.x;
+        const uint2 dm = fast_div_modulo((uint32_t)z, ne12_fdv);
+        const int i11 = dm.x;
+        const int i12 = dm.y;
+
+        const int i01 = src1_ptr[i10*s10 + i11*s11 + i12*s12];
+
+        char       * GGML_CUDA_RESTRICT dst_row  = dst_ptr  + i10*s1 + i11*s2 + i12*s3;
+        const char * GGML_CUDA_RESTRICT src0_row = src0_ptr + (int64_t)i01*nb01 + i11*nb02 + i12*nb03;
+
+        const bool aligned = (row_bytes % 16 == 0) &&
+            ((uintptr_t)dst_row % 16 == 0) && ((uintptr_t)src0_row % 16 == 0);
+        if (aligned) {
+            const int64_t nvec = row_bytes / 16;
+            int4       * GGML_CUDA_RESTRICT d4 = (int4 *)       dst_row;
+            const int4 * GGML_CUDA_RESTRICT s4 = (const int4 *) src0_row;
+            for (int64_t i = blockIdx.y*blockDim.x + threadIdx.x; i < nvec; i += gridDim.y*blockDim.x) {
+                d4[i] = s4[i];
+            }
+        } else {
+            for (int64_t i = blockIdx.y*blockDim.x + threadIdx.x; i < row_bytes; i += gridDim.y*blockDim.x) {
+                dst_row[i] = src0_row[i];
+            }
+        }
+    }
+}
+
 template<typename grad_t, typename dst_t>
 static __global__ void k_get_rows_back_float(
         const grad_t * __restrict__ grad, const int32_t * __restrict__ rows, dst_t * __restrict__ dst,
@@ -440,6 +480,27 @@ void get_rows_cuda(
         int64_t ne10, int64_t ne11, int64_t ne12, size_t nb10, size_t nb11, size_t nb12,
         size_t nb1, size_t nb2, size_t nb3,
         cudaStream_t stream) {
+    // TurboQuant sparse decode: same-type quantized gather = raw row copy
+    if (dst_type == src0_type && ggml_is_quantized(src0_type)) {
+        const size_t row_bytes = ggml_row_size(src0_type, ne00);
+        const size_t s10 = nb10 / sizeof(int32_t);
+        const size_t s11 = nb11 / sizeof(int32_t);
+        const size_t s12 = nb12 / sizeof(int32_t);
+        GGML_ASSERT(ne12 > 0);
+        const uint3 ne12_fdv = init_fastdiv_values(ne12);
+        const int64_t nvec = (row_bytes % 16 == 0) ? row_bytes / 16 : row_bytes;
+        const int block_num_y = (int) ((nvec + CUDA_GET_ROWS_BLOCK_SIZE - 1) / CUDA_GET_ROWS_BLOCK_SIZE);
+        const dim3 block_dims(CUDA_GET_ROWS_BLOCK_SIZE, 1, 1);
+        const dim3 block_nums(ne10, MIN(block_num_y, UINT16_MAX), MIN(ne11*ne12, UINT16_MAX));
+        const ggml_cuda_kernel_launch_params launch_params = {block_nums, block_dims, 0, stream};
+        ggml_cuda_kernel_launch(k_get_rows_raw, launch_params,
+            (const char *) src0_d, src1_d, (char *) dst_d,
+            (int64_t) row_bytes, ne11, ne12_fdv,
+            nb1, nb2, nb3,
+            nb01, nb02, nb03,
+            s10, s11, s12);
+        return;
+    }
     switch (dst_type) {
         case GGML_TYPE_F32:
             ggml_cuda_get_rows_switch_src0_type(src0_d, src0_type, src1_d, (float *) dst_d,

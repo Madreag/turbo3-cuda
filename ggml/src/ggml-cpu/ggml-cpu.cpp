@@ -440,6 +440,10 @@ static bool ggml_backend_cpu_device_supports_op(ggml_backend_dev_t dev, const st
     }
 
     switch (op->op) {
+        case GGML_OP_GET_ROWS:
+            // ggml_get_rows_keep (same-type raw gather, sparse decode) is
+            // CUDA-only for quantized dst; CPU impl only writes F32/I32.
+            return op->type == GGML_TYPE_F32 || op->type == GGML_TYPE_I32;
         case GGML_OP_CPY:
         case GGML_OP_SET_ROWS:
             return
