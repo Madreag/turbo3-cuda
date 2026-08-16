@@ -1199,8 +1199,22 @@ private:
 
         int n_ctx_slot = llama_n_ctx_seq(ctx_tgt);
         if (n_ctx_slot > n_ctx_train) {
-            SRV_WRN("the slot context (%d) exceeds the training context of the model (%d) - capping\n", n_ctx_slot, n_ctx_train);
-            n_ctx_slot = n_ctx_train;
+            // Rope scaling (YaRN etc.) is a deliberate request to run past the
+            // training context — capping would silently clamp validated
+            // long-context deployments to n_ctx_train. Scaling can come from
+            // the CLI or from GGUF metadata (the library resolves UNSPECIFIED
+            // to the model's trained scaling), so check both.
+            const bool cli_scaling = params_base.rope_scaling_type != LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED &&
+                                     params_base.rope_scaling_type != LLAMA_ROPE_SCALING_TYPE_NONE;
+            const bool model_scaling = params_base.rope_scaling_type == LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED &&
+                                       llama_model_rope_freq_scale_train(model_tgt) != 1.0f;
+            if (cli_scaling || model_scaling) {
+                SRV_WRN("slot context (%d) exceeds training context (%d) — allowed: rope scaling configured\n",
+                        n_ctx_slot, n_ctx_train);
+            } else {
+                SRV_WRN("the slot context (%d) exceeds the training context of the model (%d) - capping\n", n_ctx_slot, n_ctx_train);
+                n_ctx_slot = n_ctx_train;
+            }
         }
 
         slots.clear();
