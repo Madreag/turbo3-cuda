@@ -84,6 +84,61 @@ at 1.0, shipped as client config or per-key proxy sampler override;
 Whatever the outcome: handoff + WORKPLAN verdict entry with numbers, and
 the "biggest potential decode multiplier left" line gets replaced by data.
 
+## RESULTS
+
+### A0 (2026-08-15): production temp premise CONFIRMED
+Current Hermes capture sends `temperature: 1.0` explicitly (older capture
+omitted it → launcher 1.0 default applied). Production = 1.0 for real.
+Ship mechanism for any change: client config or per-key proxy override;
+launcher default is fallback only.
+
+### Phase A (2026-08-15): acceptance curve — GAP EXPLAINED, item closed
+38K probes, prod binary (fused+GDN), one boot, per-request temp, fixed
+seed, 2 reps (identical — fixed seed ⇒ same path; reps prove measurement
+stability, not sampling variance):
+
+| T | code accept / decode | prose accept / decode |
+|---|---|---|
+| 0.0 | 0.883 / 107.9 | 0.766 / 100.6 |
+| 0.4 | 0.819 / 103.3 | 0.847 / 106.7 |
+| 0.5 | 0.871 / 107.2 | 0.703 / 95.5 |
+| 0.6 | 0.726 / 96.0 | 0.597 / 87.2 |
+| 0.8 | 0.786 / 100.7 | 0.528 / 82.0 |
+| 1.0 | 0.764 / 98.5 | 0.582 / 86.1 |
+
+- **Entropy-driven, confirmed**: greedy vs 1.0 = +12 pts code / +18 pts
+  prose. The recorded "67%" was a workload blend at 1.0 (prose 0.58 / code
+  0.76). NO anomaly → the draft-sampling hunt stays closed. The handoff's
+  "biggest potential decode multiplier left" framing is retired.
+- Mid-curve non-monotonicity (0.6 < 0.8 on code) is CONTENT-trajectory
+  noise: one sampled continuation per temp; content moves acceptance more
+  than temp locally. Curve endpoints are the trustworthy part.
+- Multiplier bound if a low temp is adopted: ~+5-9% code / +11-24% prose
+  decode at T≤0.5; T=0.6 ≈ speed-neutral vs 1.0 within this noise.
+- Decision therefore rests on QUALITY (Phase B) — speed alone justifies
+  at most T≈0.4-0.5, and only if the battery holds.
+
+### Phase B @64K (2026-08-15): T=0.6 sweeps perfect; T=0.4 disqualified
+
+| seed | T=1.0 | T=0.6 | T=0.4 |
+|---|---|---|---|
+| 42 | 5/6 (ledger 7/8: R2 36≠38) | **6/6 (8/8)** | 5/6 (**ledger 0/8 — EMPTY answers**) |
+| 43 | 6/6 | **6/6** | 6/6 |
+| 44 | 6/6 | **6/6** | 6/6 |
+
+- **T=0.6 is the only temp that swept 9/9 tiers perfect across all seeds.**
+  The community's "0.6 beats 1.0 agentic" claim is SUPPORTED at 64K.
+- T=0.4 s=42 ledger `got: {}` — think-budget exhaustion (the spiral trap;
+  Qwen's anti-repetition rationale for 1.0 is real, it just bites at 0.4,
+  not 0.6). **T=0.4 disqualified for think-mode agentic serving** — the
+  commenter's "0.4-0.5 for coding" would need think OFF to be safe; not
+  our serving shape.
+- T=1.0 s=42 ledger 7/8 was an ordinary tracking error (36 vs 38) — at
+  temp>0 even the baseline has quality variance; the historical greedy
+  8/8 baselines were the stable ceiling, as suspected.
+- hops/correction/code-traj: 18/18 PASS at every temp — temperature does
+  not touch the recall/override/executable axes at 64K.
+
 ## Explicitly out of scope
 reasoning_effort re-test (decided; renders 0/2 at low), NVFP4 weights
 (vLLM/Blackwell path, not our stack), sampler shape changes (top-p/top-k

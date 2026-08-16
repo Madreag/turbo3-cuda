@@ -1,0 +1,72 @@
+{
+ "label": "t0.4s43",
+ "seed": 43,
+ "depths": [
+  64000
+ ],
+ "pass": 6,
+ "total": 6,
+ "results": [
+  {
+   "depth": 64000,
+   "test": "hops-2",
+   "pass": true,
+   "want": "Sarn Break",
+   "got": "Sarn Break"
+  },
+  {
+   "depth": 64000,
+   "test": "hops-3",
+   "pass": true,
+   "want": "576",
+   "got": "576"
+  },
+  {
+   "depth": 64000,
+   "test": "hops-4",
+   "pass": true,
+   "want": "69-L535",
+   "got": "69-L535"
+  },
+  {
+   "depth": 64000,
+   "test": "ledger",
+   "pass": true,
+   "score": "8/8",
+   "want": {
+    "R1": "0",
+    "R2": "34",
+    "R3": "-10",
+    "R4": "34",
+    "R5": "60",
+    "R6": "4",
+    "R7": "23",
+    "R8": "0"
+   },
+   "got": {
+    "R1": "0",
+    "R2": "34",
+    "R3": "-10",
+    "R4": "34",
+    "R5": "60",
+    "R6": "4",
+    "R7": "23",
+    "R8": "0"
+   }
+  },
+  {
+   "depth": 64000,
+   "test": "correction",
+   "pass": true,
+   "want": "3932",
+   "got": "3932"
+  },
+  {
+   "depth": 64000,
+   "test": "code-traj",
+   "pass": true,
+   "err": null
+  }
+ ],
+ "ts": "2026-08-15 21:56"
+}

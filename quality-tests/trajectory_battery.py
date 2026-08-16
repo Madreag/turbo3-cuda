@@ -154,9 +154,15 @@ print("CODE-TRAJ PASS")
 """
 
 
+TEMP = 0.0          # set from --temp; 0 = greedy (historical baseline mode)
+SAMPLER_SEED = 42   # set from --seed; sent per-request when TEMP > 0
+
 def ask(port, messages, max_tokens=400):
-    body = {"messages": messages, "max_tokens": max_tokens, "temperature": 0,
+    body = {"messages": messages, "max_tokens": max_tokens, "temperature": TEMP,
             "cache_prompt": True}
+    if TEMP > 0:
+        # production sampler shape at temp>0; fixed seed for reproducibility
+        body.update({"top_p": 0.95, "top_k": 20, "seed": SAMPLER_SEED})
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}/v1/chat/completions",
         data=json.dumps(body).encode(),
@@ -238,7 +244,12 @@ def main():
     ap.add_argument("--depths", default="16000,64000")
     ap.add_argument("--label", default="baseline")
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--temp", type=float, default=0.0,
+                    help="sampling temperature (0 = greedy, the historical baseline mode)")
     args = ap.parse_args()
+    global TEMP, SAMPLER_SEED
+    TEMP = args.temp
+    SAMPLER_SEED = args.seed
     depths = [int(x) for x in args.depths.split(",")]
     results = []
     for d in depths:

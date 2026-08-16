@@ -1,0 +1,63 @@
+{
+ "label": "t0.4s42",
+ "seed": 42,
+ "depths": [
+  64000
+ ],
+ "pass": 5,
+ "total": 6,
+ "results": [
+  {
+   "depth": 64000,
+   "test": "hops-2",
+   "pass": true,
+   "want": "Quill Harbor",
+   "got": "Quill Harbor"
+  },
+  {
+   "depth": 64000,
+   "test": "hops-3",
+   "pass": true,
+   "want": "487",
+   "got": "487"
+  },
+  {
+   "depth": 64000,
+   "test": "hops-4",
+   "pass": true,
+   "want": "52-M856",
+   "got": "52-M856"
+  },
+  {
+   "depth": 64000,
+   "test": "ledger",
+   "pass": false,
+   "score": "0/8",
+   "want": {
+    "R1": "-6",
+    "R2": "38",
+    "R3": "2",
+    "R4": "45",
+    "R5": "-29",
+    "R6": "19",
+    "R7": "26",
+    "R8": "-9"
+   },
+   "got": {}
+  },
+  {
+   "depth": 64000,
+   "test": "correction",
+   "pass": true,
+   "want": "6516",
+   "got": "6516"
+  },
+  {
+   "depth": 64000,
+   "test": "code-traj",
+   "pass": true,
+   "err": null
+  }
+ ],
+ "ts": "2026-08-15 21:44"
+}
