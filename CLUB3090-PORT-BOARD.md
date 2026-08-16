@@ -100,7 +100,13 @@ standing gate metric in kl_divergence.py.
   baseline as a standing gate metric.
 - Effort: ~1-2 h total.
 
-### P3 [ ] Fill-ladder probe — PREREQUISITE for the context push
+### P3 [T] PASSED 2026-08-16 — the failure class DOES NOT EXIST on our stack.
+Speed profile (320K, n3): VRAM +80 MiB ONE-TIME at first prefill, then flat
+to 299,613 cached tokens (91.4%). Max profile (409K, MTP-off): +32 MiB flat
+to 329,249 cached. Bonus: first decode-vs-depth curve past 256K (~85 shallow
+→ ~55-60 @200K → ~40 @266K → 37 @300K on n3; 28-31 @274-329K MTP-off), and
+per-rung prefix-reuse verified at depth. fill_ladder.py is a standing tool.
+Original spec:
 - Their claim ("boots ≠ fills", most transferable ops finding): FA
   transient scratch grows with FILL (~7.9 MB/1K tok their config); a 262K
   alloc filled only to ~125K before OOM; fixed-depth probes give false
@@ -172,7 +178,12 @@ P9 (p-min gate may keep the code win and erase the prose tax). Original:
   cache/checkpoint/proxy change.
 - Effort: ~2 h.
 
-### P8 [ ] VRAM-law calculator (fold into context push)
+### P8 [T→A] SHIPPED 2026-08-16 — tools/vram_law.py, two measured anchors
+(spec-n3 @320K: 31,768; MTP-off @376,832: 29,998 → spec-off drops ~1.9 GB
+of draft/spec compute overhead, not the estimated 350 MB). Option table
+drove the ctx decision: speed profile is AT its ceiling (~334K max); the
+max window lives on the MTP-off branch (~484K theoretical @700-floor, capped
+by YaRN validation at 1.5625/409K). Original spec:
 - Their kv-calc: calibrated predictor, PASS/TIGHT/FAIL verdicts, ±1.5 GB
   band — but their own docs: it CANNOT model llama.cpp (no elastic pool;
   "measured boot ladder only").
