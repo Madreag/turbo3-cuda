@@ -55,7 +55,21 @@ Q≤8 (instances already compiled; gate + validation only).
   verdict used default depth — this supersedes it only if a sweep was
   actually absent (verify in RESEARCH-2026-08 first).
 
-### P2 [ ] Tail-KLD metric + three-way KV comparison — CHEAP, HIGH SIGNAL
+### P2 [T→A] DONE 2026-08-15 — tail metric shipped; five-type ladder run.
+RESULT (157 prompts, fresh f16 ref archived as
+kld38/kld_logprobs_f16_qwen38_yarn_157tail.json; summaries kld38/*_tail):
+q8_0 mean .0019 p99 .056 max .089 top1 99.4% | **turbo4 .0060 / .062 /
+.064 / 96.2%** | q4_0 .0156 / .069 / **1.708** / 96.2% | turbo3_tcq .0154 /
+**.179 / .185** / 93.6% | turbo3 .0182 / .124 / .143 / 88.5%.
+VERDICTS: (1) turbo4 extreme tail = q8_0-class (max even lower) → the
+critique DOES NOT transfer to turbo4; community floor matched at half the
+bytes. (2) q4_0 = the mean-hides-tail cautionary tale (catastrophic 1.71
+single-position blowup). (3) turbo3_tcq independently CONFIRMS the
+critique's shape (better mean than turbo3, fattest extreme tail). (4)
+turbo3 is NOT lossless-class (88.5% top-1). Tail percentiles are now a
+standing gate metric in kl_divergence.py.
+
+### (original P2 spec, for the record)
 - Their claim (sharpest external critique of our tech family): TQ-class KV
   quality claims are mean-level, not tail-level — Anbeeld's data puts
   turbo3_tcq at ~82% precision on the worst 0.1% of positions (JSON keys,
@@ -101,7 +115,8 @@ Q≤8 (instances already compiled; gate + validation only).
 - Gate: net decode win on the code probe without prose loss; battery @64K.
 - Effort: ~1 h. Fold into P1's session (shares harness).
 
-### P5 [ ] Rollback-clamp audit (vllm#50021 pattern insurance)
+### P5 [T] DONE 2026-08-15 — CLEAN (triple-guarded: bounded rollback + explicit false-return contract, set_rs_idx clamp, kernel slot bounds). Original spec:
+### Rollback-clamp audit (vllm#50021 pattern insurance)
 - Their claim: vLLM's MTP×GDN spec path indexes state blocks by an
   UNBOUNDED accepted-token count → wild write → Xid 13/31 dead worker on
   5090-class cards; depth-independent, probabilistic.

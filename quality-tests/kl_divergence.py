@@ -227,10 +227,19 @@ def main():
             mean_kld = sum(klds) / len(klds)
             top1_pct = top1_matches / len(klds) * 100
             rms_dp = math.sqrt(sum(delta_p_sqs) / len(delta_p_sqs))
+            # tail metrics (club-3090 critique: mean-level claims hide tail
+            # damage concentrated on JSON/tool tokens). Percentiles over the
+            # per-prompt KLD samples; resolution scales with --n-prompts.
+            ks = sorted(klds)
+            def pct(p):
+                return ks[min(len(ks) - 1, int(p / 100.0 * len(ks)))]
+            p50, p90, p99, kmax = pct(50), pct(90), pct(99), ks[-1]
             print(f"\n{'='*50}")
             print(f"KL Divergence: {args.type} vs f16")
             print(f"{'='*50}")
             print(f"  KLD (mean):     {mean_kld:.6f}")
+            print(f"  KLD p50/p90:    {p50:.6f} / {p90:.6f}")
+            print(f"  KLD p99/max:    {p99:.6f} / {kmax:.6f}")
             print(f"  Top-1 agree:    {top1_pct:.1f}%")
             print(f"  Delta-p RMS:    {rms_dp:.6f}")
             print(f"  N prompts:      {len(klds)}")
@@ -242,6 +251,10 @@ def main():
                     "type": args.type,
                     "vs": "f16",
                     "kld_mean": mean_kld,
+                    "kld_p50": p50,
+                    "kld_p90": p90,
+                    "kld_p99": p99,
+                    "kld_max": kmax,
                     "top1_agreement_pct": top1_pct,
                     "delta_p_rms": rms_dp,
                     "n_prompts": len(klds),
