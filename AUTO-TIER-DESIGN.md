@@ -140,3 +140,17 @@ post-swap first turn, is_disconnected() aborts a swap nobody awaits.
    time (~20-50 s), continuity (answer references pre-switch context),
    fallback path, tier-down, and the proxy test suite extended (~12 tests).
 Effort: ~1 day including gates.
+
+## QUICK YARN-TAX RESULTS (2026-08-16, 1-hour suite; full A'+B' overnight pending)
+- Identity gate PASSED (yarn@1.0 ≡ none at noise floor, 99.991% same-top).
+- SHALLOW (full-vocab KLD, 32K samples): none→1.25 = 98.49% same-top
+  (-1.5%); none→1.5625 = 97.98% (-2.0%); **unification increment
+  1.25→1.5625 ≈ 0.5% top-1 at short context**, mean-Δp -0.03%. All far
+  below the KV-quant effect (96.2%).
+- DEEP (256K station, n=25 branch probes): the scales genuinely diverge —
+  1.25-vs-1.5625 top-1 agreement 80%, heavy tail. CANNOT be adjudicated by
+  distribution tools (no-yarn sits at its native cliff there; divergence ≠
+  worse). Deep-quality attribution = the overnight matched-config battery
+  (B') at 64K/128K/256K tiers × 3 scales.
+- Data: quality-tests/yarntax/*.json; analyzers yarn_stations.py /
+  yarn_tax_analyze.py.
