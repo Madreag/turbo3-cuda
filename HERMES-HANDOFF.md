@@ -117,13 +117,16 @@ lock-acquire has no timeout (by design: two-user serialization).
   GGML_TURBO_MMA_FUSED=1 (in-tree default also flipped on branch
   feature/sparse-decode). Re-run the P0 probe (~30 min) before believing
   the sparse verdict for any future model swap.
-- **NEXT QUEUE = CLUB3090-PORT-BOARD.md** (2026-08-15 review of the
-  club-3090 community repo): Wave 1 = two-stage ngram+MTP depth sweep
-  (P1, top lever — includes the fused-Q≤4 × draft-depth interaction
-  analysis), tail-KLD metric + turbo4-vs-q8_0-vs-q4_0 three-way (P2),
-  rollback-clamp audit (P5), launcher hardening (P6). Wave 2 = fill-ladder
-  probe (P3, MANDATORY before any ctx push) + VRAM-law calculator (P8) +
-  agentic-turns probe (P7).
+- **NEXT ARC = TEMP-STUDY.md** (user directive 2026-08-15: inference
+  first): temperature × MTP-acceptance double lever — community claim
+  "temp 0.6 beats 1.0 agentic, 0.4-0.5 for coding" tested with multi-seed
+  battery gates + acceptance/decode curves. Key facts feeding it: battery
+  baselines were GREEDY all along; live prod acceptance reads 0.79-0.90;
+  effort ladder already decided (xhigh@1.0; low = 0/2 renders).
+- THEN: **CLUB3090-PORT-BOARD.md** waves (two-stage ngram+MTP depth sweep
+  P1 with the fused-Q≤4 × draft-depth interaction, tail-KLD three-way P2,
+  rollback audit P5, launcher hardening P6; Wave 2 = fill-ladder P3 before
+  any ctx push, VRAM calculator P8, agentic-turns probe P7).
 - Post-testing-phase: context push + optional MTP-off profile (gated on P3).
 - **GDN #22587: ADOPTED 2026-08-15** (un-parked, merged with b10448
   snapshot-slot semantics, all gates green — see WORKPLAN GDN section).

@@ -1,0 +1,91 @@
+# Temperature × MTP-Acceptance Study — the double lever
+
+Status: PLANNED 2026-08-15 (user directive: focus inference; test the
+community claim that temp 1.0 is wrong for coding/agentic work). This is
+the NEXT arc, ahead of the club-3090 port waves.
+
+## Why this is one study, not two
+
+Temperature is a double lever on this stack:
+1. **Quality** (community claim, untested on us): a Qwen3.8-27B-NVFP4 user
+   reports temp 0.6 beat 1.0 on agentic suites ("preliminary… six suites,
+   3× reps, no statistical treatment") and suggests 0.4-0.5 for
+   coding/architecture. Qwen's vendor recommendation is 1.0 — historically
+   an anti-repetition guard for long thinking traces, i.e. tuned for a
+   failure mode, not for agentic accuracy.
+2. **Speed** (our data): MTP acceptance rises as temperature falls
+   (greedy 82.5% vs temp-1.0 ~67%; the coding A/B measured 59-63% at
+   production sampling). If a lower temp is quality-neutral-or-better on
+   OUR battery, a large decode multiplier comes free. This study either
+   banks that multiplier or formally closes the "acceptance gap" as the
+   price of sampling entropy.
+
+## Priors on record (do not re-derive)
+
+- Effort ladder ALREADY DECIDED (launcher header, session f5334395):
+  reasoning_effort=xhigh @ temp 1.0 won pixel-gated renders 3/4 vs medium
+  2/4 vs **low 0/2** — the commenter's `effort:low` is refuted for our
+  render workload; effort stays template-default in this study. Only TEMP
+  varies.
+- **The trajectory battery has always run GREEDY** (`temperature: 0`
+  hardcoded) — all recorded battery baselines are greedy, and serving-temp
+  quality has never been validated. The study must first create temp-1.0
+  baselines before comparing lower temps.
+- **Live prod acceptance TODAY reads 0.79-0.90** (server print_timing
+  lines, post-fused+GDN, real Hermes traffic) — far above the recorded
+  67%. Unknown mix of: clients sending their own temps, code-heavy spans,
+  binary evolution. Phase A0 resolves this.
+- club-3090 cross-engine: greedy inflates spec acceptance ~2×; their
+  llama.cpp MTP at temp 0.6 accepted 55.3% narrative / 71.2% code —
+  acceptance is prompt-type-dependent; probes must split code vs prose.
+- Qwen anti-greedy warning: low temp in thinking mode risks repetition
+  loops — the ledger/spiral axis of our battery is exactly where this
+  would show. Low temp could help (focus) or hurt (loops): empirical.
+
+## Phase A0 — what does production actually run at? (~10 min)
+Inspect recent proxy captures (~/.config/llama-tcq/captures) for
+client-sent sampling params. If Hermes already sends its own temp, the
+launcher's `--temp 1.0` is a dormant fallback and "production = 1.0" is a
+false premise — the study's baseline temp becomes whatever clients send,
+and the shipping mechanism becomes client config or a proxy-level
+override, not the launcher.
+
+## Phase A — acceptance/decode vs temperature curve (~1.5 h GPU)
+- Prod binary, one boot, temp passed per-request (server default untouched).
+- Temps {0.0, 0.4, 0.5, 0.6, 0.8, 1.0} × probes {code-continuation,
+  prose-continuation} @38K, n_predict 700, 2 reps each, ordering repeated.
+- Parse per-task `draft acceptance = X (a/g), mean len = L` from
+  server.log per run window; record decode tok/s from timings.
+- Output: acceptance(T) and decode(T) curves, split by prompt type.
+- Interpretation forks: acceptance rises smoothly as T falls → entropy
+  explanation CONFIRMED, gap closed, proceed on quality; acceptance flat →
+  genuine anomaly → open the draft-sampling hunt (draft/target sampler
+  mismatch, p_min, backend-sampling re-check) — only then.
+
+## Phase B — quality at candidate temps (~2-3 h GPU)
+- Prereq: add `--temp` flag to trajectory_battery.py (one-line body
+  change; keep default 0 so historical baselines stay reproducible).
+- Matrix: battery @64K × temps {1.0, 0.6, 0.4} × seeds {42, 43, 44}
+  (temp>0 is stochastic — single-seed comparisons are not evidence; the
+  community claim's weakness is exactly "no statistical treatment").
+- Ledger @128K (the known cliff/spiral tier) for finalists {1.0, best-low}
+  × 2 seeds — the decisive test of "lower temp helps agentic" vs "lower
+  temp spirals": record spiral rate and think-length distribution per temp.
+- Gates for adopting a lower default: all @64K columns ≥ temp-1.0 baseline
+  across 3 seeds; ledger@128K not worse (score AND spiral rate); Phase A
+  decode win ≥5% at that temp. Renders re-checked only if a temp change is
+  adopted (effort ladder stands).
+
+## Phase C — decision + ship (~30 min)
+Outcomes: (a) adopt lower default (launcher + doc note that clients
+override); (b) split guidance — e.g. coding sessions at 0.5, general/think
+at 1.0, shipped as client config or per-key proxy sampler override;
+(c) keep 1.0, publish the curve, close the acceptance item permanently.
+Whatever the outcome: handoff + WORKPLAN verdict entry with numbers, and
+the "biggest potential decode multiplier left" line gets replaced by data.
+
+## Explicitly out of scope
+reasoning_effort re-test (decided; renders 0/2 at low), NVFP4 weights
+(vLLM/Blackwell path, not our stack), sampler shape changes (top-p/top-k
+stay 0.95/20 — one variable at a time), club-3090 port waves (queued
+behind this).
