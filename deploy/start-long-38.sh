@@ -68,6 +68,24 @@ export CUDA_ENABLE_COREDUMP_ON_EXCEPTION=1
 # server.log, relaunch with:  export LLAMA_GRAPH_REUSE_DISABLE=1  (perf cost)
 
 mkdir -p "$CONF/slots-long"
+
+# ── VRAM settle (club-3090 P6): a fresh stop returns before CUDA frees the
+#    residency under WSL; booting into held VRAM caused transient OOMs.
+#    Wait until used-VRAM stops falling (two stable reads) or 30s. ──────────
+prev=-1
+for i in $(seq 1 15); do
+    used=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1)
+    [ -z "$used" ] && break
+    if [ "$used" = "$prev" ] && [ "$used" -lt 24000 ]; then break; fi
+    prev=$used
+    sleep 2
+done
+
+# Spec-decode config is env-able for A/B arms (defaults = production):
+#   SPEC_TYPE=ngram-mod,draft-mtp SPEC_EXTRA="--spec-ngram-mod-n-max 3" bash start-long-38.sh
+SPEC_TYPE="${SPEC_TYPE:-draft-mtp}"
+SPEC_NMAX="${SPEC_NMAX:-2}"
+SPEC_EXTRA="${SPEC_EXTRA:-}"
 # Key via --api-key-file: the old --api-key "$KEY" form exposed the key in
 # /proc/*/cmdline to any local process (bughunt A5).
 # --metrics: exposes spec_decode_* acceptance counters (grammar/MTP split
@@ -77,7 +95,7 @@ nohup ./build-g1/bin/llama-server \
   -m /home/erol/ai/turboquant/models/qwen38/Qwen3.8-27B-Q6_K.gguf \
   --mmproj /home/erol/ai/turboquant/models/qwen38/mmproj-F16.gguf \
   --no-mmproj-offload \
-  --spec-type draft-mtp --spec-draft-n-max 2 \
+  --spec-type $SPEC_TYPE --spec-draft-n-max $SPEC_NMAX $SPEC_EXTRA \
   -ctkd turbo4 -ctvd turbo4 \
   -ctk turbo4 -ctv turbo4 \
   -fa on -ngl 99 -c $CTX --no-context-shift \

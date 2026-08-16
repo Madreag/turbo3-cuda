@@ -59,7 +59,10 @@ Budget = weights (20.8 GB) + KV (17.5 KiB/token incl. draft) + recurrent ×(1+n_
 (f16 default!) and the triple scratch were never budgeted — `nvidia-smi` pins at
 the residency cap and HIDES overcommit ("config changes don't move the number" =
 you are paged). Keep ≥1 GB free. Context-fill does NOT grow VRAM (static
-prealloc; checkpoints live in host RAM, ~8 KiB/token of depth, cap 2).
+prealloc; checkpoints live in host RAM, ~8 KiB/token of depth, cap 2) —
+**verified to 256K fill** (battery); the 294K (0.92×n_ctx) fill-ladder is
+port-board P3 and MANDATORY before any ctx increase (club-3090's
+"boots ≠ fills" FA-scratch-at-fill failure class).
 Ceiling behavior is graceful: `finish_reason: length`, over-cap prompts → 400.
 
 ## QUALITY GATES (all in quality-tests/)
@@ -149,4 +152,10 @@ USER STOP overrides goals. No pkill patterns matching your own cmdline; kill
 by pidfile. No background llama-bench/perplexity. One GPU workload at a time,
 babysat. Never run llama-cli non-interactively. Keys never enter the repo.
 120s Bash guillotine: long jobs → run_in_background. Loads ≠ hangs (cold disk
-124 MB/s). Render truth = pixels + console only.
+124 MB/s). Render truth = pixels + console only. Multi-step background
+scripts: ABSOLUTE paths only (relative-after-cd killed two probes) and
+bounded health waits with process-death checks (never `until curl` alone).
+Before EVER raising --parallel>1: run the distinct-answers gate (N identical
+greedy prompts concurrently must return identical answers — hybrid
+graph-reuse state-crossover class, ik#2260) and confirm MTP isn't silently
+dropped; today's parallel-1 + proxy serialization is a validated design.

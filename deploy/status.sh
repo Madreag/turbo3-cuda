@@ -20,3 +20,10 @@ for p in 8131 8130; do
 done
 echo "--- gpu"
 nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader 2>/dev/null
+# swap tripwire (club-3090 P6): serving-process pages in swap silently
+# invalidate every perf number — surface it here.
+spid=$(ss -tlnp 2>/dev/null | grep ':8131 ' | grep -oP 'pid=\K[0-9]+' | head -1)
+if [ -n "$spid" ]; then
+    vsw=$(grep VmSwap /proc/$spid/status 2>/dev/null | awk '{print $2, $3}')
+    echo "--- swap: server VmSwap = ${vsw:-n/a}"
+fi
