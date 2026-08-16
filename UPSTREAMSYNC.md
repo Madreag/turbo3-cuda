@@ -1,3 +1,9 @@
+> **DONE (2026-08-15).** Sync executed to b10435 then micro-synced to tip
+> b10448 (clean merge; acceptance 72.9→82.5% via #27133). Fork carries are
+> tracked in the sync/2026-08 branch history; upstreamable patches staged in
+> pr-package/. This file is the historical plan; WORKPLAN-BESTAPP.md is
+> current.
+
 # UPSTREAMSYNC — Full-Accuracy Plan for Rebasing onto Current llama.cpp
 (investigated & drafted 2026-08-15; all numbers measured, not assumed)
 

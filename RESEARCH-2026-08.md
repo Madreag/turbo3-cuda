@@ -1,5 +1,12 @@
 # Research Campaign — 2026-08-15
 
+> **PARTIALLY SUPERSEDED (same day, later hours).** The board below drove the
+> marathon; where verdicts conflict, WORKPLAN-BESTAPP.md wins. Superseded here:
+> the VEC-vs-MMA cliff table (native MMA-turbo kernels shipped: 84-89 tok/s
+> @38K); the art-turn grammar story (real-suite tax ~4%; the penalty was VRAM
+> paging); acceptance-regression bisect (fixed upstream by #27133); ngram/
+> backend-sampling (measured wash); DSpark (doesn't fit at 320K).
+
 > **TIER 0 EXECUTED same evening — measured outcomes:**
 > - Checkpoint cherry-picks (#26885, #25592×2, #24891, #26004) applied,
 >   built, deployed. **Restore-reuse hole CLOSED and verified**: post-restore

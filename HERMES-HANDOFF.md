@@ -1,208 +1,112 @@
-# Hermes × Qwen3.6-27B — Handoff (2026-08-09, post-fix)
+# TurboQuant Serving Stack — Handoff (2026-08-15, board-complete)
 
-Supersedes the 2026-08-08 version of this file (see git history for it) and the
-diagnostic threads in HERMES-INTEGRATION-GOAL.md. Branch: `hermes/server-foundation`.
+Supersedes the 2026-08-09 Failure-B edition (git history holds it; its
+grammar-bomb forensics remain valid record). Branch: `hermes/server-foundation`
+(this repo) + `sync/2026-08` (the llama.cpp fork, remote `myfork`).
 
-## STATUS: Failure B is SOLVED — root-caused, fixed, deployed, verified.
+## CURRENT STATE — one screen
 
-The "Response remained truncated after 4 continuation attempts" failure was
-neither a token cap (our side's early claim — wrong), nor slot preemption or
-proxy restarts (the Hermes agent's claim — also wrong for the failing session).
-It was a server-side grammar/parser failure chain in the G1 binary:
+- **Model:** Qwen3.8-27B Q6_K (hybrid: 48 DeltaNet + 16 attention layers,
+  head_dim 256, GQA-4), native MTP head. Vision via mmproj **on CPU**
+  (~21 s/image encode, once per image; text speed unaffected).
+- **Context:** 327,680 (320K), YaRN 1.25. LOCKED for the testing phase (user
+  decision): guarantees ~1 GB VRAM headroom so no measurement is paging-
+  poisoned. Post-testing options: push ctx up; optional MTP-off profile
+  (~0.8 GB back) as a user-selectable trade.
+- **KV cache:** turbo4 (66-byte blocks, 4.125 bpv, corrected Lloyd-Max
+  centroids) K+V, target AND draft (`-ctkd/-ctvd turbo4`). Alphas 1.00.
+  MMA-turbo fused decode kernels (kill-switch `GGML_TURBO_MMA_FUSED=0`).
+- **Speculative:** `--spec-type draft-mtp --spec-draft-n-max 2`. Acceptance
+  82.5% greedy / ~67% at temp 1.0 (post-#27133 queue redesign).
+- **Fork:** upstream-tip b10448 + carries. Binary: `build-g1/bin/llama-server`
+  (= the 24565-adopted build; `.mainline` beside it is the rollback twin;
+  `.pre-bughunt` = pre-marathon).
+- **Measured (fitted, unpaged):** shallow decode ~110-122 tok/s; 38K depth
+  ~84-89 decode / ~2,650 prefill; full 38K turn ≈ 23 s; KLD vs f16 0.00473
+  (top-1 98.3%); VRAM 31.1-31.7 of 32.6 GB.
 
-### The confirmed mechanism (byte-exact evidence in scratchpad pre-fix/ captures
-### and ~/.config/llama-tcq/server.log.20260808-grammar-corpse-evidence)
+## OPERATE
 
-1. **Grammar bomb.** The live Hermes tool suite includes `computer_use` with
-   1 required + 48 optional parameters. G1's auto-parser (the #24624 port)
-   emitted the optional-args grammar as `(space (arg1|...|arg48)){0,48}` —
-   GBNF repetition rewrite multiplies the 48-way choice by 48 ≈ 2304 rules,
-   tripping `MAX_REPETITION_THRESHOLD` (2000) in src/llama-grammar.cpp:494 →
-   `failed to parse grammar` on EVERY live Hermes request (4/4 that session;
-   verified reproducible with a minimal 2-tool request). The quality-test
-   battery's 38-tool replica lacks the 48-param monster — its grammar compiled,
-   which is why batteries were clean while the user bled. NOT preemption:
-   trace analysis shows all 4 failing streams ran with zero concurrent traffic,
-   zero restarts, owner_lock held; llama-server released each slot normally.
+```bash
+bash ~/.config/llama-tcq/start-long-38.sh   # guarded: refuses double-start,
+                                            # rotates logs, health-gates both layers
+bash ~/.config/llama-tcq/stop.sh            # verified kill, port check
+bash ~/.config/llama-tcq/status.sh          # ports + /health + VRAM (not pidfiles)
+```
+Clients: `http://192.168.50.130:8130/v1` (OpenAI) or `/v1/messages`
+(Anthropic), keys in `keys.json`. After a Windows reboot re-add the portproxy
+if clients can't reach 8130 (WSL IP rotation).
 
-2. **Unprotected generation.** Grammar dead → sampler chain built with no
-   grammar stage → nothing constrains the model's tool-call syntax. The 33K
-   Hermes system prompt teaches JSON-style `<tool_call>{"name":...}` calls;
-   the template/parser expect XML `<function=...><parameter=...` style, with
-   required args in strict definition order. Unconstrained, the model follows
-   the prompt (JSON args, or reordered parameters — our captured corpse wrote
-   `content` before `path`) → the PEG incremental parser consumes the tool-call
-   open, then JAMS: one tool_calls delta, then silence (heartbeats while the
-   GPU generates at full speed), everything accumulating unconsumed.
+Rollback: stop → `cp build-g1/bin/llama-server.mainline build-g1/bin/llama-server`
+→ start (drops only the +9% 24565 tune). Deeper history: `.pre-bughunt`.
+**Slot files are config-specific** — archive `slots-long/*.bin` on any config
+change (server refuses stale ones gracefully; proxy erases and re-prefills).
 
-3. **The corpse.** At end of generation the final parse (is_partial=false,
-   server-task.cpp update_chat_msg → common_chat_parse) THROWS
-   `Failed to parse input at pos N: ...` (chat.cpp:1771). The streaming path
-   emits that exception as a terminal in-stream error frame —
-   `data: {"error":{"code":500,"message":"Failed to parse input at pos 402:
-   <tool_call>...<full raw generation embedded>...","type":"server_error"}}`
-   — then closes with **no [DONE], no finish_reason**. That is the giant
-   "keyless" 20-23KB terminal chunk in stream-trace.log, and it is the exact
-   answer to the Hermes agent's question about terminal frames. Hermes
-   correctly flags truncation, retries with its ~8K write-splitting nudge, the
-   model dies the same way (7,826-token corpse = task 54273, eval'd at full
-   48 tok/s and released `truncated = 0` — a parse corpse, not a cut), ×4 →
-   the user-facing error. The same throw is the known non-streaming 500
-   ("Failed to parse input at pos 22: <think>") — one bug, two faces.
+## THE VRAM LAW (hard-won 2026-08-15)
 
-### The fix (deployed 2026-08-09 ~00:20, commit on this branch)
+Budget = weights (20.8 GB) + KV (17.5 KiB/token incl. draft) + recurrent ×(1+n_max)
++ **THREE compute scratches** (target/draft/vision — scale with ctx×batch)
++ ~250 MB meta. The stack ran silently WDDM-paged for two days because draft-KV
+(f16 default!) and the triple scratch were never budgeted — `nvidia-smi` pins at
+the residency cap and HIDES overcommit ("config changes don't move the number" =
+you are paged). Keep ≥1 GB free. Context-fill does NOT grow VRAM (static
+prealloc; checkpoints live in host RAM, ~8 KiB/token of depth, cap 2).
+Ceiling behavior is graceful: `finish_reason: length`, over-cap prompts → 400.
 
-- **Root fix** — common/chat-auto-parser-generator.cpp: optional tool args now
-  emit `(space (arg1|...|argN))*` via `p.zero_or_more` instead of
-  `p.repeat(..., 0, N)`. `*` renders as a single recursive GBNF rule — no
-  repetition rewrite, no threshold, identical accepted language ({0,N} never
-  enforced per-arg uniqueness). The 48-param tool now compiles; grammar stays
-  ALIVE on live Hermes requests, which forces correct XML syntax and arg order
-  (grammar-constrained decoding masks divergent tokens), which keeps the
-  incremental parser streaming tool deltas, which makes proper
-  `finish_reason` + `[DONE]` termination structurally guaranteed.
-- **Safety net** — tools/server/server-task.cpp update_chat_msg: a final-parse
-  throw can no longer corpse a response. is_partial=false failures degrade to
-  the last good incrementally-parsed message (streams: terminate properly with
-  finish_reason + [DONE]; non-stream: raw text as content instead of a 500),
-  with a loud SRV_WRN. Streaming partial-parse behavior unchanged.
+## QUALITY GATES (all in quality-tests/)
 
-### Verification (all on the patched binary, direct :8131 captures)
+- `kl_divergence.py` — 2048-token prompts, cache_prompt=false, vs the ARCHIVED
+  same-model reference `kld38/kld_logprobs_f16_qwen38_yarn.json` (a stale
+  cross-model reference produces false-catastrophic numbers — 3.6-era file is
+  quarantined). Baseline: 0.00473 / 98.3%.
+- `trajectory_battery.py` — the agentic axis. Baseline
+  (`trajbase/traj_b10448-320k-baseline2.json`, seed 42): hops-2/3/4,
+  correction, executable code-traj = PASS at 64K/128K/256K; **ledger
+  (state-tracking) is the discriminative cliff: 8/8@64K → spiral@128K →
+  4/8@256K**. Any quant/kernel change must hold the perfect columns and not
+  lower ledger.
+- Depth probe: `scratchpad/depth_decode_test.py` (recreate from WORKPLAN if
+  /tmp wiped). **Paired-run law:** single-arm vs historical baseline is
+  invalid on this box (echo noise ±20%, environmental confounds); A/B =
+  alternating binaries, minutes apart, ordering must repeat.
 
-- RED (pre-fix, preserved in scratchpad pre-fix/): minimal 2-tool repro trips
-  the grammar guard; JSON-bait sysprompt run reproduces the user's exact
-  signature — 84 content frames, 1 tool frame, 30s silence, 4.7KB terminal
-  error frame, EOF without [DONE].
-- GREEN (post-fix): same JSON-bait request — grammar compiles (0 failures in
-  server.log), 1753 streaming tool_calls deltas, no silence, terminal
-  `finish_reason:"tool_calls"` + `[DONE]`, zero error frames.
-- Battery regression: hermes_shaped_battery preverify via proxy — result
-  recorded in quality-tests/niah_results (see latest preverify entry).
-- Stop-string mid-call cutoff (`stop: ["</parameter>"]`) verified graceful
-  BEFORE the fix (finish_reason:"tool_calls" + [DONE]) — plain truncation was
-  never the corpse trigger; syntax divergence was.
+## PROXY (deploy/proxy.py, v6.4, 49/49 tests via `python3 test_proxy.py`)
 
-### For the Hermes-side agent (their question, answered with bytes)
+Per-user keys → slot pinning with save/restore (now actually effective:
+checkpoint fix made post-restore reuse ~49 tokens instead of full re-prefill);
+think-tag extraction (literal tags after content start are preserved); stream
+tripwires WITH client-facing repair (truncation → error frame + [DONE] /
+error event — never a silent "finished" corpse); heartbeats both protocols;
+circuit breaker (fast 503 while server restarts); passthrough allowlisted
+(/slots and raw completion endpoints blocked); Anthropic images translated
+to image_url. Known accepted gaps: Anthropic-path thinking-memory;
+lock-acquire has no timeout (by design: two-user serialization).
 
-Terminal frame of the truncated streams = in-stream `data: {"error":{...
-"type":"server_error"}}` then bare EOF. No [DONE], no finish_reason, no cap
-(max_tokens 131072 confirmed arriving; generations died at 9767/2153/7826/1016
-tokens, all `truncated = 0`, all slot-released normally). Their preemption /
-proxy-restart theory: disproven for the failing session (no concurrent
-traffic, no restarts in window, owner_lock covers the full stream lifetime) —
-but their insistence on the terminal-frame evidence was correct methodology
-and is what cracked it. Their two upstream nits stand: the "~8K" continuation
-nudge teaches write-splitting for a failure class where it can't help, and
-continuations re-pay full prefill.
+## DOC MAP (authority order for "what happened / what's next")
 
+1. `WORKPLAN-BESTAPP.md` — the marathon ledger: every verdict with numbers
+   (adopted / tested-not-needed / closed), VRAM autopsy, paired-run rule.
+2. `SPARSE-DECODE-DESIGN.md` — the one remaining build arc (designed, gated,
+   not started).
+3. `BUGHUNT.md` — 2026-08-15 audit ledger (proxy/scripts/C++ fixes, all shipped).
+4. `RESEARCH-2026-08.md` — the research campaign board (several speed verdicts
+   superseded by later paired re-tests — WORKPLAN wins on conflict).
+5. `FUTUREPLAN.md` / `UPSTREAMSYNC.md` — historical (phases done; sync done).
+6. `pr-package/` — three upstream-ready PR branches staged on the user's fork
+   (state-restore hardening, ctx-cap rope scaling, parse-degrade). User opens
+   PRs; assistant never submits to external repos.
 
-## STACK STATE UPDATE — 2026-08-15: UPSTREAM SYNC LIVE
-- Production binary is now the SYNC BUILD (branch sync/2026-08, based on
-  upstream 9d57ce456 of 2026-08-14 + TurboQuant port; pushed to myfork).
-  Types renumbered 80-85. Full battery passed: 42/42 unit, ladder 3/3
-  complete (2/3 clean renders — gate met), NIAH 130K 5/5 + 380K 5/5 (after
-  fixing upstream's new n_ctx_train slot cap to respect explicit rope
-  scaling — commit dc6f94ef2, upstreamable), vision verbatim, non-stream
-  think+fenced now returns 200 (upstream parser + our degrade net), effort
-  kwargs verified. MTP measured 1.52x decode, correctness = f16-control
-  equivalent; NOT yet enabled in production (fit check at full profile
-  pending — the next decision).
-- Binary lineage in build-g1/bin: llama-server (sync, 103MB self-contained),
-  .pre-sync (Aug-14 NextN build), .pre-nextn, .pre-grammar-fix. Old 7.9MB
-  binaries were RPATH-dependent on their build trees; the sync binary has no
-  build-tree deps.
-- Rollback: stop.sh && cp build-g1/bin/llama-server.pre-sync
-  build-g1/bin/llama-server && start-long-38.sh
+## OPEN ARCS
 
-## STACK STATE (2026-08-14, Qwen3.8 cutover — superseded above)
+- **Sparse decode** (next big build; see design doc).
+- Post-testing-phase: context push + optional MTP-off profile.
+- Watchlist: upstream issues 27090/27102/26609/25717 (our shapes); Vulkan
+  92%-acceptance reference gap; parked 22587 GDN decode rewrite.
 
-- **PRODUCTION IS NOW Qwen3.8-27B** (`models/qwen38/Qwen3.8-27B-Q6_K.gguf`,
-  arch qwen35, embedded NextN/MTP block — needs binary ≥ commit 815b14d61).
-  Profile: `start-long-38.sh` (409600 / YaRN 1.5625 / turbo4 / alphas
-  1.10-1.12 / temp 1.0 / reasoning_effort xhigh by default). Validated
-  2026-08-14: effort ladder xhigh 3/4 clean renders (medium 2/4, low 0/2,
-  xhigh@t0.6 1/2 with one 131K-cap truncation); NIAH effective 5/5 at 130K
-  and 380K (scorer's CTRL "FABRICATED" = false-positive, model refuses
-  correctly while quoting the Meridian code — fix the scorer someday);
-  proxy-path acceptance 1/1 clean render, 0 tripwire alerts. Costs to know:
-  xhigh art turns ≈ 40-100K tokens / 20-40 min; ~1/12 runs brushes Hermes's
-  131072 max_tokens mid-think (finish=length, properly terminated — knob is
-  Hermes-side); 3.8 detours to skill_view/bash before write_file (real
-  Hermes loops handle this; single-shot harnesses must be loop-tolerant).
-  Battery harness max_tokens raised 30000→131072 to match the real wire.
-  Rollback: `stop.sh && cp build-g1/bin/llama-server.pre-nextn
-  build-g1/bin/llama-server && start-long.sh` (3.6 slot saves archived in
-  slots-long/pre-38-backup/).
-- **VISION IS LIVE** (2026-08-14 late): `--mmproj models/qwen38/mmproj-F16.gguf`
-  in start-long-38.sh. OpenAI `image_url` content parts work end-to-end
-  through the proxy (smoke: model read its own artifact screenshot's UI text
-  verbatim in 13s; text path regression-clean). VRAM 31.2/32.6GB (~1.4GB
-  headroom — watch Windows-side volatility; escape hatch:
-  `--no-mmproj-offload` moves the encoder to CPU). Proxy v6.2: captures strip
-  base64 image payloads (42/42 unit tests). Caveats: vision quality under
-  turbo4 KV is smoke-validated only (no battery yet); the Anthropic
-  /v1/messages translation path still drops images (OpenAI path only).
-- Previous model (rollback pair): `/home/erol/ai/turboquant/models/Qwen3.6-27B-Q6_K.gguf` (unsloth, qwen35).
-- Server: `build-g1/bin/llama-server` — G1 + tonight's two patches. Built from
-  worktree `/home/erol/ai/turboquant/turboquant-g1` (branch checkout), staged
-  into `turboquant-kv-cache/build-g1/bin/`. Rollbacks:
-  `build-g1/bin/llama-server.pre-grammar-fix` (last night's G1), `build-tcq/`
-  (pre-G1, untouched).
-- Live profile: `~/.config/llama-tcq/start-long.sh` (409600 ctx, turbo4/turbo4,
-  YaRN 1.5625, alphas 1.10/1.12, --parallel 1). Daily: `start.sh`.
-- Proxy: v6.1 (owner_lock verified to hold for the entire request lifetime —
-  proxy-mediated preemption is impossible). 41/41 unit tests. New in v6.1:
-  (a) TRIPWIRES — any relayed in-stream error frame or stream ending without
-  [DONE] logs `[ALERT] ...` to proxy.log + `ALERT` trace lines; validated
-  against the real 2026-08-08 corpse bytes (fires both) and a healthy stream
-  (fires neither). A future corpse announces itself instead of hiding.
-  (b) REAL-TRAFFIC CAPTURE — every tools-bearing request body is persisted
-  pre-mutation to `~/.config/llama-tcq/captures/tools_<user>_<suitehash>.json`;
-  regression gates must replay the live Hermes capture, never a hand-built
-  replica (the replica gap is what hid the grammar bomb). Soak on the patched
-  stack: 20/20 turns PASS, 0 alerts.
-  KNOWN INSTR BUG unchanged: `_partial` artifact files also fire on clean runs;
-  cut signal is "no END frame" — WHICH MEANS handler exception (client-leg
-  reset or proxy death), NOT upstream EOF: an upstream bare-EOF still writes
-  END. Trace END + client-visible missing [DONE] = in-stream error frame.
-- Client: `http://192.168.50.130:8130/v1`, keys in keys.json (users: erol,
-  brother). Windows portproxy for :8130 (WSL 172.17.154.123; re-add on rotate).
+## OPS LAWS (unchanged, blood-signed)
 
-## KNOWN OPEN ITEMS (none block Hermes art sessions)
-
-- PEG required-args parsing is definition-order-strict; only the (now working)
-  grammar makes order safe. If grammar is ever disabled again, reordering jams
-  return. Upstream-worthy: order-flexible required-arg parsing, and a visible
-  per-request warning when a tool grammar fails to build (today it's one log
-  line and silent unconstrained generation).
-- Between-instance quality variance (Failure A territory): 50-75% clean rate
-  spread, one sick instance cured by restart. Discriminating test still to run:
-  cache-purge vs restart. Mitigation: restart server before art sessions.
-- Non-streaming think+fenced 500: now degrades to raw-content 200 via the
-  safety net; the true parser fix still rides the next upstream sync.
-- HERMES-REPAIR-RULE.md: written, NOT deployed. USER LAW unchanged: no
-  model-caging; config-only levers.
-- 4591828-class no-END traces (client-leg resets, e.g. ~22:49 that evening):
-  consistent with user-side aborts; not implicated in the solved failure. If
-  they recur without a user abort, suspect the Windows portproxy leg.
-
-## VERIFICATION TOOLING
-
-- Everything from the previous handoff (hermes_shaped_battery.py,
-  longctx_battery.py, render_arm.sh, pw_verify.py, bare_arm.py, ollama_arm.py)
-  plus this session's corpse harnesses in the session scratchpad:
-  `repro_corpse.py` (minimal grammar-bomb), `corpse_force.py` (stop-string
-  cutoff), `corpse_json.py` (JSON-bait, the deterministic user-condition
-  reproducer) — pre-fix captures under `pre-fix/`.
-
-## OPERATING LAWS (unchanged, hard-won)
-
-- USER STOP overrides everything. Kill test work, never production; park; quiet.
-- Never `pkill -f`/`pgrep -f` a pattern present in your own command line;
-  pgrep -x / socket-owner / bracket-classes; kill and relaunch in SEPARATE calls.
-- Render evidence = pixels + JS console only; `timeout 45` headless Chrome.
-- Bash hard-kills ~120s: setsid + background waiters for anything long.
-- Don't run GPU work while the user may be using Hermes (queueing delays them
-  even though decapitation is disproven). Single slot.
-- Warm page cache before timing; Windows VRAM volatile; CUDA 12.8; --no-mmap.
-- Model quality is proven good. The model was never the bug. Don't cage it.
+USER STOP overrides goals. No pkill patterns matching your own cmdline; kill
+by pidfile. No background llama-bench/perplexity. One GPU workload at a time,
+babysat. Never run llama-cli non-interactively. Keys never enter the repo.
+120s Bash guillotine: long jobs → run_in_background. Loads ≠ hangs (cold disk
+124 MB/s). Render truth = pixels + console only.

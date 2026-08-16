@@ -1,3 +1,10 @@
+> **HISTORICAL (closed 2026-08-15).** All phases executed or superseded.
+> Outcomes and every later verdict live in WORKPLAN-BESTAPP.md (authoritative)
+> and HERMES-HANDOFF.md (current state). Notable supersessions: MTP adopted
+> then re-based on MMA-turbo kernels; q8-K option deprioritized (pure turbo4
+> with corrected centroids beats the old hybrid arm); art-turn 'grammar
+> penalty' was VRAM paging.
+
 # FUTUREPLAN — Quality & Speed Roadmap (drafted 2026-08-15)
 
 ## OUTCOMES (updated 2026-08-15, A+B evening executed)

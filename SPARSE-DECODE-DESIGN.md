@@ -1,13 +1,15 @@
 # Sparse Decode Design — Quest-class page selection over TurboQuant KV
 
-Status: DESIGN (2026-08-15). Prereqs shipped: MMA-turbo decode path,
-trajectory battery (the safety gate this feature must pass).
+Status: DESIGN — CURRENT as of 2026-08-15 board-complete. Prereqs shipped:
+MMA-turbo decode path (+24565 tune: 84-89 tok/s @38K), trajectory battery
+WITH recorded baseline (traj_b10448-320k-baseline2.json — the gate).
 
 ## Problem
 Decode at depth is bandwidth-bound: every token reads the full attention KV
-(5.8 GB at 320K). Measured decode: ~110-122 tok/s shallow → ~75-84 @38K →
-falls with depth. Frontier consensus (SAW-INT4 etc.): at 4.125 bpv we sit at
-the quantization ceiling — the remaining lever is reading FEWER tokens, not
+(~5.3 GB at the current 320K profile). Measured decode (fitted, unpaged,
+24565 adopted): ~110-122 tok/s shallow → 84-89 @38K → falls further with
+depth. Frontier consensus (SAW-INT4 etc.): at 4.125 bpv we sit at the
+quantization ceiling — the remaining lever is reading FEWER tokens, not
 smaller ones.
 
 ## Key insight: rotation is a non-issue
@@ -24,8 +26,8 @@ may even improve: rotated dims are variance-flattened, tightening min/max.)
   ≈ +6% of KV** (f8 later → +3%).
 - Selection per decode step, per layer: score pages via Σ_d max(q_d·min_d,
   q_d·max_d); keep {first S sink pages} ∪ {last W recent pages} ∪ {top-N
-  scored}. Target effective window 8-16K tokens → ~10-40× fewer KV reads at
-  320K.
+  scored}. Target effective window 8-16K tokens → ~10-40x fewer KV reads at
+  320K (current profile) and more at any future larger ctx.
 - Gather → FA: upstream MiniMax-MSA plumbing (merged #24908: block score →
   top-k → get_rows → FA over selected KV) is reusable; our fork already ships
   MMA-turbo FA over arbitrary KV views.
@@ -42,16 +44,21 @@ may even improve: rotated dims are variance-flattened, tightening min/max.)
 - P1 kernels behind env flag (TURBO_SPARSE_DECODE=N): metadata buffers +
   set_rows update + scoring kernel + gather+FA wiring. Decode-only (Q≤4),
   full attention during prefill.
-- P2 gates: trajectory battery (multi-hop is EXACTLY what sparsity threatens)
-  ≥ baseline; KLD ≤ 1.1× baseline; needle multi-position; depth-decode curve
-  16K→256K (win must be ≥1.5× at 128K+ to justify).
+- P2 gates (CONCRETE, baselines recorded): trajectory battery seed-42 —
+  hops/correction/code-traj must stay PASS at 64K/128K/256K and ledger must
+  not drop below 8/8 / spiral / 4/8; KLD ≤ 0.0052 (1.1x of 0.00473); needle
+  multi-position; depth-decode curve 16K→256K — win must be ≥1.5x over the
+  84-89 tok/s @38K baseline at 128K+ to justify the complexity.
 - P3 tune: page size {64,128}, N schedule per depth, anchor-layer count,
   sink/recent sizes; f8 metadata.
 
 ## Risks
 - Multi-hop regression (mitigation: battery gate + generous N floor).
 - Draft/MTP interplay: draft context stays FULL attention (tiny anyway).
-- VRAM +6% metadata (budget exists: 1.5 GB headroom holds ~350 MB at 320K).
+- VRAM +6% metadata: ~320 MB at 320K vs ~900 MB current headroom — fits but
+  tightens; f8 metadata (P3) halves it. Re-verify the budget table (VRAM law
+  in HERMES-HANDOFF.md) before P1 lands.
 
-Effort: ~1-2 weeks of kernel work. Not started — next big arc after current
-queue closes.
+Effort: ~1-2 weeks of kernel work. NOT STARTED — the single remaining board
+item; start in a fresh session with this doc + WORKPLAN-BESTAPP.md + the
+battery baseline as the working set.
