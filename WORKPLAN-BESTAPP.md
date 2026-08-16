@@ -80,9 +80,25 @@ deploy batch. Slot files archived on config change. Rollback binaries kept.
   either. Stays out. 22587 stays parked (merge cost vs low appetite at
   current decode speeds).
 
-## BOARD STATUS: all items DONE/CLOSED except the sparse-decode BUILD
-(designed + gated, ~1-2 week kernel arc — next major session). Production =
-24565 binary (llama-server.mainline is the rollback twin).
+## BOARD STATUS: ALL ITEMS DONE/CLOSED (2026-08-15 late — board complete)
+The final open arc, sparse decode, was executed and CLOSED at P0:
+**tested, not viable** on this model. The offline validator (built per the
+design doc: examples/sparse-probe + sparse-p0/ analyzers, 4 rounds, depths
+16K→315K at prod YaRN config, real code/agent corpus) measured that even
+ORACLE page selection at recall 0.90 must read 30-50% of the cache at every
+depth (the 16 hybrid attention layers spread mass too widely; the Quest
+concentration premise fails; the min/max-bound scorer is additionally broken
+by our double rotation — mean scorer is the fix but can't beat the oracle
+ceiling). Speedup ceiling ≈1.2× @128K < the ≥1.5× gate. Kernels not built.
+Evidence + surviving artifacts: SPARSE-DECODE-BUILD.md.
+
+**P0's collateral discovery, ADOPTED: prod was running with the fused
+MMA-turbo decode path OFF** (GGML_TURBO_MMA_FUSED defaults opt-in in-tree;
+launcher never set it → VEC/dequant path since deploy). Fix = launcher
+export + in-tree default flip on branch feature/sparse-decode. Paired A/B +
+KLD below (see SPARSE-DECODE-BUILD.md results log for numbers).
+
+Production = 24565 binary (llama-server.mainline is the rollback twin).
 
 ## TRAJECTORY BATTERY DONE — baseline recorded (traj_b10448-320k-baseline2)
 - hops-2/3/4, correction, code-traj: **PASS at 64K/128K/256K, all clean** —

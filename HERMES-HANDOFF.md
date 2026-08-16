@@ -86,8 +86,9 @@ lock-acquire has no timeout (by design: two-user serialization).
 
 1. `WORKPLAN-BESTAPP.md` — the marathon ledger: every verdict with numbers
    (adopted / tested-not-needed / closed), VRAM autopsy, paired-run rule.
-2. `SPARSE-DECODE-DESIGN.md` — the one remaining build arc (designed, gated,
-   not started).
+2. `SPARSE-DECODE-BUILD.md` — the sparse-decode P0 execution ledger and
+   CLOSED verdict (tested-not-viable + the fused-gate discovery);
+   `SPARSE-DECODE-DESIGN.md` is its superseded design record.
 3. `BUGHUNT.md` — 2026-08-15 audit ledger (proxy/scripts/C++ fixes, all shipped).
 4. `RESEARCH-2026-08.md` — the research campaign board (several speed verdicts
    superseded by later paired re-tests — WORKPLAN wins on conflict).
@@ -98,10 +99,18 @@ lock-acquire has no timeout (by design: two-user serialization).
 
 ## OPEN ARCS
 
-- **Sparse decode** (next big build; see design doc).
+- **Sparse decode: CLOSED 2026-08-15 — tested, not viable** (P0 offline
+  validator: even oracle selection reads 30-50% of cache on this hybrid;
+  evidence in SPARSE-DECODE-BUILD.md). Collateral fix ADOPTED: prod was
+  silently running fused-MMA OFF — launcher now exports
+  GGML_TURBO_MMA_FUSED=1 (in-tree default also flipped on branch
+  feature/sparse-decode). Re-run the P0 probe (~30 min) before believing
+  the sparse verdict for any future model swap.
 - Post-testing-phase: context push + optional MTP-off profile.
+- Depth-decode levers still on the table: parked 22587 GDN decode rewrite
+  (48 DeltaNet layers), MTP acceptance work.
 - Watchlist: upstream issues 27090/27102/26609/25717 (our shapes); Vulkan
-  92%-acceptance reference gap; parked 22587 GDN decode rewrite.
+  92%-acceptance reference gap.
 
 ## OPS LAWS (unchanged, blood-signed)
 

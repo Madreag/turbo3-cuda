@@ -1,8 +1,25 @@
 # Sparse Decode Design — Quest-class page selection over TurboQuant KV
 
-Status: DESIGN — CURRENT as of 2026-08-15 board-complete. Prereqs shipped:
-MMA-turbo decode path (+24565 tune: 84-89 tok/s @38K), trajectory battery
-WITH recorded baseline (traj_b10448-320k-baseline2.json — the gate).
+> **CLOSED — TESTED, NOT VIABLE (2026-08-15, P0 verdict).** The offline
+> validator this doc prescribed was built and run (4 rounds, depths 16K→315K,
+> production YaRN config, real agentic/code corpus). Findings, in order:
+> (1) Quest min/max bounds are broken by our double rotation (Hadamard+WHT
+> flattens the outlier structure they need) — the "rotated bounds may even
+> tighten" hypothesis below is measured FALSE; (2) a rotation-immune mean
+> scorer fixes ranking but (3) the model's 16 hybrid attention layers spread
+> mass so widely that even ORACLE selection at recall 0.90 must read 30-50%
+> of the cache at every depth — at 315K, six layers can't reach recall 0.85
+> reading 40% of it. Ceiling ≈1.2× @128K / ≈1.5× @320K before quality loss →
+> the ≥1.5×@128K+ gate below is unreachable. P1-P3 were not built.
+> **Full evidence + what survives the arc: SPARSE-DECODE-BUILD.md.**
+> The P0 tooling (examples/sparse-probe + sparse-p0/) is retained — re-run it
+> (~30 min) before believing this verdict for any OTHER model; dense-attention
+> models likely behave differently.
+
+Status: superseded design record (kept for the sketch + rationale).
+Prereqs that were shipped: MMA-turbo decode path (+24565 tune: 84-89 tok/s
+@38K), trajectory battery WITH recorded baseline
+(traj_b10448-320k-baseline2.json — the gate).
 
 ## Problem
 Decode at depth is bandwidth-bound: every token reads the full attention KV
