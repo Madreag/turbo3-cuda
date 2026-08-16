@@ -1,0 +1,72 @@
+{
+ "label": "b1_t1.0s43",
+ "seed": 43,
+ "depths": [
+  16000
+ ],
+ "pass": 6,
+ "total": 6,
+ "results": [
+  {
+   "depth": 16000,
+   "test": "hops-2",
+   "pass": true,
+   "want": "Vetch Hollow",
+   "got": "Vetch Hollow"
+  },
+  {
+   "depth": 16000,
+   "test": "hops-3",
+   "pass": true,
+   "want": "565",
+   "got": "565"
+  },
+  {
+   "depth": 16000,
+   "test": "hops-4",
+   "pass": true,
+   "want": "44-K153",
+   "got": "44-K153"
+  },
+  {
+   "depth": 16000,
+   "test": "ledger",
+   "pass": true,
+   "score": "8/8",
+   "want": {
+    "R1": "39",
+    "R2": "12",
+    "R3": "2",
+    "R4": "3",
+    "R5": "37",
+    "R6": "5",
+    "R7": "31",
+    "R8": "10"
+   },
+   "got": {
+    "R1": "39",
+    "R2": "12",
+    "R3": "2",
+    "R4": "3",
+    "R5": "37",
+    "R6": "5",
+    "R7": "31",
+    "R8": "10"
+   }
+  },
+  {
+   "depth": 16000,
+   "test": "correction",
+   "pass": true,
+   "want": "4566",
+   "got": "4566"
+  },
+  {
+   "depth": 16000,
+   "test": "code-traj",
+   "pass": true,
+   "err": null
+  }
+ ],
+ "ts": "2026-08-16 01:37"
+}

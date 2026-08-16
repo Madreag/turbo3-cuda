@@ -165,7 +165,13 @@ P9 (p-min gate may keep the code win and erase the prose tax). Original:
   script exits fast with logs.
 - Effort: ~45 min.
 
-### P7 [ ] Agentic-turns speed probe (their fixture idea, our gap)
+### P7 [A] SHIPPED+BASELINED 2026-08-16 — quality-tests/agentic_turns_probe.py.
+Baseline (prod n3, 12 turns to ~110K accumulated): TTFT tracks the DELTA
+(~0.8 ms/delta-token at turn 2 AND turn 12 — flat), prefix reuse perfect
+every turn, decode 70-105 t/s throughout. **vLLM Cliff-3 pathology (TTFT ∝
+total ctx despite cache hits) is ABSENT on our stack** — the checkpoint/
+reuse work measurably holds. Standing regression gate for cache/proxy
+changes. (Verdict math = per-delta-token, anchored turn 2.) Original spec:
 - Their bench-agentic: 15 turns of real tool-results ramping to ~53K,
   per-turn TTFT + decode, growth anchored to turn 2 (turn 1 = cold-start),
   verdict bands (≤1.5× stable … O(n)-like).
@@ -215,12 +221,13 @@ by YaRN validation at 1.5625/409K). Original spec:
   divergence their gate may have seen.
 
 ### B1 [D] Blog review (veladan.org Qwen3.8 FP8 benchmarks) — recorded intel
-- Their HermesAgent-20: 91 @temp0.6 → 79 @1.0 (−12) on SHALLOW agent work —
-  reconciles with our TEMP-STUDY (0.6 wins shallow, spirals at 128K; their
-  suites never go deep; their 0.6 pass was n=1). OPEN IDEA: depth-aware
-  per-request temp override in proxy (0.6 while ctx < ~96K, 1.0 beyond) —
-  needs a shallow tool-call-shaped suite on OUR stack first (our battery
-  under-weights that axis).
+- Their HermesAgent-20 91→79 shallow temp claim: **TESTED 2026-08-16
+  (B1-lite): does NOT transfer** — battery @16K, 0.6 vs 1.0 × 3 seeds =
+  identical per-seed on every axis ({6/6, 6/6, 5/6} both temps, even the
+  s44 miss mirrored). Depth-aware proxy-temp idea PARKED (motivating
+  evidence absent on our instrument). TEMP-STUDY verdict (1.0) stands at
+  every depth now. (Caveat: our battery ≠ their tool-call-format suite;
+  revisit only if real tool-call failures surface in production.)
 - YaRN tax warning for the ctx push: at YaRN 4.0 their BugFind dropped −12;
   "'slightly impact short-context quality'… undersells it." Any YaRN
   increase (409K profile) must re-gate KLD+battery vs the 1.25 baseline.

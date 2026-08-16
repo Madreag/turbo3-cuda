@@ -1,0 +1,72 @@
+{
+ "label": "b1_t1.0s44",
+ "seed": 44,
+ "depths": [
+  16000
+ ],
+ "pass": 5,
+ "total": 6,
+ "results": [
+  {
+   "depth": 16000,
+   "test": "hops-2",
+   "pass": true,
+   "want": "Brindle Bay",
+   "got": "Brindle Bay"
+  },
+  {
+   "depth": 16000,
+   "test": "hops-3",
+   "pass": true,
+   "want": "616",
+   "got": "616"
+  },
+  {
+   "depth": 16000,
+   "test": "hops-4",
+   "pass": true,
+   "want": "79-M479",
+   "got": "79-M479"
+  },
+  {
+   "depth": 16000,
+   "test": "ledger",
+   "pass": false,
+   "score": "7/8",
+   "want": {
+    "R1": "25",
+    "R2": "62",
+    "R3": "-26",
+    "R4": "62",
+    "R5": "-16",
+    "R6": "26",
+    "R7": "81",
+    "R8": "-19"
+   },
+   "got": {
+    "R1": "25",
+    "R2": "62",
+    "R3": "-8",
+    "R4": "62",
+    "R5": "-16",
+    "R6": "26",
+    "R7": "81",
+    "R8": "-19"
+   }
+  },
+  {
+   "depth": 16000,
+   "test": "correction",
+   "pass": true,
+   "want": "6606",
+   "got": "6606"
+  },
+  {
+   "depth": 16000,
+   "test": "code-traj",
+   "pass": true,
+   "err": null
+  }
+ ],
+ "ts": "2026-08-16 01:40"
+}

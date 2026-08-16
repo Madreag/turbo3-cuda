@@ -1,0 +1,72 @@
+{
+ "label": "b1_t0.6s42",
+ "seed": 42,
+ "depths": [
+  16000
+ ],
+ "pass": 6,
+ "total": 6,
+ "results": [
+  {
+   "depth": 16000,
+   "test": "hops-2",
+   "pass": true,
+   "want": "Ludlow Spur",
+   "got": "Ludlow Spur"
+  },
+  {
+   "depth": 16000,
+   "test": "hops-3",
+   "pass": true,
+   "want": "819",
+   "got": "819"
+  },
+  {
+   "depth": 16000,
+   "test": "hops-4",
+   "pass": true,
+   "want": "65-N256",
+   "got": "65-N256"
+  },
+  {
+   "depth": 16000,
+   "test": "ledger",
+   "pass": true,
+   "score": "8/8",
+   "want": {
+    "R1": "13",
+    "R2": "67",
+    "R3": "30",
+    "R4": "-5",
+    "R5": "6",
+    "R6": "-59",
+    "R7": "-45",
+    "R8": "23"
+   },
+   "got": {
+    "R1": "13",
+    "R2": "67",
+    "R3": "30",
+    "R4": "-5",
+    "R5": "6",
+    "R6": "-59",
+    "R7": "-45",
+    "R8": "23"
+   }
+  },
+  {
+   "depth": 16000,
+   "test": "correction",
+   "pass": true,
+   "want": "2587",
+   "got": "2587"
+  },
+  {
+   "depth": 16000,
+   "test": "code-traj",
+   "pass": true,
+   "err": null
+  }
+ ],
+ "ts": "2026-08-16 01:35"
+}
