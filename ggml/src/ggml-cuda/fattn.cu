@@ -188,8 +188,8 @@ static void ggml_cuda_flash_attn_ext_mma_turbo_switch_ncols2(ggml_backend_cuda_c
 // reduction trees (tensor-core fragment order vs per-thread VEC order), so a near-tie greedy
 // token can flip (~1 in ~25 tokens on a hard tie). This is the same irreducible f16-order
 // difference that exists between the base f16-MMA and f16-VEC kernels — not a regression — but
-// it fails strict token-identity. We therefore keep VEC the default and expose the faster MMA
-// path as opt-in via GGML_TURBO_MMA_FUSED=1.
+// it fails strict token-identity. Since 2026-08-15 the fused path is the DEFAULT (production
+// adoption: +2.2%/+8.7% decode at 38K/121K, KLD-equal, battery-clean); set =0 for VEC-identity A/Bs.
 static bool ggml_cuda_turbo_mma_fused() {
     static const bool v = []{
         const char * s = getenv("GGML_TURBO_MMA_FUSED");
