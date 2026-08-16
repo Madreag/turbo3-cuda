@@ -1,8 +1,19 @@
-# TurboQuant Serving Stack — Handoff (2026-08-15, board-complete)
+# TurboQuant Serving Stack — Handoff (2026-08-16, post-consolidation)
 
 Supersedes the 2026-08-09 Failure-B edition (git history holds it; its
-grammar-bomb forensics remain valid record). Branch: `hermes/server-foundation`
-(this repo) + `sync/2026-08` (the llama.cpp fork, remote `myfork`).
+grammar-bomb forensics remain valid record).
+
+## BRANCH MAP (ONE git repo, four worktrees, ONE GitHub remote:
+## github.com/Madreag/turbo3-cuda — consolidated 2026-08-16, 8→6 branches)
+
+| branch | worktree | what it is |
+|---|---|---|
+| `release/cuda-optimized` | turboquant-kv-cache | PUBLIC MAIN: README/showcase, kernel-optimization history, TCQ |
+| `sync/2026-08` | turboquant-sync | **THE FORK / PROD SOURCE** — upstream b10448 + all carries + sparse-P0 tooling + fused-default + get_rows_keep + GDN #22587. Tip == the shipped prod binary. (feature/sparse-decode and feature/gdn-22587 were linear ancestors — fast-forwarded in and deleted.) |
+| `hermes/server-foundation` | turboquant-g1 | ops docs, quality-tests, deploy mirrors, boards/ledgers (this file) |
+| `pr/ctx-cap-rope-scaling` ·  `pr/parse-degrade-safety` · `pr/state-restore-hardening` | tq-prstage | staged upstream-ready PRs — USER opens them; assistant never submits to external repos |
+
+Everything is pushed; all six tips verified == GitHub 2026-08-16.
 
 ## CURRENT STATE — one screen
 
@@ -27,7 +38,8 @@ grammar-bomb forensics remain valid record). Branch: `hermes/server-foundation`
   code/prose at temp 1.0 (the old "67%" was a blend; entropy-explained,
   TEMP-STUDY). Spec-vs-off greedy output differs by fp-tie class at ANY
   n_max (accepted; P10).
-- **Fork:** upstream-tip b10448 + carries. Binary: `build-g1/bin/llama-server`
+- **Fork:** branch `sync/2026-08` (consolidated), upstream-tip b10448 +
+  carries. Binary: `build-g1/bin/llama-server`
   (= gdn22587 build: 24565 + fused-MMA-default + GDN row-per-warp #22587;
   rollback chain: `.pre-gdn22587` → `.mainline` → `.pre-bughunt`). Fused
   MMA-turbo decode is ON via launcher env (2026-08-15 adoption: +2.2% @38K,
