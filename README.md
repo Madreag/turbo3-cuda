@@ -2,6 +2,11 @@
 
 CUDA implementation of [TurboQuant](https://arxiv.org/abs/2504.19874) (ICLR 2026) KV cache compression for llama.cpp, targeting NVIDIA GPUs (SM86+).
 
+**Now in production on Qwen3.8-27B / RTX 5090** — 113 tok/s code decode at
+38K depth, two serving profiles up to 409K context on one 32 GB card, and
+tail-level quality parity with q8_0 at half the bytes: see
+[the showcase section](#qwen38-27b-on-rtx-5090--the-production-showcase-2026-08).
+
 ## Why TurboQuant?
 
 The KV cache is the memory bottleneck for long-context LLM inference. At 32K+ tokens, the KV cache can exceed the model weights in size, consuming VRAM and bandwidth. TurboQuant compresses KV values from 8.5 bits (q8_0) down to 2-4 bits — **slashing memory 4-8x** while maintaining quality. The result: longer context, more concurrent users, and on bandwidth-limited GPUs, **faster decode**.
@@ -26,12 +31,100 @@ This fork by [@Madreag](https://github.com/Madreag) adds aggressive **CUDA kerne
 | Sparse V skip (type-adaptive thresholds) | +4.6% at 32K, zero PPL cost |
 | `__launch_bounds__(128, 3)` occupancy | +7-13% at 32K |
 | Half-precision LUT, `__expf` softmax, L2 prefetch | cumulative ~9% |
+| **TCQ (Trellis Coded Quantization)** — see below | Best quality at 3.25 bpv |
+| **V-norm alpha calibration** (turbo3/turbo2/turbo4) | Recovers up to 0.05% PPL vs q8_0 |
 
 At short context, both builds are identical or near-identical. The advantage shows at **32K+** where KV bandwidth dominates — the bigger the context, the larger the gain.
 
-Built on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, native Flash Attention vec_dot, and MMA prefill. All 4 turbo types with 36 asymmetric K/V combinations. Validated across 5 models, 4 GPUs, 1,351+ stability iterations with zero failures.
+Built on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, native Flash Attention vec_dot, and MMA prefill. All 4 turbo types with 36 asymmetric K/V combinations, plus 2 Viterbi-encoded TCQ variants. Validated across 5 models, 4 GPUs, 1,351+ stability iterations with zero failures.
 
-## Performance (RTX 5090, Qwen 3.5 27B Q6_K)
+
+## Qwen3.8-27B on RTX 5090 — the production showcase (2026-08)
+
+This fork now serves **Qwen3.8-27B** (hybrid: 48 DeltaNet/GDN + 16 attention
+layers, native MTP head, vision) in production on a single **RTX 5090 32 GB**
+under WSL2 — the full stack: turbo4 KV (4.125 bpv, corrected Lloyd-Max
+centroids), fused MMA-turbo decode kernels, an upstream GDN row-per-warp
+kernel merged with the fork's snapshot-slot rollback semantics, and MTP
+speculative decode at draft depth 3. Everything below is measured on that
+box, with the measurement conditions stated.
+
+### Two serving profiles, one card
+
+| Profile | ctx | YaRN | MTP | VRAM used | fill-proven | decode at depth |
+|---|---:|---:|:--:|---:|---:|---|
+| **Speed** (default) | 327,680 | 1.25 | n=3 | 31.8 / 32.6 GB | 266K cached | ~113 tok/s code @38K |
+| **Max-context** | 409,600 | 1.5625 | off | 30.7 / 32.6 GB | 329K cached | 28-31 tok/s @274-329K |
+
+Turning MTP off frees a measured **~1.9 GB** of draft/spec compute — that,
+not the draft KV, is what funds the 409K window. Both profiles are
+fill-ladder-verified **VRAM-static**: +80/+32 MiB one-time first-prefill
+allocation, then flat to the deepest measured fill.
+
+### Decode throughput (temp 1.0 — the *serving* sampler, not greedy)
+
+38K-token prompt, 700-token continuations, MTP n=3, paired A/B methodology
+(restarts between arms, ordering repeated):
+
+| workload | tok/s | vs MTP n=2 |
+|---|---:|---:|
+| code continuation | **113** | +17% |
+| copy/edit-loop (rename-and-echo) | **140** | +22% |
+| prose continuation | 79 | −6% |
+
+Prefill ~2,700 tok/s @38K, ~1,715 @121K. Decode-vs-depth envelope (20-token
+samples per rung — treat as an envelope, not precision): ~86 @14K → ~77 @85K
+→ ~57-68 @111-160K → ~40-65 @174-246K → ~44 @260K → **37 @300K**.
+
+MTP acceptance is temperature- and content-dependent: ~0.88/0.77 (code/prose)
+at greedy, ~0.75/0.41 at temp 1.0. Greedy inflates spec-decode acceptance
+roughly 2× — never quote greedy acceptance as a serving number.
+
+### Quality — mean AND tail (the part most KV-quant claims skip)
+
+157 prompts (2048 tokens each) against a same-binary, same-YaRN f16-KV
+reference; per-prompt KLD percentiles:
+
+| KV type | bits/val | mean KLD | p99 | max | top-1 |
+|---|---:|---:|---:|---:|---:|
+| q8_0 | ~8.5 | 0.0019 | 0.056 | 0.089 | 99.4% |
+| **turbo4** | **4.125** | 0.0060 | **0.062** | **0.064** | 96.2% |
+| q4_0 | ~4.5 | 0.0156 | 0.069 | **1.708** | 96.2% |
+| turbo3_tcq | ~3.3 | 0.0154 | 0.179 | 0.185 | 93.6% |
+| turbo3 | ~3.3 | 0.0182 | 0.124 | 0.143 | 88.5% |
+
+The headline: **turbo4's extreme tail is q8_0-class at half the bytes** (its
+max is actually *lower* than q8_0's), while q4_0 — the format many stacks
+ship at this budget — hides a catastrophic single-position blowup (max 1.71)
+behind a pleasant-looking mid-distribution. Mean-only KLD comparisons cannot
+see this; tail percentiles are now a standing gate in this project.
+
+Behavioral gates on the shipped config (trajectory battery, multi-seed at
+serving temperature): chained multi-hop recall, correction-override, and
+executable code-trajectories **pass through the 256K tier**; exact
+state-tracking (ledger) is clean through the 128K tier and think-spirals at
+the 256K tier. NIAH 5/5 at 130K and 380K through turbo4+YaRN. (Battery depth
+labels are nominal tiers; true fills run ~13% shallower.)
+
+### What shipped to get there (all paired-A/B gated)
+
+- **Fused MMA-turbo decode** default-on: +2.2% @38K, **+8.7% @121K** decode.
+- **GDN row-per-warp kernel** (upstream PR #22673-era #22587 merged with the
+  fork's per-token snapshot-slot rollback): +2.8% decode @38K, +1.7-1.8%
+  prefill at both depths; 36/36 backend-op tests including all snapshot cases.
+- **MTP draft depth 3**: the fused verify path covers 4-row batches, which
+  made n=3 free where it used to fall off the fast path. Community tuning
+  folklore did NOT transfer: confidence-gating (p-min) and ngram cascades
+  both measured *worse* here — cheap fused verification inverts their
+  economics. Measure on your own stack.
+- Serving temperature stays at Qwen's recommended **1.0**: lower temps win
+  shallow benchmarks but think-spiral at depth (0.6 spirals at the 128K
+  tier, 0.4 already at 64K). Multi-seed battery evidence, both directions.
+
+Full evidence ledgers (every verdict with numbers, including the rejected
+ideas): the `hermes/server-foundation` branch of this repo.
+
+## Prior-generation validation (RTX 5090, Qwen 3.5 27B Q6_K)
 
 | Type | Bits/Value | Compression | Short Decode | 32K Decode | PPL ctx=512 | PPL ctx=2048 |
 |------|:---------:|:-----------:|:------------:|:----------:|:-----------:|:------------:|
@@ -76,7 +169,42 @@ Key takeaways from this table:
 | **Best balance** | turbo3 | q8_0 quality at 5.1x compression | `-ctk turbo3 -ctv turbo3` |
 | **Long context** | turbo2 | 32K champion (+5.4% vs q8_0), 42 tok/s at 256K, 7.5x compression | `-ctk turbo2 -ctv turbo2` |
 | **Best quality** | turbo4 | +0.97% PPL at 3.76x compression | `-ctk turbo4 -ctv turbo4` |
+| **Viterbi-optimal** | turbo3_tcq | Quality edge over scalar turbo3 at 3.25 bpv (Viterbi encoding) | `-ctk turbo3_tcq -ctv turbo3_tcq` |
 | **Maximum compression** | turbo1.5 | 8x compression, 212 tok/s MoE | `-ctk turbo1.5 -ctv turbo1.5` |
+
+## TCQ — Trellis Coded Quantization (Optional, Quality-Optimal Variants)
+
+[PR #1](https://github.com/Madreag/turbo3-cuda/pull/1) ported spiritbuun's **Trellis Coded Quantization** on top of the existing turbo3/turbo2 pipeline. TCQ uses a Viterbi-optimal encoder over a 512-state (turbo3_tcq) or 256-state (turbo2_tcq) trellis with GLA-trained codebooks, beating the scalar turbo PPL at the same bit rate at the cost of a one-time encoding pass during `SET_ROWS`.
+
+| Type | bpv | Compression | Encoder | PPL @ ctx=512 (27B Q6_K) |
+|------|----:|:-----------:|:-------:|:------------------------:|
+| turbo3 | 3.125 | 5.12x | Scalar | 6.852 |
+| **turbo3_tcq** | **3.25** | **4.92x** | **Viterbi (512-state)** | **6.503** (better than scalar turbo3) |
+| turbo2 | 2.125 | 7.53x | Scalar | 7.121 |
+| turbo2_tcq | 2.25 | 7.11x | Viterbi (256-state) | (see session notes) |
+
+**Speed trade-off**: turbo3_tcq decodes at ~96% of scalar turbo3 (53.57 vs 55.87 tok/s on RTX 5090, tg128). The 4% drop is Viterbi-encoder overhead during `SET_ROWS`.
+
+**V-norm alpha calibration**: TurboQuant V-values benefit from a small per-type scale correction (calibrated on Qwopus 3.5 27B Q6_K, wikitext-2, 32 chunks):
+
+| Env var | Applies to | Calibrated value | Δ PPL vs α=1.00 |
+|---|---|:---:|:---:|
+| `TURBO_NORM_ALPHA_V` | turbo3, turbo2, turbo3_tcq, turbo2_tcq | **1.04** | -0.04% |
+| `TURBO4_NORM_ALPHA_V` | turbo4 | **1.10** | -0.40% |
+
+With α=1.10, `q8_0 K + turbo4 V` matches the q8_0/q8_0 baseline within 0.05% PPL (5.4876 vs 5.4849) — effectively lossless V compression at 4.25 bpv.
+
+> **α is a per-model calibration, not a constant.** The values above were
+> calibrated on Qwen 3.5-era 27B. **Qwen3.8-27B wants α = 1.00/1.00** — the
+> inherited 1.10/1.12 cost 2.3× KLD there (2026-08 corrected-methodology
+> sweep). Re-sweep α on every model change.
+
+**Usage**:
+```bash
+export TURBO_NORM_ALPHA_V=1.04
+export TURBO4_NORM_ALPHA_V=1.10
+./build/bin/llama-server -m model.gguf -ctk q8_0 -ctv turbo4 -fa -ngl 99
+```
 
 ## Q4_K_M Weight Quantization (Speed Champion)
 
@@ -321,6 +449,13 @@ CUDA kernel optimizations, cross-GPU validation, and quality testing by [@Madrea
 - D=256 LUT disable for SM120 — workaround for NVIDIA codegen bug (NVBUG 5218000/5288270)
 - Block-128 CUDA validation — turbo3 5.12x compression, turbo2 7.53x
 
+**TCQ Integration (from spiritbuun, PR #1):**
+- Ported Viterbi encoder (512/256 state) + GLA-trained codebooks to our CUDA pipeline
+- Added `turbo3_tcq` and `turbo2_tcq` KV cache types, integrated with FA vec/MMA prefill
+- Caught 3 critical pre-merge integration bugs (SET_ROWS/GET_ROWS/CPY supports_op, Q pre-rotation WHT missing in `llama-graph.cpp`, llama-bench type parser) — all documented in Session 30
+- Added V-norm alpha calibration mechanism (env-var opt-in, lossless default) for turbo3/turbo2/turbo4
+- FWHT prefill optimization investigated on SM120: spiritbuun's simpler butterfly produces shared-memory **bank conflicts** at h=1,2 (-1% to -3% pp) on modern NVIDIA; our existing kernel is retained. Patch preserved for older hardware where bank-conflict cost is lower.
+
 **Architecture & Features:**
 - All 4 turbo types ported to CUDA (turbo4, turbo3, turbo2, turbo1.5)
 - 36 asymmetric K×V combinations with full VEC template instances
@@ -338,7 +473,7 @@ CUDA kernel optimizations, cross-GPU validation, and quality testing by [@Madrea
 
 - **[TheTom](https://github.com/TheTom)** — Metal implementation, turbo4 resurrection (7 bugs fixed), asymmetric K/V discovery, turbo3 norm correction, block-128 storage research, sparse V concept, quality validation methodology
 - **[signalnine](https://github.com/signalnine)** — Original CUDA port of TurboQuant for llama.cpp (PR #3 to TheTom's repo), InnerQ per-channel equalization
-- **[spiritbuun](https://github.com/spiritbuun)** — turbo4 norm correction (separate CUDA fork), inverse FWHT prefill optimization
+- **[spiritbuun](https://github.com/spiritbuun)** — turbo4 norm correction (separate CUDA fork), **TCQ (Trellis Coded Quantization) with Viterbi encoder and GLA-trained codebooks** (ported to this fork in PR #1), inverse FWHT prefill variant (investigated — bank-conflict regression on SM120, retained as reference patch)
 - **[HyperionMS2040](https://github.com/HyperionMS2040)** — Block-128 SET_ROWS warp-to-block mapping fix (`7cb6edb`), validated PPL-identical on SM86
 
 ### Paper
