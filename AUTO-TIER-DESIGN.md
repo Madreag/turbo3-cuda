@@ -98,9 +98,13 @@ daily in prod). Checkpoints persist in slot files in our tree (#26004 pick).
 → **Phase 2 collapses into Phase 1: switch = save slot (~2.8 GB, seconds) +
 restart (~10-40 s warm) + restore + ~49-token reuse ≈ 20-50 s total, NO
 re-prefill.** Plain re-prefill remains the automatic fallback.
-Quality gate required first: speed profile at rope 1.5625 — tail-KLD already
-measured BETTER at 1.5625 (0.0052/p99 .028 vs 0.0060/.062), battery 2-seed
-pass on the speed profile config pending.
+Quality gate required first — and CORRECTED 2026-08-16: our existing KLD
+runs compared each scale against a SAME-SCALE f16 reference, which isolates
+QUANT error and cancels the yarn tax out entirely. "0.0052 at 1.5625" means
+quant stays transparent there — it says NOTHING about what yarn itself
+costs. The yarn tax (none vs 1.25 vs 1.5625) has never been measured on
+this stack; YARN-TAX-STUDY (menu presented to user) must run before rope
+unification is adopted.
 
 **2. Tooling agent.** Nothing off-the-shelf routes on token count locally
 (llama-swap + llama.cpp native router are name-driven; token triggers live

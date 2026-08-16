@@ -221,6 +221,37 @@ lock-acquire has no timeout (by design: two-user serialization).
    (state-restore hardening, ctx-cap rope scaling, parse-degrade). User opens
    PRs; assistant never submits to external repos.
 
+## RESUME HERE (2026-08-16, context-handoff point)
+
+**Just completed:** branch consolidation (6 branches, map above) · README
+3.8/5090 showcase (public repo) · mega-bughunt (11 fixes) · two-profile
+serving shipped+gated (320K speed n3 / 409K max) · Hermes client brief
+(model ids qwen3.8-27b-320k/409k; output UNCAPPED per user directive —
+never cap capability) · ctx-checkpoints 2-vs-4 tested (keep 2) ·
+AUTO-TIER-DESIGN.md finalized after a 3-agent search blast.
+
+**In flight / immediate next:** YARN-TAX measurement. User asked: quantify
+quality of rope none vs 1.25 vs 1.5625 — and correctly suspected our
+KLD runs don't show it (they used matched-scale f16 refs = quant-only,
+yarn cancels out; recorded in AUTO-TIER-DESIGN). A test-options menu was
+presented (cross-scale KLD vs NO-YARN f16 reference incl. pure f16-vs-f16
+arms; battery at matched config ctx=131072 scale {none,1.25,1.5625} × 3
+seeds; optional PPL ladder / RULER — search agent findings in session).
+**Waiting on user's pick before running.** No-yarn arms must run at
+ctx ≤ 262144 (native).
+
+**Then:** if 1.5625 tax acceptable → unify speed profile rope at 1.5625 →
+build proxy auto-tier per AUTO-TIER-DESIGN (one Hermes model id, tier-up
+~180K via usage-token tracking, hold-and-swap with slot save/restore
+handoff ≈ 20-50 s — slot files are rope-scale-bound but ctx/spec-agnostic,
+the design doc has the full verified matrix + heartbeat/drain/error
+shapes). If tax too high → keep 1.25 and build the same design with the
+~2-min re-prefill switch.
+
+**Standing context:** prod = speed profile, healthy; effort=max session;
+user doctrine: QUALITY AND FEATURES OVER SPEED, never cap capability,
+options-before-execution on new test arcs, TLDR-style replies preferred.
+
 ## OPEN ARCS
 
 - **Sparse decode: CLOSED 2026-08-15 — tested, not viable** (P0 offline
