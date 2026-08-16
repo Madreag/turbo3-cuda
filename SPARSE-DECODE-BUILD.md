@@ -255,7 +255,9 @@ ccmma baseline is binary evolution (b10448 sync + 24565) on the prefill
 path — top-1 unchanged 98.3%, still excellent; noted, not gate-blocking
 (the 0.0052 threshold was written against the same-binary premise that no
 longer holds; behavioral gate = battery). Decode-path behavioral check =
-trajectory battery @64K on fused-ON (below). Caveat on record: fused is NOT
+trajectory battery @64K on fused-ON: **6/6 — hops-2/3/4 PASS, ledger 8/8,
+correction PASS, code-traj PASS** (traj_fused64.json, seed 42) — identical
+to the baseline columns at this tier. GATE PASSED; adoption stands. Caveat on record: fused is NOT
 token-identical to VEC (f16 reduction order, ~1-in-25 hard-tie flips) — set
 =0 for strict-identity A/Bs; the 84-89 tok/s @38K in older docs are
 VEC-path temp-1.0 probes; this A/B's greedy probes ran 101-104 @38K.
