@@ -9,10 +9,13 @@ grammar-bomb forensics remain valid record). Branch: `hermes/server-foundation`
 - **Model:** Qwen3.8-27B Q6_K (hybrid: 48 DeltaNet + 16 attention layers,
   head_dim 256, GQA-4), native MTP head. Vision via mmproj **on CPU**
   (~21 s/image encode, once per image; text speed unaffected).
-- **Context:** 327,680 (320K), YaRN 1.25. LOCKED for the testing phase (user
-  decision): guarantees ~1 GB VRAM headroom so no measurement is paging-
-  poisoned. Post-testing options: push ctx up; optional MTP-off profile
-  (~0.8 GB back) as a user-selectable trade.
+- **Context:** TWO PROFILES (2026-08-16, ctx push executed). Default =
+  SPEED: 327,680 (320K), YaRN 1.25, MTP n3 — at its VRAM ceiling (~334K
+  max per vram_law.py). Opt-in = MAX-CTX: 409,600, YaRN 1.5625, MTP OFF
+  (spec-off frees ~1.9 GB of draft/spec compute — measured, not the old
+  0.8 GB estimate). Both fill-ladder-verified VRAM-static. Theoretical
+  MTP-off ceiling ~484K but that needs YaRN ~1.85 — beyond validated
+  territory; 1.5625 is the NIAH-validated boundary.
 - **KV cache:** turbo4 (66-byte blocks, 4.125 bpv, corrected Lloyd-Max
   centroids) K+V, target AND draft (`-ctkd/-ctvd turbo4`). Alphas 1.00.
   MMA-turbo fused decode kernels (kill-switch `GGML_TURBO_MMA_FUSED=0`).
@@ -44,11 +47,21 @@ grammar-bomb forensics remain valid record). Branch: `hermes/server-foundation`
 ## OPERATE
 
 ```bash
-bash ~/.config/llama-tcq/start-long-38.sh   # guarded: refuses double-start,
-                                            # rotates logs, health-gates both layers
+bash ~/.config/llama-tcq/start-long-38.sh   # SPEED profile (default): 320K,
+                                            # MTP n3 — code ~113 t/s @38K
+bash ~/.config/llama-tcq/start-max-38.sh    # MAX-CTX profile (opt-in): 409,600
+                                            # ctx, YaRN 1.5625, MTP OFF —
+                                            # ~28-31 t/s deep, 329K fill-proven
 bash ~/.config/llama-tcq/stop.sh            # verified kill, port check
-bash ~/.config/llama-tcq/status.sh          # ports + /health + VRAM (not pidfiles)
+bash ~/.config/llama-tcq/status.sh          # ports + /health + VRAM + swap line
 ```
+One profile at a time (same ports; double-start guard enforces). Slot dirs
+are per-profile (slots-long/ vs slots-max/) — switching profiles never
+poisons the other's slot files. Max-profile gates (2026-08-16): fill-ladder
+flat (+32 MiB to 329K cached), KLD@1.5625 mean 0.0052 / p99 0.028 / top-1
+95.5% (quant transparency holds at the higher YaRN), battery @64K 2-of-3
+(seed-42 spiral = the known trajectory-luck mode), NIAH 5/5 @380K
+(pre-validated at this scale). VRAM ~30.7 GB used, ~1.9 GB free.
 Clients: `http://192.168.50.130:8130/v1` (OpenAI) or `/v1/messages`
 (Anthropic), keys in `keys.json`. After a Windows reboot re-add the portproxy
 if clients can't reach 8130 (WSL IP rotation).
