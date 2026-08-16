@@ -93,6 +93,8 @@ SPEC_TYPE="${SPEC_TYPE:-draft-mtp}"
 SPEC_NMAX="${SPEC_NMAX:-3}"   # 3 ADOPTED 2026-08-16: code decode +17% (96→113), copy-heavy +22% (115→140), prose -6% — coding-primary trade; 5-seed ledger gate {8,8,8,7-wrongval,0-spiral(traj-luck, base-class mode)}; p-min gate + ngram cascade both measured WORSE on our fused stack (see g1 CLUB3090-PORT-BOARD P9/P1)
 SPEC_PMIN="${SPEC_PMIN:-}"   # e.g. 0.60 — confidence gate (arg parser has no --flag=value form)
 SPEC_EXTRA="${SPEC_EXTRA:-}"
+CKPT="${CKPT:-2}"          # ctx-checkpoints (host RAM, ~2.4GB each at full depth)
+ALIAS="${ALIAS:-qwen3.8-27b-320k}"  # model id shown in /v1/models — the Hermes selector key
 # Key via --api-key-file: the old --api-key "$KEY" form exposed the key in
 # /proc/*/cmdline to any local process (bughunt A5).
 # --metrics: exposes spec_decode_* acceptance counters (grammar/MTP split
@@ -111,7 +113,7 @@ nohup ./build-g1/bin/llama-server \
   --chat-template-kwargs '{"preserve_thinking": true}' \
   --parallel 1 -b 512 -ub 512 \
   --temp 1.0 --top-p 0.95 --top-k 20 \
-  --ctx-checkpoints 2 \
+  --ctx-checkpoints $CKPT --alias $ALIAS \
   --slot-save-path "$CONF/slots-long/" \
   --host 127.0.0.1 --port 8131 \
   --api-key-file "$CONF/api.key" \

@@ -87,6 +87,14 @@ change (server refuses stale ones gracefully; proxy erases and re-prefills).
 
 ## HERMES CLIENT SETTINGS (3.8-era, 2026-08-16 — supersedes 3.5 tuning)
 
+- **Provider**: `5090PC`, OpenAI-compatible, base `http://192.168.50.130:8130/v1`,
+  key from keys.json. **Two model ids** (served one-at-a-time, launcher
+  `--alias`): `qwen3.8-27b-320k` (speed profile) · `qwen3.8-27b-409k`
+  (max-ctx profile). Wrong-id requests still serve the running model.
+- **ctx-checkpoints stays 2** (tested 2026-08-16: 2 vs 4 token-identical
+  reprocess at 25/50/75% edit depths — 11586/11876/13432 both — while 4
+  costs +700 MB host RSS; the cap is NOT a stale limitation).
+
 - **Context to declare**: 320,000 (speed profile). Max profile: 400,000.
 - **Compaction trigger — user's choice on a measured spectrum, compact
   down to ~40K whenever it fires:**
