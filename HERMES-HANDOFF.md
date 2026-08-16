@@ -102,7 +102,9 @@ lock-acquire has no timeout (by design: two-user serialization).
 4. `RESEARCH-2026-08.md` — the research campaign board (several speed verdicts
    superseded by later paired re-tests — WORKPLAN wins on conflict).
 5. `FUTUREPLAN.md` / `UPSTREAMSYNC.md` — historical (phases done; sync done).
-6. `pr-package/` — three upstream-ready PR branches staged on the user's fork
+6. `CLUB3090-PORT-BOARD.md` — the standing NEXT queue: ports/tests/skips
+   from the club-3090 review, with per-item validation gates and waves.
+7. `pr-package/` — three upstream-ready PR branches staged on the user's fork
    (state-restore hardening, ctx-cap rope scaling, parse-degrade). User opens
    PRs; assistant never submits to external repos.
 
@@ -115,11 +117,20 @@ lock-acquire has no timeout (by design: two-user serialization).
   GGML_TURBO_MMA_FUSED=1 (in-tree default also flipped on branch
   feature/sparse-decode). Re-run the P0 probe (~30 min) before believing
   the sparse verdict for any future model swap.
-- Post-testing-phase: context push + optional MTP-off profile.
+- **NEXT QUEUE = CLUB3090-PORT-BOARD.md** (2026-08-15 review of the
+  club-3090 community repo): Wave 1 = two-stage ngram+MTP depth sweep
+  (P1, top lever — includes the fused-Q≤4 × draft-depth interaction
+  analysis), tail-KLD metric + turbo4-vs-q8_0-vs-q4_0 three-way (P2),
+  rollback-clamp audit (P5), launcher hardening (P6). Wave 2 = fill-ladder
+  probe (P3, MANDATORY before any ctx push) + VRAM-law calculator (P8) +
+  agentic-turns probe (P7).
+- Post-testing-phase: context push + optional MTP-off profile (gated on P3).
 - **GDN #22587: ADOPTED 2026-08-15** (un-parked, merged with b10448
   snapshot-slot semantics, all gates green — see WORKPLAN GDN section).
-- Remaining decode lever: MTP acceptance at temp 1.0 (67% vs 82.5% greedy,
-  Vulkan 92% reference gap).
+- MTP acceptance note (reframed by the club-3090 review): greedy inflates
+  spec acceptance ~2× cross-engine; our 82.5% greedy / 67% temp-1.0 is
+  expected, the "Vulkan 92%" reference is presumed greedy. Lever = tuning
+  (board P1/P4), not a mystery.
 - Watchlist: upstream issues 27090/27102/26609/25717 (our shapes); Vulkan
   92%-acceptance reference gap.
 
