@@ -74,8 +74,15 @@ deploy batch. Slot files archived on config change. Rollback binaries kept.
   mainline 74.8/83.7 vs variant 84.5/88.7 — consistent ordering, worst-B >
   best-A. The paged-era 'neutral' verdict was wrong; paired methodology
   vindicated. Deployed.
-- DSpark: closed not-fitting (see battery section). GDN 26001 prefill pair:
-  next/last.
+- DSpark: closed not-fitting (see battery section).
+- **GDN 26001: TESTED-NEUTRAL, paired** (2657/81.3 vs 2636/80.5 — <1% both
+  metrics). Paged-era 'regression' was paging; no gain on SM120/Qwen3.8
+  either. Stays out. 22587 stays parked (merge cost vs low appetite at
+  current decode speeds).
+
+## BOARD STATUS: all items DONE/CLOSED except the sparse-decode BUILD
+(designed + gated, ~1-2 week kernel arc — next major session). Production =
+24565 binary (llama-server.mainline is the rollback twin).
 
 ## TRAJECTORY BATTERY DONE — baseline recorded (traj_b10448-320k-baseline2)
 - hops-2/3/4, correction, code-traj: **PASS at 64K/128K/256K, all clean** —
