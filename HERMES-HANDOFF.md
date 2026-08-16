@@ -19,11 +19,18 @@ grammar-bomb forensics remain valid record). Branch: `hermes/server-foundation`
 - **Speculative:** `--spec-type draft-mtp --spec-draft-n-max 2`. Acceptance
   82.5% greedy / ~67% at temp 1.0 (post-#27133 queue redesign).
 - **Fork:** upstream-tip b10448 + carries. Binary: `build-g1/bin/llama-server`
-  (= the 24565-adopted build; `.mainline` beside it is the rollback twin;
-  `.pre-bughunt` = pre-marathon).
-- **Measured (fitted, unpaged):** shallow decode ~110-122 tok/s; 38K depth
-  ~84-89 decode / ~2,650 prefill; full 38K turn ≈ 23 s; KLD vs f16 0.00473
-  (top-1 98.3%); VRAM 31.1-31.7 of 32.6 GB.
+  (= gdn22587 build: 24565 + fused-MMA-default + GDN row-per-warp #22587;
+  rollback chain: `.pre-gdn22587` → `.mainline` → `.pre-bughunt`). Fused
+  MMA-turbo decode is ON via launcher env (2026-08-15 adoption: +2.2% @38K,
+  +8.7% @121K decode); GDN #22587 adopted same day (+2.8% decode @38K,
+  +1.7-1.8% prefill both depths, +0.4% @121K).
+- **Measured (fitted, unpaged, post-adoptions, greedy probes):** 38K depth
+  ~108 decode / ~2,720 prefill; 121K depth ~77 decode / ~1,715 prefill.
+  (Older "84-89 @38K" figures were VEC-path temp-1.0 probes — superseded.)
+  KLD vs archived f16 ref: 0.0050-0.0059 / top-1 96.7-98.3% (same-day binary
+  pair; the archived 0.00473 predates b10448+24565 binary evolution).
+  Battery @64K on the shipped binary: 6/6, ledger 8/8 (traj_gdn64.json).
+  VRAM 31.1-31.7 of 32.6 GB.
 
 ## OPERATE
 
@@ -37,8 +44,10 @@ Clients: `http://192.168.50.130:8130/v1` (OpenAI) or `/v1/messages`
 (Anthropic), keys in `keys.json`. After a Windows reboot re-add the portproxy
 if clients can't reach 8130 (WSL IP rotation).
 
-Rollback: stop → `cp build-g1/bin/llama-server.mainline build-g1/bin/llama-server`
-→ start (drops only the +9% 24565 tune). Deeper history: `.pre-bughunt`.
+Rollback: stop → `cp build-g1/bin/llama-server.pre-gdn22587 build-g1/bin/llama-server`
+→ start (drops only the GDN #22587 kernel). Deeper: `.mainline` (also drops
+24565), `.pre-bughunt`. Fused-MMA kill-switch: GGML_TURBO_MMA_FUSED=0 env
+(no binary swap needed).
 **Slot files are config-specific** — archive `slots-long/*.bin` on any config
 change (server refuses stale ones gracefully; proxy erases and re-prefills).
 
@@ -107,8 +116,10 @@ lock-acquire has no timeout (by design: two-user serialization).
   feature/sparse-decode). Re-run the P0 probe (~30 min) before believing
   the sparse verdict for any future model swap.
 - Post-testing-phase: context push + optional MTP-off profile.
-- Depth-decode levers still on the table: parked 22587 GDN decode rewrite
-  (48 DeltaNet layers), MTP acceptance work.
+- **GDN #22587: ADOPTED 2026-08-15** (un-parked, merged with b10448
+  snapshot-slot semantics, all gates green — see WORKPLAN GDN section).
+- Remaining decode lever: MTP acceptance at temp 1.0 (67% vs 82.5% greedy,
+  Vulkan 92% reference gap).
 - Watchlist: upstream issues 27090/27102/26609/25717 (our shapes); Vulkan
   92%-acceptance reference gap.
 

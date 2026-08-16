@@ -100,6 +100,34 @@ KLD below (see SPARSE-DECODE-BUILD.md results log for numbers).
 
 Production = 24565 binary (llama-server.mainline is the rollback twin).
 
+## GDN #22587 UN-PARKED AND EXECUTED (2026-08-15 late, "go 22587")
+Upstream PR #22587 (row-per-warp GATED_DELTA_NET kernel, single file, open,
+last updated Jul 21) merged onto our tree. The predicted "dedicated merge"
+was real but inverted: the conflict wasn't 26001 (reverted out) — upstream's
+own kernel had EVOLVED past the PR's base (keep_rs_t snapshot slots for the
+checkpoint/MTP-rollback cluster, separate state ptr + fused-cache path, PDL
+launches). Merge = the PR's row-per-warp parallelization grafted with all
+b10448 semantics (branch feature/gdn-22587, commit 6107ad805; state layouts
+verified identical line-by-line before writing).
+- Correctness: test-backend-ops 36/36 (all K>1 snapshot cases, KDA, permuted,
+  multi-seq, odd prefill lengths).
+- Paired A/B (binary swap arms, restarts between, ordering repeated,
+  fused-ON both arms): decode @38K 105.1/104.9 → **108.0/107.9 (+2.8%)**;
+  decode @121K 77.1/76.9 → 77.3/77.3 (+0.4%); prefill **+1.7-1.8% at both
+  depths** (2661-2686→2716-2728 / 1685-1692→1715-1719). Depth-independent
+  cost ⇒ win concentrates at shallow decode + all prefill, as predicted.
+- KLD (prefill-sensitive for GDN): 0.005030 mean (vs base 0.005865 same-day
+  — slightly BETTER) / top-1 96.7% vs 98.3% = exactly one prompt's argmax
+  tie-flip at 60-prompt granularity with improved mean ⇒ fp-reorder
+  equivalence class, pass.
+- Battery @64K on GDN: **6/6 — hops-2/3/4 PASS, ledger 8/8, correction PASS,
+  code-traj PASS** (traj_gdn64.json, seed 42). ALL GATES GREEN.
+**ADOPTED 2026-08-15**: prod llama-server = gdn22587 build (verified ==
+candidate); rollback twin llama-server.pre-gdn22587 (base = sparse-branch
+tip); deeper history .mainline/.pre-bughunt unchanged. Branch
+feature/gdn-22587 pushed to myfork. PR courtesy: patch stays on our fork;
+upstream PR is the author's — nothing pushed externally.
+
 ## TRAJECTORY BATTERY DONE — baseline recorded (traj_b10448-320k-baseline2)
 - hops-2/3/4, correction, code-traj: **PASS at 64K/128K/256K, all clean** —
   chained recall, correction-override, and executable coding trajectories
