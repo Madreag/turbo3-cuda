@@ -36,7 +36,21 @@ Q≤8 (instances already compiled; gate + validation only).
 ────────────────────────────────────────────────────────────────────────
 ## PORTS (claim → port → validation test → gate)
 
-### P1 [ ] Two-stage ngram+MTP with swept ngram depth — TOP PRIORITY
+### P1 [T] SWEPT 2026-08-15 — depth 2 is OUR optimum; verdict pending gate.
+RESULT (temp 1.0, code+prose @38K, arms restarted, base repeated clean):
+base 95.9-96.5 code / 84.1-84.4 prose (accept .760/.582, rep-stable).
+casc2: cold ≈ base; WARM (ngram index has seen the text): code 108.5
+(+12%, accept .846), prose **132.3 (+57%, accept .981)**. Never worse than
+base in any cell; combined draft ≤3 → verify batch ≤4 → STAYS FUSED.
+casc3/casc4: code warm +5-10%, but prose REGRESSES (76.1/73.5, accept
+.48/.45 — wasted deep drafts + batches spill past the fused Q≤4 window).
+**The board's kernel-window prediction confirmed: their depth-4 peak does
+not transfer; ours is 2.** Their +64% decoded: their bench measures the
+WARM regime (5 repeats after warmups) — real for agentic loops (files
+re-read, edit retries) but the honest claim is "up to +12-57% warm,
+neutral cold." Gate in flight: battery @64K on casc2 + P4 n_max=3 arm.
+
+### (original P1 spec)
 - Their claim: chained ngram(n=4)+MTP(n=3) = +64% code decode, lossless
   quality; inverted-U in ngram depth.
 - Port: likely config-only — pre-checked 2026-08-15: `--spec-ngram-mod-n-min`
@@ -102,7 +116,11 @@ standing gate metric in kl_divergence.py.
   ctx>320K change; the ladder becomes the ctx-push acceptance test.
 - Effort: ~1 h build+run.
 
-### P4 [ ] MTP n_max=3 re-test (fused changed the calculus)
+### P4 [T] MEASURED 2026-08-15 — n3 ungated: code 112.7/113.3 (+17% vs
+base 96!), prose 79.3 (−6%), accept .75/.41, no clamp (head supports ≥3),
+batch 4 stays fused. The cross-rig shape reproduces. Decision folded into
+P9 (p-min gate may keep the code win and erase the prose tax). Original:
+### MTP n_max=3 re-test (fused changed the calculus)
 - Their data: vLLM n=3 AL 3.3-4.0; llama.cpp-family sweeps show shallow
   optima (n=2 on one model, n=5 knee on another) — model-specific.
 - Ours: n_max=2 was chosen when batch>2 fell off the fast path. Post-fused,
@@ -163,6 +181,40 @@ standing gate metric in kl_divergence.py.
   as calibration; used to plan ctx targets + the MTP-off max-ctx profile.
   P3's ladder data feeds it.
 - Effort: ~1-2 h, wave 2.
+
+### P9 [ ] p-min confidence gate sweep (source: sudoingX/qwen38-mtp review)
+- Their claim (cross-rig, RX9070 sweep is the clean one): `--spec-draft-p-min
+  0.60` makes deep drafts "nearly free" — gated n-max 4 beat ungated n-max 2
+  (+3% mixed, **+21% copy-heavy**, acceptance 0.86 vs 0.73, ~3.3 tok/round);
+  code climbs with depth on EVERY rig (A6000: 84.3 tok/s at n-max 6!), prose
+  pays ungated, the gate rescues it. We have NEVER swept p-min.
+- Test: arms {n2 (prod), n2+pmin.6, n3+pmin.6, n4+pmin.6} × probes {code,
+  prose, NEW copy-heavy probe (rename-and-echo over a 4K file ≈ agentic
+  edit-loop shape)} @38K temp 1.0, reps+ordering per our law. Interacts with
+  the fused Q≤4 window: gated deep drafts have VARIABLE batch — steps >4
+  fall off the fused path; measure, don't assume.
+- Gate: overall ≥ prod-n2 with prose ≥ −2%; battery on winner.
+
+### P10 [ ] Cascade/spec determinism spot-check (pre-adoption insurance)
+- One qwen38-mtp host's greedy code-completion hash gate flagged
+  "chaining ngram-mod made n-max 2 unstable" → ships without ngram. Spec
+  decode should be distribution-preserving; before adopting ANY cascade/
+  p-min config: greedy same-prompt ×3 must produce IDENTICAL output
+  (cascade on vs off), plus battery. Cheap; catches implementation-level
+  divergence their gate may have seen.
+
+### B1 [D] Blog review (veladan.org Qwen3.8 FP8 benchmarks) — recorded intel
+- Their HermesAgent-20: 91 @temp0.6 → 79 @1.0 (−12) on SHALLOW agent work —
+  reconciles with our TEMP-STUDY (0.6 wins shallow, spirals at 128K; their
+  suites never go deep; their 0.6 pass was n=1). OPEN IDEA: depth-aware
+  per-request temp override in proxy (0.6 while ctx < ~96K, 1.0 beyond) —
+  needs a shallow tool-call-shaped suite on OUR stack first (our battery
+  under-weights that axis).
+- YaRN tax warning for the ctx push: at YaRN 4.0 their BugFind dropped −12;
+  "'slightly impact short-context quality'… undersells it." Any YaRN
+  increase (409K profile) must re-gate KLD+battery vs the 1.25 baseline.
+- NVFP4 ≈ FP8 within noise on Blackwell/vLLM (weights axis, background).
+- Their gen numbers: 3.6→3.8 HermesAgent +29pts — matches our pilot.
 
 ### U1 [ ] USER-SIDE (Windows) — two .wslconfig/registry changes
 - `networkingMode=mirrored` in .wslconfig (Win11 22H2+): permanently ends

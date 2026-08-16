@@ -85,6 +85,7 @@ done
 #   SPEC_TYPE=ngram-mod,draft-mtp SPEC_EXTRA="--spec-ngram-mod-n-max 3" bash start-long-38.sh
 SPEC_TYPE="${SPEC_TYPE:-draft-mtp}"
 SPEC_NMAX="${SPEC_NMAX:-2}"
+SPEC_PMIN="${SPEC_PMIN:-}"   # e.g. 0.60 — confidence gate (arg parser has no --flag=value form)
 SPEC_EXTRA="${SPEC_EXTRA:-}"
 # Key via --api-key-file: the old --api-key "$KEY" form exposed the key in
 # /proc/*/cmdline to any local process (bughunt A5).
@@ -95,7 +96,7 @@ nohup ./build-g1/bin/llama-server \
   -m /home/erol/ai/turboquant/models/qwen38/Qwen3.8-27B-Q6_K.gguf \
   --mmproj /home/erol/ai/turboquant/models/qwen38/mmproj-F16.gguf \
   --no-mmproj-offload \
-  --spec-type $SPEC_TYPE --spec-draft-n-max $SPEC_NMAX $SPEC_EXTRA \
+  --spec-type $SPEC_TYPE --spec-draft-n-max $SPEC_NMAX ${SPEC_PMIN:+--spec-draft-p-min $SPEC_PMIN} $SPEC_EXTRA \
   -ctkd turbo4 -ctvd turbo4 \
   -ctk turbo4 -ctv turbo4 \
   -fa on -ngl 99 -c $CTX --no-context-shift \
