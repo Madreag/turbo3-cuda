@@ -53,6 +53,13 @@ SCALE=1.25          # = CTX / 262144 (native)
 
 export TURBO_NORM_ALPHA_V=1.00
 export TURBO4_NORM_ALPHA_V=1.00
+# Fused MMA-turbo decode path (2026-08-15 sparse-P0 discovery: the in-tree
+# gate is opt-in and prod had silently run the VEC/dequant path since deploy).
+# Paired A/B (restarts between arms, ordering repeated): decode +2.2% @38K,
+# +8.7% @121K (70.3/70.3 -> 76.5/76.3); prefill unchanged; KLD == baseline.
+# Not token-identical to VEC (f16 reduction order) — unset/=0 for strict
+# VEC-identity A/Bs.
+export GGML_TURBO_MMA_FUSED=${GGML_TURBO_MMA_FUSED:-1}
 # CUDA crash forensics (ops round 3): on a CUDA abort, write a coredump
 # instead of losing the evidence (WSL CaptureCrash dumps land Windows-side).
 export CUDA_ENABLE_COREDUMP_ON_EXCEPTION=1
