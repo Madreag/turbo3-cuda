@@ -16,16 +16,25 @@ grammar-bomb forensics remain valid record). Branch: `hermes/server-foundation`
 - **KV cache:** turbo4 (66-byte blocks, 4.125 bpv, corrected Lloyd-Max
   centroids) K+V, target AND draft (`-ctkd/-ctvd turbo4`). Alphas 1.00.
   MMA-turbo fused decode kernels (kill-switch `GGML_TURBO_MMA_FUSED=0`).
-- **Speculative:** `--spec-type draft-mtp --spec-draft-n-max 2`. Acceptance
-  82.5% greedy / ~67% at temp 1.0 (post-#27133 queue redesign).
+- **Speculative:** `--spec-type draft-mtp --spec-draft-n-max 3` (n3 ADOPTED
+  2026-08-16: code decode 96→113 +17%, copy/edit-loop 115→140 +22%, prose
+  −6% — coding-primary trade; 5-seed ledger gate passed; p-min gate and
+  ngram cascades measured WORSE on our fused stack — board P9/P1).
+  Acceptance is temp/content-dependent: ~0.88/0.77 greedy, ~0.75/0.41
+  code/prose at temp 1.0 (the old "67%" was a blend; entropy-explained,
+  TEMP-STUDY). Spec-vs-off greedy output differs by fp-tie class at ANY
+  n_max (accepted; P10).
 - **Fork:** upstream-tip b10448 + carries. Binary: `build-g1/bin/llama-server`
   (= gdn22587 build: 24565 + fused-MMA-default + GDN row-per-warp #22587;
   rollback chain: `.pre-gdn22587` → `.mainline` → `.pre-bughunt`). Fused
   MMA-turbo decode is ON via launcher env (2026-08-15 adoption: +2.2% @38K,
   +8.7% @121K decode); GDN #22587 adopted same day (+2.8% decode @38K,
   +1.7-1.8% prefill both depths, +0.4% @121K).
-- **Measured (fitted, unpaged, post-adoptions, greedy probes):** 38K depth
-  ~108 decode / ~2,720 prefill; 121K depth ~77 decode / ~1,715 prefill.
+- **Measured (fitted, unpaged, post-adoptions):** at temp 1.0 @38K: code
+  ~113 decode (n3), prose ~79, copy/edit-loop ~140; greedy @38K ~108-113;
+  121K ~77 (n2-era, pre-n3); prefill ~2,700 @38K / ~1,715 @121K. VRAM
+  31.77/32.61 GB (~840 MB headroom post-n3 — the +1 recurrent copy;
+  fill-ladder P3 required before ANY ctx increase).
   (Older "84-89 @38K" figures were VEC-path temp-1.0 probes — superseded.)
   KLD vs archived f16 ref: 0.0050-0.0059 / top-1 96.7-98.3% (same-day binary
   pair; the archived 0.00473 predates b10448+24565 binary evolution).

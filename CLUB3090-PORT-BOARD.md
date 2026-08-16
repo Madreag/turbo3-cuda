@@ -36,7 +36,7 @@ Q≤8 (instances already compiled; gate + validation only).
 ────────────────────────────────────────────────────────────────────────
 ## PORTS (claim → port → validation test → gate)
 
-### P1 [T] SWEPT 2026-08-15 — depth 2 is OUR optimum; verdict pending gate.
+### P1 [R] CLOSED 2026-08-16 — cascade REJECTED (superseded by P4/n3: casc2 warm-only upside, casc2n3 ≤ n3 and noisier; plain MTP n_max=3 beats every cascade arm).
 RESULT (temp 1.0, code+prose @38K, arms restarted, base repeated clean):
 base 95.9-96.5 code / 84.1-84.4 prose (accept .760/.582, rep-stable).
 casc2: cold ≈ base; WARM (ngram index has seen the text): code 108.5
@@ -116,7 +116,7 @@ standing gate metric in kl_divergence.py.
   ctx>320K change; the ladder becomes the ctx-push acceptance test.
 - Effort: ~1 h build+run.
 
-### P4 [T] MEASURED 2026-08-15 — n3 ungated: code 112.7/113.3 (+17% vs
+### P4 [A] **ADOPTED 2026-08-16** (SPEC_NMAX default 3; slots archived; headroom ~840MB) — n3 ungated: code 112.7/113.3 (+17% vs
 base 96!), prose 79.3 (−6%), accept .75/.41, no clamp (head supports ≥3),
 batch 4 stays fused. The cross-rig shape reproduces. Decision folded into
 P9 (p-min gate may keep the code win and erase the prose tax). Original:
@@ -182,7 +182,7 @@ P9 (p-min gate may keep the code win and erase the prose tax). Original:
   P3's ladder data feeds it.
 - Effort: ~1-2 h, wave 2.
 
-### P9 [ ] p-min confidence gate sweep (source: sudoingX/qwen38-mtp review)
+### P9 [R] TESTED-REJECTED 2026-08-16 — p-min 0.60 HURTS on our stack (n2+pmin prose 84→68, -20%; no gated arm beats ungated n3 on code: 92-104 vs 113). Kernel-economics inversion: our fused verify makes wasted drafts nearly free, so the gate only forfeits upside; community rigs pay full verify cost, hence their +21%. Second inversion of the review (after cascade depth). Original spec:
 - Their claim (cross-rig, RX9070 sweep is the clean one): `--spec-draft-p-min
   0.60` makes deep drafts "nearly free" — gated n-max 4 beat ungated n-max 2
   (+3% mixed, **+21% copy-heavy**, acceptance 0.86 vs 0.73, ~3.3 tok/round);
@@ -195,7 +195,7 @@ P9 (p-min gate may keep the code win and erase the prose tax). Original:
   fall off the fused path; measure, don't assume.
 - Gate: overall ≥ prod-n2 with prose ≥ −2%; battery on winner.
 
-### P10 [ ] Cascade/spec determinism spot-check (pre-adoption insurance)
+### P10 [T] RUN 2026-08-16 — pass-with-known-class: n3 greedy self-consistent; n3 ≠ spec-off BUT n2 (months-old prod) ALSO ≠ spec-off (third hash) → divergence is inherent to spec verify-batch shape (fp tie-flips, accepted class; likely explains the community host's hash-gate instability). Original spec:
 - One qwen38-mtp host's greedy code-completion hash gate flagged
   "chaining ngram-mod made n-max 2 unstable" → ships without ngram. Spec
   decode should be distribution-preserving; before adopting ANY cascade/

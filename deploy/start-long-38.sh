@@ -84,7 +84,7 @@ done
 # Spec-decode config is env-able for A/B arms (defaults = production):
 #   SPEC_TYPE=ngram-mod,draft-mtp SPEC_EXTRA="--spec-ngram-mod-n-max 3" bash start-long-38.sh
 SPEC_TYPE="${SPEC_TYPE:-draft-mtp}"
-SPEC_NMAX="${SPEC_NMAX:-2}"
+SPEC_NMAX="${SPEC_NMAX:-3}"   # 3 ADOPTED 2026-08-16: code decode +17% (96→113), copy-heavy +22% (115→140), prose -6% — coding-primary trade; 5-seed ledger gate {8,8,8,7-wrongval,0-spiral(traj-luck, base-class mode)}; p-min gate + ngram cascade both measured WORSE on our fused stack (see g1 CLUB3090-PORT-BOARD P9/P1)
 SPEC_PMIN="${SPEC_PMIN:-}"   # e.g. 0.60 — confidence gate (arg parser has no --flag=value form)
 SPEC_EXTRA="${SPEC_EXTRA:-}"
 # Key via --api-key-file: the old --api-key "$KEY" form exposed the key in

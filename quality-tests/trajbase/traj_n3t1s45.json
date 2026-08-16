@@ -1,0 +1,72 @@
+{
+ "label": "n3t1s45",
+ "seed": 45,
+ "depths": [
+  64000
+ ],
+ "pass": 6,
+ "total": 6,
+ "results": [
+  {
+   "depth": 64000,
+   "test": "hops-2",
+   "pass": true,
+   "want": "Vetch Hollow",
+   "got": "Vetch Hollow"
+  },
+  {
+   "depth": 64000,
+   "test": "hops-3",
+   "pass": true,
+   "want": "898",
+   "got": "898"
+  },
+  {
+   "depth": 64000,
+   "test": "hops-4",
+   "pass": true,
+   "want": "82-K544",
+   "got": "82-K544"
+  },
+  {
+   "depth": 64000,
+   "test": "ledger",
+   "pass": true,
+   "score": "8/8",
+   "want": {
+    "R1": "20",
+    "R2": "-7",
+    "R3": "9",
+    "R4": "-28",
+    "R5": "-18",
+    "R6": "8",
+    "R7": "15",
+    "R8": "-31"
+   },
+   "got": {
+    "R7": "15",
+    "R8": "-31",
+    "R5": "-18",
+    "R6": "8",
+    "R1": "20",
+    "R2": "-7",
+    "R3": "9",
+    "R4": "-28"
+   }
+  },
+  {
+   "depth": 64000,
+   "test": "correction",
+   "pass": true,
+   "want": "9796",
+   "got": "9796"
+  },
+  {
+   "depth": 64000,
+   "test": "code-traj",
+   "pass": true,
+   "err": null
+  }
+ ],
+ "ts": "2026-08-16 00:31"
+}

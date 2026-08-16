@@ -1,0 +1,72 @@
+{
+ "label": "n3t1s46",
+ "seed": 46,
+ "depths": [
+  64000
+ ],
+ "pass": 5,
+ "total": 6,
+ "results": [
+  {
+   "depth": 64000,
+   "test": "hops-2",
+   "pass": true,
+   "want": "Osier Point",
+   "got": "Osier Point"
+  },
+  {
+   "depth": 64000,
+   "test": "hops-3",
+   "pass": true,
+   "want": "786",
+   "got": "786"
+  },
+  {
+   "depth": 64000,
+   "test": "hops-4",
+   "pass": true,
+   "want": "48-P464",
+   "got": "48-P464"
+  },
+  {
+   "depth": 64000,
+   "test": "ledger",
+   "pass": false,
+   "score": "7/8",
+   "want": {
+    "R1": "16",
+    "R2": "0",
+    "R3": "55",
+    "R4": "25",
+    "R5": "17",
+    "R6": "67",
+    "R7": "-16",
+    "R8": "0"
+   },
+   "got": {
+    "R1": "8",
+    "R2": "0",
+    "R3": "55",
+    "R4": "25",
+    "R5": "17",
+    "R6": "67",
+    "R7": "-16",
+    "R8": "0"
+   }
+  },
+  {
+   "depth": 64000,
+   "test": "correction",
+   "pass": true,
+   "want": "1934",
+   "got": "1934"
+  },
+  {
+   "depth": 64000,
+   "test": "code-traj",
+   "pass": true,
+   "err": null
+  }
+ ],
+ "ts": "2026-08-16 00:35"
+}
