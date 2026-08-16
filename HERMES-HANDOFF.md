@@ -112,6 +112,25 @@ change (server refuses stale ones gracefully; proxy erases and re-prefills).
   fan-out just queues.
 - **Images**: ~21 s first-encode each (mmproj on CPU), then cached in
   context — batch/crop judiciously.
+- **Max output tokens: 49,152 — and note it is THINK-INCLUSIVE** on this
+  stack (preserve_thinking streams reasoning as output). Healthy deep
+  thinks measure up to ~32K; 49K = 32K think + ~17K answer headroom. If
+  Hermes has separate think/answer budgets: combined ≥ 40K. Server sets no
+  cap — the client knob is authoritative; ceiling is graceful.
+- **Broom / pruning rules (prefix-break physics)**: kept old tool outputs
+  cost NOTHING per turn (already prefilled; TTFT tracks only the delta) —
+  but retroactively trimming/deleting an old message REWRITES THE PREFIX at
+  that point → full re-prefill of everything after it (~40-60 s mid-depth).
+  Therefore: (1) **insertion-time caps YES** — truncate giant tool dumps
+  BEFORE they enter context (~24-30K tokens/result is comfortably proven);
+  (2) **rolling retro-trim NO** — an every-turn broom converts 0.8 ms/token
+  delta-TTFT into a fresh-prefill per turn, the single worst client setting
+  possible here; (3) **batch all cleanup into the compaction event** — one
+  intentional prefix rewrite per cycle at the ~120K trigger. A full-clear
+  broom (new session) is always fine.
+- **cache_prompt must stay enabled** (server-side prefix reuse is the
+  foundation of all of the above; verified live — do not send
+  cache_prompt:false).
 - **Max profile** (`start-max-38.sh`, 400K): for reference-heavy work that
   genuinely needs >280K of un-compactable material; decode ~28-31 t/s deep
   and NO MTP; recall axes (hops/needle) hold at depth but exact
