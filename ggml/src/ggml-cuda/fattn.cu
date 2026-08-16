@@ -177,7 +177,10 @@ static void ggml_cuda_flash_attn_ext_mma_turbo_switch_ncols2(ggml_backend_cuda_c
     ggml_cuda_flash_attn_ext_mma_turbo_case<DKQ, DV, 8, 1, type_K, type_V>(ctx, dst); // ncols2 = 1 -> (8,1)
 }
 
-// Env latch for the fused turbo4 MMA decode path. DEFAULT OFF.
+// Env latch for the fused turbo4 MMA decode path. DEFAULT ON (sparse-decode
+// branch, 2026-08-15): the opt-in default was A/B hygiene during the token-
+// identity comparisons, but it silently left production on the VEC path.
+// GGML_TURBO_MMA_FUSED=0 remains the kill-switch for strict VEC-identical runs.
 //
 // The MMA path is correctness-validated (coherent output, KLD == VEC baseline 0.008396)
 // and faster than VEC at every depth (beats rival "buun"), BUT it is NOT bit/token-identical
@@ -190,7 +193,7 @@ static void ggml_cuda_flash_attn_ext_mma_turbo_switch_ncols2(ggml_backend_cuda_c
 static bool ggml_cuda_turbo_mma_fused() {
     static const bool v = []{
         const char * s = getenv("GGML_TURBO_MMA_FUSED");
-        return s && s[0] == '1';   // default OFF; only ON when explicitly set to "1"
+        return !(s && s[0] == '0');   // default ON; GGML_TURBO_MMA_FUSED=0 disables
     }();
     return v;
 }
