@@ -13,7 +13,9 @@ Env: TCQ_KEY for auth.
 import argparse, json, os, subprocess, sys, time, urllib.request
 
 CORPUS = "/home/erol/ai/turboquant/turboquant-g1/sparse-p0/corpus.txt"
-TOK_PER_CHAR = 0.3376   # measured for this corpus (490694 tok / 1453563 chars)
+TOK_PER_CHAR = 0.3376   # initial guess; AUTO-RECALIBRATED after the first rung
+                        # (2026-08-16 fix: the static value overshot chars→tokens
+                        # ~12% at depth, so ladders undershot their token targets)
 
 def vram():
     out = subprocess.run(["nvidia-smi", "--query-gpu=memory.used,memory.total",
@@ -47,8 +49,9 @@ def main():
           f"({args.target_frac:.0%} of {args.n_ctx}), {len(rungs)} rungs")
 
     peak = used0
+    tok_per_char = TOK_PER_CHAR
     for i, tok_target in enumerate(rungs):
-        nchars = min(int(tok_target / TOK_PER_CHAR), len(corpus))
+        nchars = min(int(tok_target / tok_per_char), len(corpus))
         body = {"prompt": corpus[:nchars], "n_predict": 20, "temperature": 0.0,
                 "ignore_eos": True, "cache_prompt": True}
         req = urllib.request.Request(
@@ -67,6 +70,9 @@ def main():
             sys.exit(1)
         wall = time.time() - t0
         t = out.get("timings", {})
+        cached = out.get("tokens_cached")
+        if isinstance(cached, int) and cached > 4096 and nchars < len(corpus):
+            tok_per_char = cached / nchars   # recalibrate so later rungs hit target
         u, _ = vram()
         peak = max(peak, u)
         hp = "ok" if health(args.port) else "UNHEALTHY"
@@ -77,8 +83,11 @@ def main():
             print("LADDER: FAIL — health lost")
             sys.exit(1)
 
-    print(f"LADDER: PASS to {rungs[-1]} tokens — VRAM start {used0} peak {peak} "
-          f"(growth {peak-used0:+d} MiB)")
+    measured = out.get("tokens_cached", 0)
+    short = target_tokens and measured < 0.98 * target_tokens
+    tag = "PASS" if not short else "SHORT (corpus/ratio undershoot — measured < 98% of target)"
+    print(f"LADDER: {tag} — measured {measured} cached of {target_tokens} target; "
+          f"VRAM start {used0} peak {peak} (growth {peak-used0:+d} MiB)")
 
 if __name__ == "__main__":
     main()

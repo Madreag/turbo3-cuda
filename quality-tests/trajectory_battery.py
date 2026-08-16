@@ -17,6 +17,10 @@ Tests per depth (one prefill per depth, queries share the cached prefix):
                  earlier decisions; final code executed against asserts.
 
 Usage: trajectory_battery.py [--depths 16000,64000] [--label NAME] [--port 8131]
+NOTE (2026-08-16 bughunt): depth labels are NOMINAL — the words->tokens fill
+ratio makes actual depths ~13% shallower than labels (e.g. "256000" ~ 221K
+real). Labels are kept AS-IS for baseline comparability; treat them as tier
+names, not absolute depths.
 Writes trajbase/traj_<label>.json
 """
 import argparse
@@ -259,7 +263,7 @@ def main():
     outdir = Path(__file__).parent / "trajbase"
     outdir.mkdir(exist_ok=True)
     n_pass = sum(1 for r in results if r["pass"])
-    summary = {"label": args.label, "seed": args.seed, "depths": depths,
+    summary = {"label": args.label, "seed": args.seed, "temp": TEMP, "depths": depths,
                "pass": n_pass, "total": len(results), "results": results,
                "ts": time.strftime("%Y-%m-%d %H:%M")}
     out = outdir / f"traj_{args.label}.json"

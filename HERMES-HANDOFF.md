@@ -92,7 +92,12 @@ Ceiling behavior is graceful: `finish_reason: length`, over-cap prompts → 400.
 - `kl_divergence.py` — 2048-token prompts, cache_prompt=false, vs the ARCHIVED
   same-model reference `kld38/kld_logprobs_f16_qwen38_yarn.json` (a stale
   cross-model reference produces false-catastrophic numbers — 3.6-era file is
-  quarantined). Baseline: 0.00473 / 98.3%.
+  quarantined). CURRENT gate baseline (2026-08-16, 157-prompt tail set
+  `kld38/kld_logprobs_f16_qwen38_yarn_157tail.json`): mean 0.0060 / p99
+  0.062 / max 0.064 / top-1 96.2% at YaRN 1.25 (max profile @1.5625:
+  0.0052 / 0.028 / 0.064 / 95.5% vs its own matched ref). The old
+  0.00473/98.3% is a HISTORICAL datum from a pre-b10448 binary — comparing
+  against it reads a healthy run as a fake ~27% regression.
 - `trajectory_battery.py` — the agentic axis. Supports `--temp` (default 0
   = greedy, the historical baseline mode). SERVING-TEMP baseline
   (2026-08-15, temp 1.0, seeds 42/43, fused+GDN binary): hops-2/3/4,

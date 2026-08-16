@@ -312,3 +312,50 @@ by YaRN validation at 1.5625/409K). Original spec:
   profile; P7 agentic-turns baseline.
 - Wave 3 (opportunistic): soak-gate upgrades, needle-pattern diversity,
   IQ-quant max-ctx profile if ever wanted.
+
+────────────────────────────────────────────────────────────────────────
+## MEGA-BUGHUNT 2026-08-16 (35-agent workflow: 7 finders → adversarial verify)
+
+CONFIRMED + FIXED:
+- fill_ladder prefix-ratio bias + dishonest PASS line (reported nominal
+  target, not measured): auto-recalibration per rung + PASS/SHORT line now
+  prints MEASURED tokens_cached; earlier runs' true fills: 266K@"301K"
+  (320K profile), 329K@"346K" (409K) — VRAM-static conclusions unaffected.
+- HERMES-HANDOFF KLD gate quoted the superseded 0.00473 baseline (a healthy
+  run would read as a fake ~27% regression): gate now = the 157-prompt tail
+  baselines per profile; 0.00473 labelled historical.
+- Launcher header rot (BOTH profiles): 320K profile claimed "409,600/YaRN
+  1.5625" (pre-existing since the 409K era); "n_max 2 sweet spot" vs n3
+  default; rollback runbooks pointed at stale binaries AND the max profile's
+  runbook relaunched the SPEED profile; max profile carried the speed
+  profile's MTP paragraph. All rewritten.
+- VRAM-settle: threshold 24000→4000 (a half-freed 22 GB state passed the
+  old check → boot-into-OOM window) + loud give-up warning, both profiles.
+- status.sh: shows WHICH profile is live (n_ctx from boot log).
+- watch.sh: hardcoded 409,600 fill denominator → derived from boot log.
+- Legacy start.sh: deprecation guard (reproduced the A5 incident class).
+- battery: --temp/seed now recorded in artifacts (matched-temp gate rule
+  enforceable); depth-label honesty note (labels ~13% deeper than actual
+  fill — kept as tier names for baseline comparability).
+- kl_divergence: nearest-rank percentiles (p99==max at n=100 fixed),
+  prompt_tokens metadata stored + mismatch warning, loud no-reference
+  warning, length-clamp notice.
+- agentic probe: verdict anchor = first ≥2000-token turn (fixed-overhead
+  bias masked Cliff-3 class), artifacts persisted to trajbase/.
+- fattn.cu: last contradictory comment paragraph ("keep VEC the default")
+  aligned with the shipped default-ON reality (comment-only).
+
+ACCEPTED WITH RATIONALE (no change):
+- GDN kernel PDL+__restrict__: observation real, scenario non-exploitable
+  (pdl_sync fences before all loads; 36/36 op tests + A/B + battery gates
+  passed on the shipped kernel; changing it would need full re-gating).
+- Kill-switch parses only leading '0' ("=off" silently ON): documented
+  form is =0 everywhere; ergonomics nit.
+- GET_ROWS CPU supports_op keys on dst only (turbo src would abort IF
+  scheduled on CPU): pre-existing behavior, placement never routes it there.
+- stop.sh no post-SIGKILL verify: port-check invariant covers it.
+- test-backend-ops has zero fused-turbo FA coverage: known gap; our gates
+  are KLD/battery/A-B — upstream-grade tests queued for the PR-package era.
+REFUTED BY VERIFIERS (recorded in workflow transcript): 12 findings incl.
+deploy-mirror drift (checked clean), several severity-inflated variants of
+the above.

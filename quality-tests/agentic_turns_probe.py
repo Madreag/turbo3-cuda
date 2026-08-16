@@ -58,13 +58,25 @@ def main():
     # pathology to catch (vLLM Cliff-3 class) is TTFT scaling with TOTAL
     # context despite cache hits — visible as per-delta-token cost growth.
     if len(rows) >= 3:
-        c2 = rows[1][2] / max(rows[1][1], 1)
+        # anchor = first non-cold turn with a big-enough delta that fixed
+        # per-request overhead doesn't dominate the ms/token figure
+        anchor = next((r for r in rows[1:] if r[1] >= 2000), rows[1])
+        c2 = anchor[2] / max(anchor[1], 1)
         cN = rows[-1][2] / max(rows[-1][1], 1)
         ratio = cN / max(c2, 1e-9)
         band = ("STABLE" if ratio <= 1.5 else
                 "GREW" if ratio <= 3 else "O(n)-LIKE (Cliff-3 class)")
-        print(f"VERDICT [{args.label}]: prefill {c2*1000:.2f} -> {cN*1000:.2f} ms/delta-token "
+        print(f"VERDICT [{args.label}]: prefill {c2*1000:.2f} (turn {anchor[0]}) -> {cN*1000:.2f} ms/delta-token "
               f"(x{ratio:.2f}) -> {band}; decode turn2={rows[1][3]:.1f} -> {rows[-1][3]:.1f} t/s")
+        import pathlib
+        outdir = pathlib.Path(__file__).parent / "trajbase"
+        outdir.mkdir(exist_ok=True)
+        with open(outdir / f"agentic_{args.label}.json", "w") as fh:
+            json.dump({"label": args.label, "temp": args.temp,
+                       "rows": [{"turn": r[0], "prefill_delta": r[1], "ttft_s": r[2],
+                                 "decode_tps": r[3], "wall_s": r[4]} for r in rows],
+                       "anchor_turn": anchor[0], "ms_per_tok_anchor": c2*1000,
+                       "ms_per_tok_last": cN*1000, "ratio": ratio, "band": band}, fh, indent=1)
 
 if __name__ == "__main__":
     main()

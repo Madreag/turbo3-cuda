@@ -1,5 +1,6 @@
 #!/bin/bash
-# LONG-CONTEXT profile — Qwen3.8-27B at 409,600 ctx via YaRN 1.5625.
+# LONG-CONTEXT / SPEED profile (default) — Qwen3.8-27B at 327,680 ctx via YaRN 1.25.
+# Sibling: start-max-38.sh = 409,600 ctx / YaRN 1.5625 / MTP OFF (opt-in).
 #
 # VALIDATED (2026-08-14/15 battery, session f5334395):
 #   - reasoning_effort=xhigh @ temp 1.0 (vendor defaults) wins the effort
@@ -12,15 +13,16 @@
 #     1.55-1.71x (57→89-98 tok/s, acceptance 59-63%), general 1.66x. Cost:
 #     art/tool-grammar turns 0.6-0.85x (grammar-blind drafts + grammar turns
 #     losing GPU backend sampling) — accepted, coding-primary per user.
-#     NOTE: --spec-draft-n-max multiplies DeltaNet recurrent state x(1+N);
-#     2 is the sweet spot (no-checkpoint rollback fast path).
-#   - Binary: build-g1/bin/llama-server — 2026-08-15 bughunt build from
-#     sync/2026-08 (upstream 9d57ce456 + TurboQuant port + bughunt fixes),
-#     static/self-contained. Backup of prior build: llama-server.pre-bughunt.
+#     NOTE: --spec-draft-n-max multiplies DeltaNet recurrent state x(1+N).
+#     2026-08-16: n_max=3 ADOPTED (see SPEC_NMAX below — code +17%, copy +22%);
+#     n_rs_seq follows n_max automatically (need_n_rs_seq), rollback fast-path
+#     verified (0 checkpoint-restores across 48 spec tasks).
+#   - Binary: build-g1/bin/llama-server = gdn22587 build (2026-08-16).
+#     Rollback chain: .pre-gdn22587 -> .mainline -> .pre-bughunt.
 #
 # Rollback (absolute paths, run AFTER a verified stop):
 #   bash /home/erol/.config/llama-tcq/stop.sh \
-#     && cp /home/erol/ai/turboquant/turboquant-kv-cache/build-g1/bin/llama-server.pre-bughunt \
+#     && cp /home/erol/ai/turboquant/turboquant-kv-cache/build-g1/bin/llama-server.pre-gdn22587 \
 #           /home/erol/ai/turboquant/turboquant-kv-cache/build-g1/bin/llama-server \
 #     && bash /home/erol/.config/llama-tcq/start-long-38.sh
 #
@@ -76,10 +78,14 @@ prev=-1
 for i in $(seq 1 15); do
     used=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1)
     [ -z "$used" ] && break
-    if [ "$used" = "$prev" ] && [ "$used" -lt 24000 ]; then break; fi
+    if [ "$used" = "$prev" ] && [ "$used" -lt 4000 ]; then break; fi
     prev=$used
     sleep 2
 done
+if [ -n "$used" ] && [ "$used" -ge 4000 ]; then
+    echo "WARNING: VRAM still ${used} MiB after settle wait — another GPU workload" >&2
+    echo "         may be live (probe/foreign process); boot may OOM. Proceeding." >&2
+fi
 
 # Spec-decode config is env-able for A/B arms (defaults = production):
 #   SPEC_TYPE=ngram-mod,draft-mtp SPEC_EXTRA="--spec-ngram-mod-n-max 3" bash start-long-38.sh

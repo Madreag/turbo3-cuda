@@ -1,5 +1,10 @@
 #!/bin/bash
-# MAX-CONTEXT profile — Qwen3.8-27B at 409,600 ctx via YaRN 1.5625, MTP OFF.
+# MAX-CONTEXT profile (opt-in) — Qwen3.8-27B at 409,600 ctx via YaRN 1.5625,
+# MTP OFF (spec-off frees ~1.9 GB measured -> the bigger window; ~28-31 tok/s
+# at 274-329K depth). Sibling default: start-long-38.sh (320K speed profile).
+# Gates 2026-08-16: fill-ladder flat to 329K cached; KLD@1.5625 0.0052 /
+# p99 0.028 / top-1 95.5% vs matched f16 ref; battery @64K 2-of-3 (seed-42
+# trajectory spiral documented); NIAH 5/5 @380K pre-validated at this scale.
 #
 # VALIDATED (2026-08-14/15 battery, session f5334395):
 #   - reasoning_effort=xhigh @ temp 1.0 (vendor defaults) wins the effort
@@ -8,21 +13,16 @@
 #   - NIAH effective 5/5 at 130K AND 380K through turbo4+YaRN.
 #   - Alphas 1.00/1.00 (2026-08-15 corrected-methodology sweep): Qwen3.8 wants
 #     NO V-norm correction — the 3.6-inherited 1.10/1.12 cost 2.3x KLD.
-#   - MTP speculative decode (2026-08-15 A/B at production sampling): coding
-#     1.55-1.71x (57→89-98 tok/s, acceptance 59-63%), general 1.66x. Cost:
-#     art/tool-grammar turns 0.6-0.85x (grammar-blind drafts + grammar turns
-#     losing GPU backend sampling) — accepted, coding-primary per user.
-#     NOTE: --spec-draft-n-max multiplies DeltaNet recurrent state x(1+N);
-#     2 is the sweet spot (no-checkpoint rollback fast path).
-#   - Binary: build-g1/bin/llama-server — 2026-08-15 bughunt build from
-#     sync/2026-08 (upstream 9d57ce456 + TurboQuant port + bughunt fixes),
-#     static/self-contained. Backup of prior build: llama-server.pre-bughunt.
+#   - MTP is OFF in this profile (SPEC_TYPE=none) — that is the point:
+#     the freed draft/spec compute (~1.9 GB) funds the 409K window.
+#   - Binary: build-g1/bin/llama-server = gdn22587 build (2026-08-16).
+#     Rollback chain: .pre-gdn22587 -> .mainline -> .pre-bughunt.
 #
 # Rollback (absolute paths, run AFTER a verified stop):
 #   bash /home/erol/.config/llama-tcq/stop.sh \
-#     && cp /home/erol/ai/turboquant/turboquant-kv-cache/build-g1/bin/llama-server.pre-bughunt \
+#     && cp /home/erol/ai/turboquant/turboquant-kv-cache/build-g1/bin/llama-server.pre-gdn22587 \
 #           /home/erol/ai/turboquant/turboquant-kv-cache/build-g1/bin/llama-server \
-#     && bash /home/erol/.config/llama-tcq/start-long-38.sh
+#     && bash /home/erol/.config/llama-tcq/start-max-38.sh
 #
 # Slot-state files are CONFIG-SPECIFIC: changing KV types, ctx, or --spec-*
 # invalidates saved .bin files (server refuses them, then the proxy erases and
@@ -76,14 +76,18 @@ prev=-1
 for i in $(seq 1 15); do
     used=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1)
     [ -z "$used" ] && break
-    if [ "$used" = "$prev" ] && [ "$used" -lt 24000 ]; then break; fi
+    if [ "$used" = "$prev" ] && [ "$used" -lt 4000 ]; then break; fi
     prev=$used
     sleep 2
 done
+if [ -n "$used" ] && [ "$used" -ge 4000 ]; then
+    echo "WARNING: VRAM still ${used} MiB after settle wait — another GPU workload" >&2
+    echo "         may be live (probe/foreign process); boot may OOM. Proceeding." >&2
+fi
 
 # Spec-decode config is env-able for A/B arms (defaults = production):
 #   SPEC_TYPE=ngram-mod,draft-mtp SPEC_EXTRA="--spec-ngram-mod-n-max 3" bash start-long-38.sh
-SPEC_TYPE="${SPEC_TYPE:-none}"   # MAX-CTX PROFILE: MTP OFF (buys ~1GB VRAM -> +49K ctx vs speed profile)
+SPEC_TYPE="${SPEC_TYPE:-none}"   # MAX-CTX PROFILE: MTP OFF frees ~1.9 GB MEASURED (draft/spec compute graph) -> funds 409K vs the 320K speed profile
 SPEC_NMAX="${SPEC_NMAX:-3}"   # 3 ADOPTED 2026-08-16: code decode +17% (96→113), copy-heavy +22% (115→140), prose -6% — coding-primary trade; 5-seed ledger gate {8,8,8,7-wrongval,0-spiral(traj-luck, base-class mode)}; p-min gate + ngram cascade both measured WORSE on our fused stack (see g1 CLUB3090-PORT-BOARD P9/P1)
 SPEC_PMIN="${SPEC_PMIN:-}"   # e.g. 0.60 — confidence gate (arg parser has no --flag=value form)
 SPEC_EXTRA="${SPEC_EXTRA:-}"

@@ -193,18 +193,28 @@ def main():
     # Save raw logprobs
     out_path = Path(args.output_dir) / f"kld_logprobs_{args.type}.json"
     with open(out_path, "w") as f:
-        json.dump({"type": args.type, "logprobs": results}, f)
+        json.dump({"type": args.type, "prompt_tokens": args.prompt_tokens, "n_prompts": len(results), "logprobs": results}, f)
     print(f"\nSaved {len(results)} logprob sets to {out_path}")
 
     # If f16 logprobs exist, compute KLD
     f16_path = Path(args.output_dir) / "kld_logprobs_f16.json"
+    if args.type != "f16" and not f16_path.exists():
+        print(f"\nWARNING: no f16 reference at {f16_path} — captured logprobs only, "
+              f"NO KLD computed. Capture a reference with --type f16 first.")
     if args.type != "f16" and f16_path.exists():
         print(f"\nComputing KL divergence vs f16...")
         with open(f16_path) as f:
             f16_data = json.load(f)
         f16_lps = f16_data["logprobs"]
+        ref_pt = f16_data.get("prompt_tokens")
+        if ref_pt is not None and ref_pt != args.prompt_tokens:
+            print(f"  WARNING: reference prompt_tokens={ref_pt} != run prompt_tokens="
+                  f"{args.prompt_tokens} — DIFFERENT PROMPTS, comparison invalid!")
 
         n = min(len(f16_lps), len(results))
+        if len(f16_lps) != len(results):
+            print(f"  NOTE: clamping comparison to {n} prompts "
+                  f"(reference has {len(f16_lps)}, run has {len(results)})")
         klds = []
         top1_matches = 0
         delta_p_sqs = []
@@ -232,7 +242,9 @@ def main():
             # per-prompt KLD samples; resolution scales with --n-prompts.
             ks = sorted(klds)
             def pct(p):
-                return ks[min(len(ks) - 1, int(p / 100.0 * len(ks)))]
+                # nearest-rank: ceil(p/100*n)-1 (fix: int(p/100*n) gave p99==max at n=100)
+                import math as _m
+                return ks[min(len(ks) - 1, max(0, _m.ceil(p / 100.0 * len(ks)) - 1))]
             p50, p90, p99, kmax = pct(50), pct(90), pct(99), ks[-1]
             print(f"\n{'='*50}")
             print(f"KL Divergence: {args.type} vs f16")

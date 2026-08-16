@@ -18,6 +18,14 @@ for p in 8131 8130; do
     code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:$p/health" 2>/dev/null)
     echo ":$p → ${code:-no response}"
 done
+prof=$(grep -m1 "n_ctx_slot" /home/erol/.config/llama-tcq/server.log 2>/dev/null | grep -oP 'n_ctx_slot = \K[0-9]+')
+if [ -n "$prof" ]; then
+    case "$prof" in
+        327680) echo "--- profile: SPEED (320K, MTP n3)";;
+        409600) echo "--- profile: MAX-CTX (409K, MTP off)";;
+        *)      echo "--- profile: ctx=$prof";;
+    esac
+fi
 echo "--- gpu"
 nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader 2>/dev/null
 # swap tripwire (club-3090 P6): serving-process pages in swap silently
