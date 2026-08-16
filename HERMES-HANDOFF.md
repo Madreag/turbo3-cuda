@@ -88,20 +88,26 @@ change (server refuses stale ones gracefully; proxy erases and re-prefills).
 ## HERMES CLIENT SETTINGS (3.8-era, 2026-08-16 — supersedes 3.5 tuning)
 
 - **Context to declare**: 320,000 (speed profile). Max profile: 400,000.
-- **Compaction: trigger ~120K tokens, compact down to ~40K.** Rationale:
-  exact state-tracking (ledger axis) is clean through the ~128K tier and
-  spirals at the 256K tier — an agent's edit-loops NEED the state axis, so
-  keep working context inside it; decode is also ~65-77 t/s at 128K vs ~40
-  at 260K. Post-compaction re-prefill of a ~40K prefix ≈ 15-25 s.
+- **Compaction trigger — user's choice on a measured spectrum, compact
+  down to ~40K whenever it fires:**
+  - **~250K trigger (max-window mode)**: recall, correction, and executable
+    code-trajectories are measured CLEAN through the 256K tier — only exact
+    state-tracking (ledger) degrades past ~128K, and decode slows toward
+    ~40 t/s. Maximum usable window.
+  - **~120K trigger (all-axes-clean mode)**: every measured quality axis
+    including exact state-tracking stays perfect, decode stays 65-77 t/s.
+  Pick per workload; nothing breaks either way. Post-compaction re-prefill
+  of a ~40K prefix ≈ 15-25 s.
 - **Sampler: DO NOT change.** temp 1.0 / top-p 0.95 / top-k 20 (client
   already sends 1.0 ✓). Lower temps measured: no shallow benefit on our
   instruments, think-spirals at depth (0.6 @128K-tier, 0.4 @64K).
 - **No reasoning_effort override** — template default (xhigh) won the
   ladder; "low" scored 0/2 on renders.
-- **max_tokens: 49,152 recommended** (was 131,072). Bounds a runaway
-  think's blast radius (spiral at 40 t/s: 131K cap = ~55 min burn, 49K =
-  ~20 min) while clearing every healthy deep think we've measured (battery
-  budgets 32K). Ceiling is graceful (finish_reason: length).
+- **max_tokens: MAXED OUT — 131,072 (or omit the cap entirely; the only
+  real bound is remaining context).** USER DIRECTIVE 2026-08-16: never cap
+  output capability. Ceiling is graceful (finish_reason: length). If a
+  depth-spiral ever burns a long generation, kill the request client-side —
+  do NOT cap the model.
 - **Streaming ON, per-request client timeout ≥ 20 min** (deep 32K-token
   thinks at depth take ~13 min; proxy heartbeats keep streams alive).
 - **Prefix stability**: never mutate the system prompt mid-session; keep
@@ -112,17 +118,18 @@ change (server refuses stale ones gracefully; proxy erases and re-prefills).
   fan-out just queues.
 - **Images**: ~21 s first-encode each (mmproj on CPU), then cached in
   context — batch/crop judiciously.
-- **Max output tokens: 49,152 — and note it is THINK-INCLUSIVE** on this
-  stack (preserve_thinking streams reasoning as output). Healthy deep
-  thinks measure up to ~32K; 49K = 32K think + ~17K answer headroom. If
-  Hermes has separate think/answer budgets: combined ≥ 40K. Server sets no
-  cap — the client knob is authoritative; ceiling is graceful.
+- **Max output tokens: MAXED (131,072 / uncapped) — think-inclusive** on
+  this stack (preserve_thinking streams reasoning as output). Server sets
+  no cap; the ceiling is remaining context and it degrades gracefully.
+  Per user directive: output is never capped on this rig.
 - **Broom / pruning rules (prefix-break physics)**: kept old tool outputs
   cost NOTHING per turn (already prefilled; TTFT tracks only the delta) —
   but retroactively trimming/deleting an old message REWRITES THE PREFIX at
   that point → full re-prefill of everything after it (~40-60 s mid-depth).
-  Therefore: (1) **insertion-time caps YES** — truncate giant tool dumps
-  BEFORE they enter context (~24-30K tokens/result is comfortably proven);
+  Therefore: (1) insertion-time truncation is purely a context-BUDGET
+  choice, not a stability need — single inserts to at least ~120K tokens
+  are proven on this stack; cap tool dumps only if you want to stretch the
+  window, never for safety;
   (2) **rolling retro-trim NO** — an every-turn broom converts 0.8 ms/token
   delta-TTFT into a fresh-prefill per turn, the single worst client setting
   possible here; (3) **batch all cleanup into the compaction event** — one
