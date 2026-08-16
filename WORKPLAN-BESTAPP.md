@@ -69,6 +69,14 @@ deploy batch. Slot files archived on config change. Rollback binaries kept.
   and IF 90% reference is real). 
 - 27106 bisect: CLOSED as parked-experiment above (not a blind bisect).
 
+## PAIRED RE-TESTS (post-paging era)
+- **24565 Blackwell FA config: ADOPTED (+9% depth decode).** Paired A/B x2:
+  mainline 74.8/83.7 vs variant 84.5/88.7 — consistent ordering, worst-B >
+  best-A. The paged-era 'neutral' verdict was wrong; paired methodology
+  vindicated. Deployed.
+- DSpark: closed not-fitting (see battery section). GDN 26001 prefill pair:
+  next/last.
+
 ## TRAJECTORY BATTERY DONE — baseline recorded (traj_b10448-320k-baseline2)
 - hops-2/3/4, correction, code-traj: **PASS at 64K/128K/256K, all clean** —
   chained recall, correction-override, and executable coding trajectories
