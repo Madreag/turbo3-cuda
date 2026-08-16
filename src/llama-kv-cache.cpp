@@ -2062,10 +2062,12 @@ void llama_kv_cache::state_read(llama_io_read_i & io, llama_seq_id seq_id, llama
 
         slot_info sinfo;
 
+        // meta inside the try as well: an EOF throw mid-meta (truncated or
+        // layout-incompatible state file) must take the seq_rm cleanup path
+        // below, not propagate with cells partially applied.
         bool res = true;
-        res = res && state_read_meta(io, strm, cell_count, sinfo, seq_id);
-
         try {
+            res = res && state_read_meta(io, strm, cell_count, sinfo, seq_id);
             res = res && state_read_data(io, strm, cell_count, sinfo);
         } catch (...) {
             res = false;
@@ -2222,6 +2224,15 @@ bool llama_kv_cache::state_read_meta(llama_io_read_i & io, uint32_t strm, uint32
         // single sequence
         seq_rm(dest_seq_id, -1, -1);
 
+        // a stale/corrupt state file can carry an arbitrary cell_count — bound
+        // it BEFORE reserving (the whole-cache branch below has this check;
+        // this branch aborted inside ubatch_reserve/apply instead)
+        if (cell_count > cells.size()) {
+            LLAMA_LOG_ERROR("%s: cell_count (%u) exceeds cache size (%u) — stale or corrupt state file\n",
+                    __func__, cell_count, (uint32_t) cells.size());
+            return false;
+        }
+
         llama_batch_allocr balloc(hparams.n_pos_per_embd());
 
         llama_ubatch ubatch = balloc.ubatch_reserve(cell_count, 1);
@@ -2271,13 +2282,20 @@ bool llama_kv_cache::state_read_meta(llama_io_read_i & io, uint32_t strm, uint32
 
         LLAMA_LOG_DEBUG("%s: cell_count = %d, dest_seq_id = %d\n", __func__, cell_count, dest_seq_id);
 
-        // DEBUG CHECK: verify that all cells were allocated and have correct seq_id and pos values
-        GGML_ASSERT(sinfo.n_stream() == 1);
-        GGML_ASSERT(sinfo.idxs[0].size() == cell_count);
+        // Consistency check: soft-fail instead of GGML_ASSERT — malformed input
+        // (a state file from a different build/config, e.g. misaligned by the
+        // cell-ext field) must produce a clean restore error, never abort()
+        // (a stale slot file aborted a production server in this path).
+        if (sinfo.n_stream() != 1 || sinfo.idxs[0].size() != cell_count) {
+            LLAMA_LOG_ERROR("%s: restored slot layout mismatch — stale or corrupt state file\n", __func__);
+            return false;
+        }
         for (uint32_t i = 0; i < cell_count; ++i) {
             const uint32_t idx = sinfo.idxs[0][i];
-            GGML_ASSERT(cells.pos_get(idx) == ubatch.pos[i]);
-            GGML_ASSERT(cells.seq_has(idx, dest_seq_id));
+            if (cells.pos_get(idx) != ubatch.pos[i] || !cells.seq_has(idx, dest_seq_id)) {
+                LLAMA_LOG_ERROR("%s: restored cell %u inconsistent — stale or corrupt state file\n", __func__, i);
+                return false;
+            }
         }
     } else {
         // whole KV cache restore

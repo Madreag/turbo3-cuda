@@ -816,11 +816,12 @@ void llama_memory_recurrent::state_read(llama_io_read_i & io, llama_seq_id seq_i
     uint32_t cell_count;
     io.read(&cell_count, sizeof(cell_count));
 
+    // meta inside the try as well: an EOF throw mid-meta (truncated or
+    // layout-incompatible state file) must take the cleanup path below, not
+    // propagate with cells partially applied.
     bool res = true;
-
-    res = res && state_read_meta(io, cell_count, seq_id);
-
     try {
+        res = res && state_read_meta(io, cell_count, seq_id);
         res = res && state_read_data(io, cell_count);
     } catch (...) {
         res = false;
@@ -956,6 +957,15 @@ bool llama_memory_recurrent::state_read_meta(llama_io_read_i & io, uint32_t cell
             return true;
         }
 
+        // bound cell_count BEFORE reserving — a stale/corrupt state file can
+        // carry arbitrary bytes here (the whole-cache branch has this check;
+        // this branch could abort inside ubatch_reserve instead)
+        if (cell_count > size) {
+            LLAMA_LOG_ERROR("%s: cell_count (%u) exceeds cache size (%u) — stale or corrupt state file\n",
+                    __func__, cell_count, size);
+            return false;
+        }
+
         llama_batch_allocr balloc(hparams.n_pos_per_embd());
 
         llama_ubatch ubatch = balloc.ubatch_reserve(cell_count, 1);
@@ -982,13 +992,17 @@ bool llama_memory_recurrent::state_read_meta(llama_io_read_i & io, uint32_t cell
             return false;
         }
 
-        // DEBUG CHECK: kv.head should be our first cell, kv.head + cell_count - 1 should be our last cell (verify seq_id and pos values)
-        // Assume that this is one contiguous block of cells
-        GGML_ASSERT(head + cell_count <= size);
-        GGML_ASSERT(cells[head].pos == ubatch.pos[0]);
-        GGML_ASSERT(cells[head + cell_count - 1].pos == ubatch.pos[cell_count - 1]);
-        GGML_ASSERT(cells[head].has_seq_id(dest_seq_id));
-        GGML_ASSERT(cells[head + cell_count - 1].has_seq_id(dest_seq_id));
+        // Consistency check: soft-fail instead of GGML_ASSERT — malformed input
+        // must produce a clean restore error, never abort() (a stale slot file
+        // from a different configuration aborted a production server here).
+        if (head + cell_count > size
+            || cells[head].pos != ubatch.pos[0]
+            || cells[head + cell_count - 1].pos != ubatch.pos[cell_count - 1]
+            || !cells[head].has_seq_id(dest_seq_id)
+            || !cells[head + cell_count - 1].has_seq_id(dest_seq_id)) {
+            LLAMA_LOG_ERROR("%s: restored cells inconsistent — stale or corrupt state file\n", __func__);
+            return false;
+        }
     } else {
         // whole KV cache restore
 
