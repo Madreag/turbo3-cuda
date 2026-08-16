@@ -98,7 +98,12 @@ ALIAS="${ALIAS:-qwen3.8-27b-409k}"  # model id shown in /v1/models — the Herme
 # --metrics: exposes spec_decode_* acceptance counters (grammar/MTP split
 # measurement) — server-side only; the proxy does NOT forward /metrics beyond
 # its allowlist policy.
-nohup ./build-g1/bin/llama-server \
+# setsid: fully detach (own session+pgroup, no tty). REQUIRED — must survive the
+# launching terminal closing and any parent-session/job cleanup (2026-08-16: a
+# plain-nohup launch was killed when the launching session's group was reaped).
+# PID stays valid for the pidfile: non-interactive bg children aren't pgroup
+# leaders, so setsid execs in place without forking.
+setsid nohup ./build-g1/bin/llama-server \
   -m /home/erol/ai/turboquant/models/qwen38/Qwen3.8-27B-Q6_K.gguf \
   --mmproj /home/erol/ai/turboquant/models/qwen38/mmproj-F16.gguf \
   --no-mmproj-offload \
@@ -116,7 +121,7 @@ nohup ./build-g1/bin/llama-server \
   --host 127.0.0.1 --port 8131 \
   --api-key-file "$CONF/api.key" \
   --metrics \
-  > "$CONF/server.log" 2>&1 &
+  < /dev/null > "$CONF/server.log" 2>&1 &
 echo $! > "$CONF/server.pid"
 
 # ── Health wait: cold-cache load of 22.9GB + mmproj at this box's ~124MB/s
@@ -138,10 +143,10 @@ if [ "$code" != "200" ]; then
 fi
 grep -m1 "n_ctx_slot" "$CONF/server.log"
 
-nohup python3 "$CONF/proxy.py" \
+setsid nohup python3 "$CONF/proxy.py" \
   --upstream http://127.0.0.1:8131 \
   --host 0.0.0.0 --port 8130 \
-  > "$CONF/proxy.log" 2>&1 &
+  < /dev/null > "$CONF/proxy.log" 2>&1 &
 echo $! > "$CONF/proxy.pid"
 
 for i in $(seq 1 10); do
