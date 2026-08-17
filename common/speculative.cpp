@@ -1460,6 +1460,32 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
 
         // if kv is shared with target (e.g Gemma4), then we can skip this catch-up decode
         if (!is_mem_shared) {
+            // resync the draft context when the target's position stream is
+            // discontinuous with what the draft has seen. This happens after
+            // mtmd image chunks (this hook deliberately skips embd batches) and
+            // after a server-side prompt reset / forced re-prefill. Without it
+            // the draft's recurrent state carries stale positions: degraded
+            // drafts at best, corrupt slot bookkeeping at worst (2026-08-16
+            // GPU-lost incidents). Clearing restarts the draft state from this
+            // batch — drafts recover within a few tokens and output quality is
+            // unaffected (rejection sampling).
+            {
+                auto * mem_dft_chk = llama_get_memory(this->params.ctx_dft);
+                for (llama_seq_id seq_id = 0; seq_id < (llama_seq_id) n_seq; ++seq_id) {
+                    if (i_batch_beg[seq_id] < 0) {
+                        continue;
+                    }
+                    const llama_pos pos0    = batch_in.pos[i_batch_beg[seq_id]];
+                    const llama_pos pos_dft = llama_memory_seq_pos_max(mem_dft_chk, seq_id);
+                    if (pos_dft >= 0 && pos0 != pos_dft + 1) {
+                        SPC_WRN("draft ctx desync for seq %d (draft pos_max = %d, incoming pos = %d) - clearing draft state\n",
+                                (int) seq_id, (int) pos_dft, (int) pos0);
+                        llama_memory_seq_rm(mem_dft_chk, seq_id, 0, -1);
+                        std::fill(pending_h[seq_id].begin(), pending_h[seq_id].end(), 0.0f);
+                    }
+                }
+            }
+
             common_batch_clear(batch);
 
             for (int k = 0; k < n_tokens; ++k) {

@@ -640,9 +640,24 @@ bool llama_memory_recurrent::find_slot(const llama_ubatch & ubatch) {
         auto & cell = cells[cell_id];
 
         if (cell.pos >= 0 && last_pos != cell.pos + (llama_pos) n_seq_tokens) {
-            // What should happen when the pos backtracks or skips a value?
-            // Clearing the state mid-batch would require special-casing which isn't done.
-            LLAMA_LOG_WARN("%s: non-consecutive token position %d after %d for sequence %d with %u new tokens\n",
+            // Non-consecutive positions are LEGAL going forward-or-equal: M-RoPE
+            // vision chunks pack N embedding tokens into max(t,h,w) position
+            // indexes (repeats within the image, a forward jump after it), and
+            // the batch validator explicitly admits them (X <= Y for embd).
+            // The recurrent scan consumes tokens in ubatch order regardless of
+            // pos, so the state math is unaffected — only this bookkeeping
+            // needs to stay monotone.
+            //
+            // A REGRESSION (last_pos < cell.pos) is different: the state cannot
+            // rewind mid-batch. Proceeding here is what corrupted downstream
+            // slot bookkeeping in the 2026-08-16 GPU-lost incidents — fail the
+            // decode cleanly instead.
+            if (last_pos < cell.pos) {
+                LLAMA_LOG_ERROR("%s: position regression %d after %d for sequence %d with %u new tokens - rejecting batch (state cannot rewind mid-batch)\n",
+                    __func__, last_pos, cell.pos, ubatch.seq_id[i][0], n_seq_tokens);
+                return false;
+            }
+            LLAMA_LOG_DEBUG("%s: non-consecutive (forward) token position %d after %d for sequence %d with %u new tokens (mrope/vision chunk)\n",
                 __func__, last_pos, cell.pos, ubatch.seq_id[i][0], n_seq_tokens);
         }
         cell.pos = last_pos;

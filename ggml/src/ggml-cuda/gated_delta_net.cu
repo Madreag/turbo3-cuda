@@ -36,7 +36,8 @@ __global__ void __launch_bounds__(ggml_cuda_get_physical_warp_size() * num_warps
         uint3   rq3_magic,
         float   scale,
         int64_t state_slot_stride,
-        int     K) {
+        int     K,
+        int64_t state_extent) {
     constexpr int warp_size     = ggml_cuda_get_physical_warp_size();
     constexpr int active_lanes  = (S_v < warp_size) ? S_v : warp_size;
     constexpr int d_qk_per_lane = S_v / active_lanes;
@@ -63,6 +64,11 @@ __global__ void __launch_bounds__(ggml_cuda_get_physical_warp_size() * num_warps
     const int64_t state_off = ((int64_t) sequence * H + h_idx) * S_v * S_v;
     state += state_off;
     curr_state += state_off;
+    // hard bounds for every state write (GPU-lost class guard, 2026-08-16): all
+    // stores below must land within state_extent floats of the state base ptr.
+    // A skipped store is a correctness bug surfaced by the host-side assert —
+    // never a wild VRAM write.
+    const int64_t ext_rem = state_extent - state_off;
     attn_data += ((int64_t) sequence * n_tokens * H + h_idx) * S_v;
 
     auto load_qk_lane = [&] __device__(float(&reg)[d_qk_per_lane], const float * base) {
@@ -178,7 +184,8 @@ __global__ void __launch_bounds__(ggml_cuda_get_physical_warp_size() * num_warps
             // snapshot slot mapping: slot 0 = most recent state, slot s = s tokens back.
             // When n_tokens < K only slots 0..n_tokens-1 are written; older slots are caller-owned.
             const int target_slot = (int) n_tokens - 1 - t;
-            if (target_slot >= 0 && target_slot < K) {
+            if (target_slot >= 0 && target_slot < K &&
+                (int64_t) target_slot * state_slot_stride + (int64_t) (dv_base + d_v_per_warp) * S_v <= ext_rem) {
                 float * slot_ptr = state + (int64_t) target_slot * state_slot_stride;
 #pragma unroll
                 for (int r = 0; r < d_v_per_warp; ++r) {
@@ -190,9 +197,11 @@ __global__ void __launch_bounds__(ggml_cuda_get_physical_warp_size() * num_warps
 
     // store final state (with keep_rs_t, slot 0 already holds it)
     if constexpr (!keep_rs_t) {
+        if ((int64_t) (dv_base + d_v_per_warp) * S_v <= ext_rem) {
 #pragma unroll
-        for (int r = 0; r < d_v_per_warp; ++r) {
-            store_qk_lane(s_tile[r], state + (int64_t) (dv_base + r) * S_v);
+            for (int r = 0; r < d_v_per_warp; ++r) {
+                store_qk_lane(s_tile[r], state + (int64_t) (dv_base + r) * S_v);
+            }
         }
     }
 }
@@ -207,7 +216,7 @@ static void launch_gated_delta_net(
         int64_t sv1,   int64_t sv2, int64_t sv3,
         int64_t sb1,   int64_t sb2, int64_t sb3,
         int64_t neqk1, int64_t rq3,
-        float scale, int64_t state_slot_stride, int K, cudaStream_t stream) {
+        float scale, int64_t state_slot_stride, int K, int64_t state_extent, cudaStream_t stream) {
     //TODO: Add chunked kernel for even faster pre-fill
     const int   warp_size   = ggml_cuda_info().devices[ggml_cuda_get_device()].warp_size;
     const int   n_block_dv  = (int) ((S_v + block_dv - 1) / block_dv);
@@ -223,26 +232,26 @@ static void launch_gated_delta_net(
             ggml_cuda_kernel_launch(gated_delta_net_cuda<16, KDA, keep_rs_t>, launch_params,
                 q_d, k_d, v_d, g_d, b_d, s_d, dst_d, state_d, H,
                 n_tokens, n_seqs, sq1, sq2, sq3, sv1, sv2, sv3,
-                sb1, sb2, sb3, neqk1_magic, rq3_magic, scale, state_slot_stride, K);
+                sb1, sb2, sb3, neqk1_magic, rq3_magic, scale, state_slot_stride, K, state_extent);
             break;
         case 32:
             ggml_cuda_kernel_launch(gated_delta_net_cuda<32, KDA, keep_rs_t>, launch_params,
                 q_d, k_d, v_d, g_d, b_d, s_d, dst_d, state_d, H,
                 n_tokens, n_seqs, sq1, sq2, sq3, sv1, sv2, sv3,
-                sb1, sb2, sb3, neqk1_magic, rq3_magic, scale, state_slot_stride, K);
+                sb1, sb2, sb3, neqk1_magic, rq3_magic, scale, state_slot_stride, K, state_extent);
             break;
         case 64: {
             ggml_cuda_kernel_launch(gated_delta_net_cuda<64, KDA, keep_rs_t>, launch_params,
                 q_d, k_d, v_d, g_d, b_d, s_d, dst_d, state_d, H,
                 n_tokens, n_seqs, sq1, sq2, sq3, sv1, sv2, sv3,
-                sb1, sb2, sb3, neqk1_magic, rq3_magic, scale, state_slot_stride, K);
+                sb1, sb2, sb3, neqk1_magic, rq3_magic, scale, state_slot_stride, K, state_extent);
             break;
         }
         case 128: {
             ggml_cuda_kernel_launch(gated_delta_net_cuda<128, KDA, keep_rs_t>, launch_params,
                 q_d, k_d, v_d, g_d, b_d, s_d, dst_d, state_d, H,
                 n_tokens, n_seqs, sq1, sq2, sq3, sv1, sv2, sv3,
-                sb1, sb2, sb3, neqk1_magic, rq3_magic, scale, state_slot_stride, K);
+                sb1, sb2, sb3, neqk1_magic, rq3_magic, scale, state_slot_stride, K, state_extent);
             break;
         }
         default:
@@ -325,30 +334,42 @@ static void ggml_cuda_op_gated_delta_net_impl(
     // recurrent state -> gdn_out tail (after attention scores), or the cache when fusing
     float * state_d           = dst_d + S_v * H * n_tokens * n_seqs;
     int64_t state_slot_stride = S_v * S_v * H * n_seqs;
+    int64_t state_extent      = ggml_nelements(dst) - S_v * H * n_tokens * n_seqs;
     if (cache != nullptr) {
         state_d           = cache->data;
         state_slot_stride = cache->slot_stride;
+        state_extent      = cache->extent;
+    }
+
+    // hard bounds for the kernel's state writes (GPU-lost class guard,
+    // 2026-08-16): the full snapshot span must fit the allocation. A failure
+    // here is a graph-construction bug — abort loudly instead of letting the
+    // kernel scribble VRAM (device-lost, reboot required).
+    {
+        const int64_t n_written  = n_tokens < (int64_t) K ? n_tokens : (int64_t) K;
+        const int64_t state_span = (keep_rs ? (n_written - 1) * state_slot_stride : (int64_t) 0) + S_v * S_v * H * n_seqs;
+        GGML_ASSERT(state_extent >= state_span && "GDN state writes would exceed the allocated state buffer");
     }
 
     if (kda) {
         if (keep_rs) {
             launch_gated_delta_net<true, true>(q_d, k_d, v_d, g_d, b_d, s_d, dst_d, state_d,
                 S_v, H, n_tokens, n_seqs, sq1, sq2, sq3, sv1, sv2, sv3,
-                sb1, sb2, sb3, neqk1, rq3, scale, state_slot_stride, K, stream);
+                sb1, sb2, sb3, neqk1, rq3, scale, state_slot_stride, K, state_extent, stream);
         } else {
             launch_gated_delta_net<true, false>(q_d, k_d, v_d, g_d, b_d, s_d, dst_d, state_d,
                 S_v, H, n_tokens, n_seqs, sq1, sq2, sq3, sv1, sv2, sv3,
-                sb1, sb2, sb3, neqk1, rq3, scale, state_slot_stride, K, stream);
+                sb1, sb2, sb3, neqk1, rq3, scale, state_slot_stride, K, state_extent, stream);
         }
     } else {
         if (keep_rs) {
             launch_gated_delta_net<false, true>(q_d, k_d, v_d, g_d, b_d, s_d, dst_d, state_d,
                 S_v, H, n_tokens, n_seqs, sq1, sq2, sq3, sv1, sv2, sv3,
-                sb1, sb2, sb3, neqk1, rq3, scale, state_slot_stride, K, stream);
+                sb1, sb2, sb3, neqk1, rq3, scale, state_slot_stride, K, state_extent, stream);
         } else {
             launch_gated_delta_net<false, false>(q_d, k_d, v_d, g_d, b_d, s_d, dst_d, state_d,
                 S_v, H, n_tokens, n_seqs, sq1, sq2, sq3, sv1, sv2, sv3,
-                sb1, sb2, sb3, neqk1, rq3, scale, state_slot_stride, K, stream);
+                sb1, sb2, sb3, neqk1, rq3, scale, state_slot_stride, K, state_extent, stream);
         }
     }
 }
