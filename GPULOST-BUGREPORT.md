@@ -102,3 +102,23 @@ seen an image until today. Old kernel: tolerated the corrupt bookkeeping
   required for the fix set above (defense in depth covers all candidates).
 - Whether crash 1's PC-wide death vs crash 2's GPU-only death is severity
   variance of the same fault (assumed yes).
+
+## STATUS UPDATE 2026-08-16 late — FIX IMPLEMENTED, CPU-VALIDATED
+
+Branch: turboquant-sync fix/vision-hybrid @ 72fa4ca4e (F1 kernel bounds, F2
+recurrent mrope handling, F3 MTP draft resync). Build clean (CUDA compiled).
+
+CPU-mode live repro (crash-forensics/cpu-repro-PASS.log), fix build, ORIGINAL
+model + mmproj, MTP n3:
+- Phase 1 image request: clean 200; no recurrent warnings (F2 silent-forward
+  path); F3 fired as designed ("draft ctx desync ... clearing draft state").
+- Phase 2 EXACT killer sequence (abort mid-gen -> resume w/ rewritten history
+  -> forced full re-prefill incl. image re-encode): clean 200; identical log
+  fingerprint to both crashes (cancel/forcing-full/erased-checkpoints) with a
+  healthy server at the end.
+
+REMAINING GATES (post-reboot, in order): CUDA test-backend-ops GDN 36/36;
+same two-phase repro on GPU babysat (accepts one reboot risk); text KLD spot
+vs prod baseline; battery spot; THEN restore --mmproj in launchers + rebuild
+prod binary from the fix branch + re-baseline vision (21s/img). Prod stays on
+the unmodified binary + vision-off until all gates pass.
