@@ -1,4 +1,4 @@
-# TurboQuant Serving Stack — Handoff (2026-08-16, post-consolidation)
+# TurboQuant Serving Stack — Handoff (2026-08-16 LATE — post GPU-lost fix ship)
 
 Supersedes the 2026-08-09 Failure-B edition (git history holds it; its
 grammar-bomb forensics remain valid record).
@@ -17,9 +17,18 @@ Everything is pushed; all six tips verified == GitHub 2026-08-16.
 
 ## CURRENT STATE — one screen
 
-- **Model:** Qwen3.8-27B Q6_K (hybrid: 48 DeltaNet + 16 attention layers,
-  head_dim 256, GQA-4), native MTP head. Vision via mmproj **on CPU**
-  (~21 s/image encode, once per image; text speed unaffected).
+- **Model roster (2026-08-16 late):** TWO weight sets, ONE serving at a time,
+  BOTH advertised under the FIXED ids qwen3.8-27b-320k/409k (Hermes breaks on
+  any other name — law in repo CLAUDE.md). (a) Original Qwen3.8-27B Q6_K
+  (hybrid: 48 DeltaNet + 16 attention layers, head_dim 256, GQA-4, native MTP
+  head) via start-long-38.sh / start-max-38.sh. (b) TRIAL:
+  JonathanColetti/Qwen3.8-27B-Uncensored Q6_K (same arch, with-MTP variant,
+  models/qwen38-uncensored/) via start-long-38u.sh — quality UNGATED (no
+  KLD/battery run on it), user-requested serving choice. CURRENTLY SERVING:
+  the uncensored trial. Which weights answer = which launcher ran; check
+  status.sh/log, never the API label. Vision via ORIGINAL mmproj **on CPU**
+  (~21-60 s/image encode, once per image; text speed unaffected) — all three
+  launchers use the gate-validated original mmproj.
 - **Context:** TWO PROFILES (2026-08-16, ctx push executed). Default =
   SPEED: 327,680 (320K), YaRN 1.25, MTP n3 — at its VRAM ceiling (~334K
   max per vram_law.py). Opt-in = MAX-CTX: 409,600, YaRN 1.5625, MTP OFF
@@ -38,10 +47,13 @@ Everything is pushed; all six tips verified == GitHub 2026-08-16.
   code/prose at temp 1.0 (the old "67%" was a blend; entropy-explained,
   TEMP-STUDY). Spec-vs-off greedy output differs by fp-tie class at ANY
   n_max (accepted; P10).
-- **Fork:** branch `sync/2026-08` (consolidated), upstream-tip b10448 +
-  carries. Binary: `build-g1/bin/llama-server`
-  (= gdn22587 build: 24565 + fused-MMA-default + GDN row-per-warp #22587;
-  rollback chain: `.pre-gdn22587` → `.mainline` → `.pre-bughunt`). Fused
+- **Fork:** prod source = branch `fix/vision-hybrid` @ 72fa4ca4e (on top of
+  `sync/2026-08`, which sits 4 commits behind upstream master — verified
+  2026-08-16, nothing relevant missing). Binary: `build-g1/bin/llama-server`
+  = fix/vision-hybrid build (gdn22587 + GPU-lost fix trio: recurrent mrope
+  handling, GDN kernel state-write bounds, MTP draft auto-resync; gates all
+  green incl. byte-identical text path). Rollback chain: `.pre-visionfix` →
+  `.pre-gdn22587` → `.mainline` → `.pre-bughunt`. Fused
   MMA-turbo decode is ON via launcher env (2026-08-15 adoption: +2.2% @38K,
   +8.7% @121K decode); GDN #22587 adopted same day (+2.8% decode @38K,
   +1.7-1.8% prefill both depths, +0.4% @121K).
@@ -59,14 +71,24 @@ Everything is pushed; all six tips verified == GitHub 2026-08-16.
 ## OPERATE
 
 ```bash
-bash ~/.config/llama-tcq/start-long-38.sh   # SPEED profile (default): 320K,
-                                            # MTP n3 — code ~113 t/s @38K
-bash ~/.config/llama-tcq/start-max-38.sh    # MAX-CTX profile (opt-in): 409,600
-                                            # ctx, YaRN 1.5625, MTP OFF —
-                                            # ~28-31 t/s deep, 329K fill-proven
-bash ~/.config/llama-tcq/stop.sh            # verified kill, port check
-bash ~/.config/llama-tcq/status.sh          # ports + /health + VRAM + swap line
+~/.config/llama-tcq/start-long-38.sh   # SPEED profile (default): 320K,
+                                       # MTP n3 — code ~113 t/s @38K, ORIGINAL weights
+~/.config/llama-tcq/start-max-38.sh    # MAX-CTX profile (opt-in): 409,600
+                                       # ctx, YaRN 1.5625, MTP OFF —
+                                       # ~28-31 t/s deep, 329K fill-proven
+~/.config/llama-tcq/start-long-38u.sh  # TRIAL: uncensored weights, SPEED params,
+                                       # own slot dir (slots-long-unc/), SAME
+                                       # advertised id qwen3.8-27b-320k
+~/.config/llama-tcq/stop.sh            # the ONLY sanctioned stop
+~/.config/llama-tcq/status.sh          # ports + /health + VRAM + swap line
 ```
+PROCESS LIFECYCLE LAW (2026-08-16, double outage): launchers use
+`setsid nohup ... </dev/null` = fully detached — nothing kills the stack
+except stop.sh, closing the LAST WSL window (that ends WSL itself on this
+box), `wsl --shutdown`, or reboot. USER'S CHOICE: no auto-start on boot —
+after any reboot the stack is DOWN until a launcher runs (first load
+cold-disk slow = minutes, not hung). If you ever touch launch lines:
+verify PGID=SID=PID and TT=? on the server pid before claiming detachment.
 One profile at a time (same ports; double-start guard enforces). Slot dirs
 are per-profile (slots-long/ vs slots-max/) — switching profiles never
 poisons the other's slot files. Max-profile gates (2026-08-16): fill-ladder
@@ -78,9 +100,10 @@ Clients: `http://192.168.50.130:8130/v1` (OpenAI) or `/v1/messages`
 (Anthropic), keys in `keys.json`. After a Windows reboot re-add the portproxy
 if clients can't reach 8130 (WSL IP rotation).
 
-Rollback: stop → `cp build-g1/bin/llama-server.pre-gdn22587 build-g1/bin/llama-server`
-→ start (drops only the GDN #22587 kernel). Deeper: `.mainline` (also drops
-24565), `.pre-bughunt`. Fused-MMA kill-switch: GGML_TURBO_MMA_FUSED=0 env
+Rollback: stop → `cp build-g1/bin/llama-server.pre-visionfix build-g1/bin/llama-server`
+→ start (drops the GPU-lost fix trio — ONLY do this with vision re-disabled!).
+Deeper: `.pre-gdn22587` (also drops the row-per-warp kernel), `.mainline`,
+`.pre-bughunt`. Fused-MMA kill-switch: GGML_TURBO_MMA_FUSED=0 env
 (no binary swap needed).
 **Slot files are config-specific** — archive `slots-long/*.bin` on any config
 change (server refuses stale ones gracefully; proxy erases and re-prefills).
@@ -221,39 +244,101 @@ lock-acquire has no timeout (by design: two-user serialization).
    (state-restore hardening, ctx-cap rope scaling, parse-degrade). User opens
    PRs; assistant never submits to external repos.
 
-## RESUME HERE (2026-08-16, context-handoff point)
+## RESUME HERE (2026-08-16 LATE — post GPU-lost fix, second handoff point)
 
-**Just completed:** branch consolidation (6 branches, map above) · README
-3.8/5090 showcase (public repo) · mega-bughunt (11 fixes) · two-profile
-serving shipped+gated (320K speed n3 / 409K max) · Hermes client brief
-(model ids qwen3.8-27b-320k/409k; output UNCAPPED per user directive —
-never cap capability) · ctx-checkpoints 2-vs-4 tested (keep 2) ·
-AUTO-TIER-DESIGN.md finalized after a 3-agent search blast.
+**WHAT WE DID (2026-08-16, chronological):**
+1. Morning arcs (see prior sections): consolidation, README showcase,
+   mega-bughunt, two-profile ship, n3 adoption, ctx-checkpoints keep-2,
+   auto-tier design, QUICK yarn-tax suite (identity gate PASSED; shallow
+   unification increment ≈0.5% top-1; deep divergence needs the overnight
+   battery as arbiter — data in quality-tests/yarntax/, summary in
+   AUTO-TIER-DESIGN.md).
+2. Process-lifecycle hardening after a DOUBLE outage: plain nohup died with
+   the launching session → all launchers now `setsid nohup </dev/null`
+   (verified live-fire). Discovered: closing the LAST WSL window terminates
+   WSL itself on this box (VM teardown, graceful SIGTERM) — accepted
+   semantics, no auto-start by user's explicit choice. User closes windows
+   to reclaim VRAM (terminals cost GPU memory) — that's WHY windows close.
+3. Fixed advertised-id LAW: ONLY qwen3.8-27b-320k / qwen3.8-27b-409k.
+   Hermes = NousResearch/hermes-agent; its quirks we solved: (a) it sent
+   reasoning_effort "max" (Kimi value) → 500s; user's agent scoped qwen ids
+   to xhigh (model's legal ladder: xhigh/medium/low). (b) images route via
+   its vision_analyze tool unless the provider's model entries are marked
+   vision-capable → told user's agent to mark them; images then flow inline.
+4. Uncensored trial: downloaded JonathanColetti Q6_K with-MTP (+ its vision
+   file, unused — we use original mmproj), built start-long-38u.sh, serving
+   under the canonical 320k id. Quality ungated; user's call.
+5. Live MTP report on real Hermes traffic: 93K-token pagoda turn at 97 t/s,
+   70% acceptance (3.10 tok/verify-pass); tool-loop phase 61%; verdict KEEP.
+   Session monitoring: 56 turns clean, ctx-checkpoints restored 53× (feature
+   validated in prod), Hermes compaction at ~120K→40K worked as configured;
+   known cost = ~60-75s full re-prefill when Hermes rewrites history after
+   big thinks (thinking-drop is vendor-CORRECT for Qwen; do NOT "fix").
+6. Inference research blast → INFERENCE-RESEARCH-2026-08.md: T1 FP4/NVFP4
+   weights on Blackwell (~7GB VRAM free + speed; gate decides), T2 upstream
+   sync (we're 4 commits behind — current!), T3 per-layer mixed KV (q8_0 on
+   the 16 attn layers), T4 WSL ops wins (Defender vhdx exclusion for the
+   124MB/s cold loads, HAGS A/B), T5 grammar-turn spec toggle. EAGLE-3:
+   skip — our MTP already beats the 3.6 head's tau (3.1 vs 2.4).
+7. **THE BIG ONE — GPU-lost bug, root-caused → fixed → gated → SHIPPED.**
+   Two incidents (GPU off the PCIe bus, reboot required) whenever a photo +
+   stop/resume hit the stack. Root cause: Qwen-VL mrope image chunks
+   (N tokens over max(t,h,w) positions) meet llama-memory-recurrent's
+   explicit "special-casing isn't done" warn-and-proceed → DeltaNet
+   bookkeeping corrupts → new GDN row-per-warp kernel writes OOB → device
+   lost. Upstream master HAS THE SAME DEFECT (verified). Fix trio on branch
+   fix/vision-hybrid @72fa4ca4e (pushed to myfork): recurrent mrope
+   handling (forward-legal/regression-rejects), kernel state-write hard
+   bounds (fused + non-fused, extent from view root), MTP draft auto-resync
+   (also fixes draft-never-cleared-on-reset). Gates ALL GREEN: op-tests
+   36/36, CPU killer-sequence repro, GPU killer-sequence repro
+   (crash-identical fingerprint survived), text path byte-identical, live
+   prod image smoke. PROMOTED to prod binary; vision RESTORED in all three
+   launchers (original mmproj); rollback .pre-visionfix. Full story:
+   GPULOST-BUGREPORT.md + crash-forensics/.
 
-**In flight / immediate next:** YARN-TAX measurement. User asked: quantify
-quality of rope none vs 1.25 vs 1.5625 — and correctly suspected our
-KLD runs don't show it (they used matched-scale f16 refs = quant-only,
-yarn cancels out; recorded in AUTO-TIER-DESIGN). A test-options menu was
-presented (cross-scale KLD vs NO-YARN f16 reference incl. pure f16-vs-f16
-arms; battery at matched config ctx=131072 scale {none,1.25,1.5625} × 3
-seeds; optional PPL ladder / RULER — search agent findings in session).
-**Waiting on user's pick before running.** No-yarn arms must run at
-ctx ≤ 262144 (native).
+**WHAT IS RUNNING NOW:** uncensored trial weights + vision + fix binary,
+SPEED profile params, advertised as qwen3.8-27b-320k, healthy. Hermes may
+send images (first image per convo ~30-60s CPU encode).
 
-**Then:** if 1.5625 tax acceptable → unify speed profile rope at 1.5625 →
-build proxy auto-tier per AUTO-TIER-DESIGN (one Hermes model id, tier-up
-~180K via usage-token tracking, hold-and-swap with slot save/restore
-handoff ≈ 20-50 s — slot files are rope-scale-bound but ctx/spec-agnostic,
-the design doc has the full verified matrix + heartbeat/drain/error
-shapes). If tax too high → keep 1.25 and build the same design with the
-~2-min re-prefill switch.
+**WHAT WE WILL DO (priority order):**
+1. OVERNIGHT yarn A'+B' battery — ON USER'S WORD ("run the extended
+   battery"). Spec in AUTO-TIER-DESIGN.md + session notes: A' depth-station
+   KLD (stations 2K/32K/128K/200K/256K; llama-perplexity --kl-divergence for
+   shallow full-vocab; yarn_stations.py branch probes deep; --parallel 1
+   MANDATORY; no-yarn arm ≤262144) + B' matched-config battery (ctx=262144,
+   scales {none,1.25,1.5625} × tiers {64K,128K} × 3 seeds + 256K finalists).
+   Delivers the rope-unification verdict.
+2. Rope verdict → auto-tier proxy build per AUTO-TIER-DESIGN.md (~1 day:
+   unified id, TIER_UP_TOKENS≈180K, hold-and-swap 20-50s if unified at
+   1.5625, else ~2-min re-prefill variant).
+3. Vision perf re-baseline on the fix build (old 21s/img predates it) before
+   quoting numbers to the user.
+4. Research board tiers in order (T4 ops wins are cheap; T2 sync is 4
+   commits; T1 FP4 gate ladder is the big swing; T3 per-layer KV; T5
+   grammar toggle).
+5. pr-package: the vision-hybrid fix is an upstream-PR candidate — USER
+   OPENS PRs to external repos, never the agent (hard boundary).
+6. Uncensored trial: if it becomes permanent, run the quality gates on it
+   (tail-KLD 157 + battery) — currently ungated.
 
-**Standing context:** prod = speed profile, healthy; effort=max session;
-user doctrine: QUALITY AND FEATURES OVER SPEED, never cap capability,
-options-before-execution on new test arcs, TLDR-style replies preferred.
+**Standing doctrine:** QUALITY AND FEATURES OVER SPEED · never cap output ·
+only 2 advertised model ids · no upstream folklore without on-stack A/B ·
+options-before-execution on NEW test arcs · TLDR replies · state the plan
+BEFORE acting (2026-08-16 lesson) · claim-scoping: name what a test covered
+AND what it didn't · verify every claim with a command first.
 
 ## OPEN ARCS
 
+- **GPU-lost / vision-on-hybrid: CLOSED+SHIPPED 2026-08-16** (fix trio gated
+  and promoted; see RESUME HERE item 7 + GPULOST-BUGREPORT.md). Residual:
+  vision perf re-baseline pending; upstream PR candidate (user opens).
+- **Inference research board: OPEN** — INFERENCE-RESEARCH-2026-08.md, five
+  tiers, FP4 weights = top strategic lever (quality gate decides).
+- **Yarn A'+B' overnight battery: ARMED, waiting on user's word** → rope
+  unification verdict → auto-tier build (AUTO-TIER-DESIGN.md).
+- **Uncensored trial weights: SERVING, quality UNGATED** — gate before
+  calling permanent.
 - **Sparse decode: CLOSED 2026-08-15 — tested, not viable** (P0 offline
   validator: even oracle selection reads 30-50% of cache on this hybrid;
   evidence in SPARSE-DECODE-BUILD.md). Collateral fix ADOPTED: prod was
