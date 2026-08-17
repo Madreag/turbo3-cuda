@@ -122,3 +122,19 @@ same two-phase repro on GPU babysat (accepts one reboot risk); text KLD spot
 vs prod baseline; battery spot; THEN restore --mmproj in launchers + rebuild
 prod binary from the fix branch + re-baseline vision (21s/img). Prod stays on
 the unmodified binary + vision-off until all gates pass.
+
+## CLOSED 2026-08-16 ~23:15 — SHIPPED TO PROD, ALL GATES GREEN
+
+GPU gates (post-reboot): CUDA test-backend-ops GDN 36/36; Phase-1 heavy image
+on GPU (2,116 embd tokens, 5 batches — heavier than the crashes): clean;
+Phase-2 exact killer sequence on GPU (abort -> resume -> forced full
+re-prefill + image re-encode, crash-identical log fingerprint): clean, GPU
+alive; text path byte-identical to prior prod binary (greedy 537/537).
+
+PROMOTED: build-g1/bin/llama-server = fix/vision-hybrid build (rollback
+.pre-visionfix). Vision RESTORED in all three launchers using the
+gate-validated ORIGINAL mmproj (incl. the uncensored launcher). Live prod
+smoke through the proxy: 2,176-token image prompt, HTTP 200, server + GPU
+healthy after. CLAUDE.md law updated. Fix branch pushed to myfork
+(fix/vision-hybrid @ 72fa4ca4e) — upstream-contribution candidate (master
+carries the same defect).
