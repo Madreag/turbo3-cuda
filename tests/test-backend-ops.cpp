@@ -4348,6 +4348,11 @@ struct test_gated_delta_net : public test_case {
         : type(type), head_count(head_count), head_size(head_size), n_seq_tokens(n_seq_tokens), n_seqs(n_seqs),
           v_repeat(v_repeat), permuted(permuted), kda(kda), K(K) {}
 
+    double max_nmse_err() override {
+        // Allow for the mixed bf16/fp16 chunked CUDA kernel on eligible shapes.
+        return 5e-6;
+    }
+
     ggml_tensor * build_graph(ggml_context * ctx) override {
         ggml_tensor * q;
         ggml_tensor * k;
@@ -9952,6 +9957,25 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     }
 
     test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 32, 128, 1, 1));
+    // CHUNKED prefill path (K==1, T>=128) — exhumed PR-26001 suite + killer shapes
+    test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 8, 128, 128, 1));
+    test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 32, 128, 512, 1));
+    test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 32, 128, 2048, 1));
+    test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 32, 128, 256, 4));
+    test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 4, 128, 256, 4));
+    test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 16, 128, 256, 1, 2));
+    test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 16, 128, 512, 1, 3));
+    test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 16, 128, 256, 4, 2));
+    test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 32, 128, 129, 1));
+    test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 32, 128, 143, 1));
+    test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 32, 128, 200, 1));
+    test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 16, 128, 200, 1, 2));
+    test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 16, 128, 143, 1, 3));
+    test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 32, 128, 300, 4));
+    // boundary killers: routing threshold edges + snapshot-slot exclusion
+    test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 32, 128, 127, 1));           // just below threshold (recurrent)
+    test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 32, 128, 128, 1, 1, false, false, 4)); // T=128 but K=4 -> recurrent
+    test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 16, 128, 384, 2, 3));        // GQA x batch x multi-chunk
     test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 32, 16, 1, 1));
     test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 32, 16, 1, 1, 1, true, true));
     test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 32, 16, 1, 1, 1, false, true));

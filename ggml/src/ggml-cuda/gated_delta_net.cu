@@ -1,4 +1,5 @@
 #include "gated_delta_net.cuh"
+#include "chunk_gated_delta_net.cuh"
 #include "ggml-cuda/common.cuh"
 
 // Row-per-warp kernel layout (upstream PR #22587) merged with the fork/b10448
@@ -281,8 +282,53 @@ static void launch_gated_delta_net(
     }
 }
 
+// Shared routing predicate for dispatch and CUDA-graph eligibility. Both must
+// use the same result because the chunked path uses pool allocations that
+// cannot be captured into CUDA graphs. (Exhumed from the parked PR-26001
+// integration, 98da4c0be; conservative gate: K==1, non-KDA, 128-wide heads.)
+bool ggml_cuda_gdn_op_is_chunked(const ggml_tensor * dst) {
+    if (dst->op != GGML_OP_GATED_DELTA_NET) {
+        return false;
+    }
+    const ggml_tensor * src_q     = dst->src[0];
+    const ggml_tensor * src_k     = dst->src[1];
+    const ggml_tensor * src_v     = dst->src[2];
+    const ggml_tensor * src_g     = dst->src[3];
+    const ggml_tensor * src_beta  = dst->src[4];
+    const ggml_tensor * src_state = dst->src[5];
+    const int64_t S_v      = src_v->ne[0];
+    const int64_t n_tokens = src_v->ne[2];
+    const int64_t neq0     = src_q->ne[0];
+    const int64_t neq1     = src_q->ne[1];
+    const int64_t nev1     = src_v->ne[1];
+    const bool    kda      = (src_g->ne[0] == S_v);
+    const int     K        = ggml_get_op_params_i32(dst, 0);
+    static const bool chunk_disabled = [] {
+        const char * s = getenv("GGML_CUDA_DISABLE_GDN_CHUNK");
+        return s && s[0] && !(s[0] == '0' && s[1] == '\0');
+    }();
+    const int  cc_dev    = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;
+    const bool is_nvidia = GGML_CUDA_CC_IS_NVIDIA(cc_dev);
+    return is_nvidia
+        && cc_dev >= GGML_CUDA_CC_AMPERE
+        && !chunk_disabled
+        && !kda && K == 1
+        && neq0 == 128 && S_v == 128 && nev1 % neq1 == 0
+        && src_k->ne[1] == neq1
+        && n_tokens >= 128
+        && ggml_is_contiguous(src_q) && ggml_is_contiguous(src_k) && ggml_is_contiguous(src_g)
+        && src_v->nb[0] == ggml_type_size(src_v->type) && src_v->nb[1] == (size_t)S_v * ggml_type_size(src_v->type)
+        && ggml_is_contiguous(src_beta) && ggml_is_contiguous(src_state);
+}
+
 static void ggml_cuda_op_gated_delta_net_impl(
         ggml_backend_cuda_context & ctx, ggml_tensor * dst, const ggml_cuda_gated_delta_net_fused_cache * cache) {
+    // Route eligible prefill batches to the chunked kernel (K==1, no fused
+    // cache, T>=128). Decode + snapshot-slot semantics stay on row-per-warp.
+    if (cache == nullptr && ggml_cuda_gdn_op_is_chunked(dst)) {
+        ggml_cuda_op_gated_delta_net_chunked(ctx, dst);
+        return;
+    }
     ggml_tensor * src_q     = dst->src[0];
     ggml_tensor * src_k     = dst->src[1];
     ggml_tensor * src_v     = dst->src[2];
