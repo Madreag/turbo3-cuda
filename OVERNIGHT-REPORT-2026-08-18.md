@@ -305,3 +305,38 @@ of downtime-until-return. Decision menu in morning analysis.
 - Morning queue after mega-analysis: vacation-mode build+test (relauncher
   DISARMED tonight by design), compaction (user-run), v3@1.5625 conditional,
   serving verification, handoff final update.
+
+## TEST B EXECUTED + RESEARCH VERDICT (2026-08-18 afternoon) — PCIe Gen5 LINK PATH IS THE LEAD
+
+- TEST B (user-directed): authentic 3.6-era stack (g1/build/bin, Aug-14 build 8815, matched libs
+  — never overwritten; the 3.8 work lived in other trees) + Qwen3.6-27B Q6_K (HF re-download;
+  prod file was purged) + frozen start.sh-era config. DIED at 11:48:29, ~60s after launch,
+  DURING MODEL LOAD: last telemetry 11:48:25 = 27C, 30W, mem clock 14001 (STOCK verified in
+  Afterburner startup profiles AND live), 1.2GB/22GB loaded. WER: 0x116 TdrBCR:4:C000009A
+  nvlddmkm "Blackwell". Minidump 081826-27359-01.dmp. => SOFTWARE FULLY EXONERATED (every code
+  generation now dies); died at idle-class power/temp during H2D transfer.
+- memtest_vulkan v0.5.0 at stock: 15+ min, ~300+ TB written+checked at ~1.0 TB/s on 29GB,
+  ZERO errors, no crash. Device-LOCAL VRAM traffic is stable; PCIe-heavy work dies.
+  => VRAM cells largely exonerated; discriminator = PCIe traffic.
+- Eliminations added today: Afterburner startup-rearm (profiles are clean: PL=100/V=0, no mem
+  offset), Windows Update (last KB March 21), driver change (610.47 installed ~May 30, spans
+  both stable and crash eras).
+- Our nvlddmkm Event 14 bursts (05:54:28, 5 min BEFORE the 05:59 death) decode as CMDre
+  command-submission errors sweeping all channels — a detectable PRODROME. Not the literal
+  "PCIE P2PREQ/REORDER SRAM Error" strings of the twin report (class match, not byte match).
+- RESEARCH BLAST: our signature is a known active 5090 class.
+  * NVIDIA forum 2026-08-01 "[Bug report] RTX 5090 GPU lost, 0x116 TDR, failed warm reboot"
+    — near-twin box (MSI 5090, 9950X3D, X870E, Win11, WSL2 AI loads, 610.62): H2D/D2H path
+    = repeatable trigger locus; PCIE-unit SRAM/ECC events; NVIDIA Bug 6546168; WSL#41224;
+    610.74 showed tentative improvement in their limited retest.
+  * r/LocalLLaMA "5090 + llama.cpp crashes after 2-3 inferences" — FIXED by BIOS Gen5->Gen4.
+  * Broad 5090 community corpus: canonical fix = force PCIe Gen4 (+ disable PCIe Link State
+    Power Management / L1 substates). Xid79/AGESA sensitivity threads implicate board firmware.
+  * Our board: ASRock X870E Taichi, BIOS 3.20 (2025-02) — pre-dates most 5090 Gen5 link fixes.
+- POWER LIMIT is the WRONG KNOB (user asked): deaths occur at 30W/27C. Link/firmware, not power.
+- MITIGATION LADDER (in order): (1) BIOS: PCIe slot Gen5->Gen4 + disable ASPM/L1 substates ->
+  rerun era-perplexity killer (dies <60s if unfixed; survives = verdict) -> full serving soak on
+  LATEST stack. (2) Driver clean-install 610.74+ (absorbs the DDU step). (3) BIOS update
+  (later AGESA) as the proper Gen5 fix — bigger intervention, post-vacation. (4) If Gen4 fails:
+  hardware/RMA with dossier (crash-forensics/ + Minidump + this log). WSL 2.6.3->2.7.0+ upgrade
+  = hygiene item afterward. Vacation: 3090 fallback remains the safety plan regardless.

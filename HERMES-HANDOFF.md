@@ -365,42 +365,54 @@ AND what it didn't · verify every claim with a command first.
   harnesses go in g1/quality-tests/; nohup'd probes survive the 120s guillotine
   group-kill (pidfile the probe, poll with until-loops).
 
-## >>> CURRENT ENTRYPOINT (2026-08-18 ~11:45 — CRASH CAUSE ISOLATED TO
-## DRIVER-STATE-OR-HARDWARE; ALL SOFTWARE WE CONTROL EXONERATED BY EXECUTION)
+## >>> CURRENT ENTRYPOINT (2026-08-18 ~13:00 — LEAD = PCIe GEN5 LINK PATH;
+## ALL SOFTWARE EXONERATED; FIX LADDER = BIOS Gen4 + ASPM-off -> killer rerun)
 
 **THE ELIMINATION TABLE (each row = an executed test, not a theory):**
 | suspect | test | result |
 |---|---|---|
 | overclock/clocks | removed to stock -> killer workload | DIED - eliminated |
-| our fork software (PDL/restrict/kernels) | fixes shipped + 13253 op-tests green -> killer | DIED - eliminated |
-| WSL2/dxg layer | OFFICIAL ggml-org b10488 native Windows binary, zero WSL, zero fork code | DIED ~2 min into plain CUDA compute - eliminated |
-| VRAM-near-cap / vision-on-CPU | dying native run: ~23GB used (9GB free), no vision loaded | not present - eliminated |
+| AB startup re-arm | [Startup] profiles read: PL=100/V=0, no offsets; live max 14001 | clean - eliminated |
+| our fork software | fixes shipped + 13253 op-tests green -> killer | DIED - eliminated |
+| WSL2/dxg layer | OFFICIAL b10488 native Windows binary, zero WSL/fork | DIED ~2 min - eliminated |
+| 3.8-era software+model | authentic 3.6-era stack (g1/build/bin 8815, Aug-14) + Qwen3.6 | DIED ~60s INTO MODEL LOAD at 27C/30W - eliminated |
+| VRAM-near-cap / vision-CPU | dying runs: 9GB free / 1.2GB loaded, no vision | not present - eliminated |
+| VRAM cells | memtest_vulkan stock: 15+min, ~300TB checked @1TB/s device-local | ZERO errors - largely eliminated |
+| Windows update / driver change | last KB Mar-21; driver 610.47 since ~May-30 (spans both eras) | unchanged - eliminated |
 
-**SURVIVORS (the only two left):**
-1. NVIDIA driver STATE corruption (version 610.47 unchanged 3mo, but caches/
-   WDDM state can rot). TEST = USER runs DDU safe-mode wipe + clean latest
-   driver install, then agent reruns the official-binary killer
-   (D:\spill\native-test\bin\llama-imatrix.exe, same args as run1.log).
-   Survives -> SOLVED. 
-2. Hardware compute path (games-stable does NOT clear it: graphics engines
-   != CUDA compute engines/power signature). If DDU'd driver still dies on
-   the official binary -> RMA track; evidence dossier = g1/crash-forensics/
-   + OVERNIGHT-REPORT elimination table + Windows MEMORY.DMP files.
+**LEAD (research-corroborated): PCIe Gen5 LINK PATH.** Every dying workload is
+PCIe-DMA-heavy (model-load H2D, imatrix logit D2H, slot save/restore, CPU-vision
+transfers); device-local VRAM traffic at 1TB/s is stable. Community twin:
+NVIDIA forum 2026-08-01 "[Bug report] RTX 5090 GPU lost, 0x116 TDR, failed warm
+reboot" (MSI 5090 + 9950X3D + X870E + WSL2 AI + 610.62; H2D/D2H = trigger locus;
+NVIDIA Bug 6546168). r/LocalLLaMA llama.cpp-on-5090 crash thread FIXED by BIOS
+Gen5->Gen4; broad 5090 corpus agrees (+ disable PCIe ASPM/L1 substates). Our
+board: ASRock X870E Taichi BIOS 3.20 (2025-02, pre-dates 5090 Gen5 link fixes).
+Our prodrome: nvlddmkm Event-14 CMDre bursts ~5 min before death (watchdog hook).
+POWER LIMIT is the WRONG KNOB — deaths at 30W/27C.
 
-**STANDING RULES NOW:** NO GPU load on the 5090 box except the single
-post-DDU discriminator run (user's word). Serving on this box is DOWN and
-stays down pending the DDU verdict. All Aug-17/18 software hardening KEEPS
-(restrict fixes, PDL=0 launchers, chunked-prefill branch, audits) — proven
-innocent but still correct hygiene; the deferred science queue (yarn B',
-v3 imatrix-A/B gates, DRY arm, chunked validation, prefetch A/B) runs
-whenever a stable GPU exists (this box post-fix, or never on this box).
+**FIX LADDER:** (1) BIOS: PCIe x16 slot Gen5->Gen4 + disable ASPM/L1 substates
+-> rerun the era-perplexity killer (g1/build/bin/llama-perplexity + models/
+Qwen3.6-27B-Q6_K.gguf + quant-lab/calib_v2.txt -ngl 99 -c 4096; dies <60s if
+unfixed; full 385-chunk pass = verdict) -> then LATEST-stack serving soak.
+(2) NVIDIA clean-install 610.74+ (absorbs old DDU step; twin thread hints 610.74
+helps). (3) BIOS/AGESA update = the proper Gen5 fix, post-vacation. (4) If Gen4
+still dies: RMA track — dossier = g1/crash-forensics/ (incl. 0818-qwen36-death/)
++ Minidump 081826-27359-01.dmp + MEMORY.DMP + OVERNIGHT-REPORT tables.
+WSL 2.6.3 -> 2.7.0+ upgrade = hygiene afterward (Blackwell dxgkrnl fixes).
+
+**STANDING RULES:** GPU load on the 5090 only for ladder-step verdicts until a
+full soak passes. Serving DOWN pending verdict. All Aug-17/18 hardening KEEPS
+(innocent but correct); deferred science queue (yarn B', v3 imatrix A/B, DRY,
+chunked validation, prefetch A/B) runs once a soak-stable GPU exists.
 
 **VACATION PLAN (user leaves ~Aug 19-20): 3090 FALLBACK SERVING** — package
 being prepared at g1/fallback-3090/ (scripts + model staging + step-by-step
 for the 3090 PC; community-proven turboquant-on-3090 ~40-60 t/s, same
-advertised model ids so Hermes needs zero changes). User deploys on the
-3090 box in ~20 min. The 5090 box: leave OFF or ARM the vacation watchdog
-(g1/vacation-mode/) only if DDU proves it stable.
+advertised model ids so Hermes needs zero changes). Even if Gen4 stabilizes
+the 5090, vacation-trust requires a multi-hour soak PASS first; 3090 package
+is the safety floor either way. Vacation watchdog (g1/vacation-mode/) can now
+also poll nvlddmkm Event-14 CMDre as a pre-death signal.
 
 ## 2026-08-17 EVENING/NIGHT ADDENDUM — OC root-cause arc + quant lab + disk law
 ## (READ THIS FIRST if resuming after 2026-08-17; supersedes conflicting bits above)
