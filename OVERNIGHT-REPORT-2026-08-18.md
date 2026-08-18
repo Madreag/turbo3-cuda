@@ -78,6 +78,10 @@ the reboot; the proof fires the moment it returns.
 | fattn-mma-turbo.cuh (host launcher) | full | n/a (host) | CLEAN — shmem sizing matches upstream formula; attr flags per-instantiation |
 | turbo4/3/2 FA tile loaders | full bounds/race audit | — | CLEAN — 66B/128-elem mapping exact; D=256 two-block span within pitch; turbo3 sign +1 shift safe by parity; per-cell disjoint writes |
 | turbo-typed flash_attn_ext_f16 instantiations | — | nc=0 of 69/129/81 loads; ACQBULK@2441 < firstLDG@3159 | CLEAN (both PDL surfaces) |
+| k_set_rows_turbo3 (+tail) | full | plain-launch (PDL-exempt) | CLEAN — butterfly barriers correct, single-writer packing, full-mask warp ops divergence-safe, shared reuse barriered |
+| fwht_cuda | full | wrapper/PDL; sync-before-loads; no entry restrict | CLEAN — early-exit is warp-uniform (shuffle masks legal); butterfly reg indexing bounded |
+| k_set_rows_turbo4 | full (pattern-delta vs turbo3) | plain-launch | CLEAN — note: is_v via tensor-name prefix is fragile (zero-risk at alpha 1.00) |
+| TCQ + VEC turbo loaders + cpy/convert | spot-check queued | soak-history: weeks stable pre-Aug-15 | pending (veterans; lower priority than chunked merge) |
 
 ## OPEN-ITEMS LIST (live — the /goal ledger; strike items as they close)
 
