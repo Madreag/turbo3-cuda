@@ -12,14 +12,14 @@ constexpr int block_dv     = num_warps * d_v_per_warp;  // 16
 
 template <int S_v, bool KDA, bool keep_rs_t>
 __global__ void __launch_bounds__(ggml_cuda_get_physical_warp_size() * num_warps, 2) gated_delta_net_cuda(
-        const float * __restrict__ q,
-        const float * __restrict__ k,
-        const float * __restrict__ v,
-        const float * __restrict__ g,
-        const float * __restrict__ beta,
-        const float * __restrict__ curr_state,
-        float * __restrict__ dst,
-        float * __restrict__ state,
+        const float * q,
+        const float * k,
+        const float * v,
+        const float * g,
+        const float * beta,
+        const float * curr_state,
+        float * dst,
+        float * state,
         int64_t H,
         int64_t n_tokens,
         int64_t n_seqs,
