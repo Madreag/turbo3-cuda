@@ -121,11 +121,16 @@ __global__ void __launch_bounds__(ggml_cuda_get_physical_warp_size() * num_warps
     __align__(16) float k_reg[d_qk_per_lane];
     load_qk_lane(k_reg, k + (int64_t) iq3 * sq3 + (int64_t) iq1 * sq1);
 
-    for (int t = 0; t < n_tokens; ++t) {
-        const float * v_t = v + (int64_t) sequence * sv3 + (int64_t) t * sv2 + (int64_t) h_idx * sv1;
+    // seed the t=0 prefetch registers
+    float beta_next = beta[(int64_t) sequence * sb3 + (int64_t) h_idx * sb1];
+    float v_local_next = 0.0f;
+    if (lane < d_v_per_warp) {
+        v_local_next = (v + (int64_t) sequence * sv3 + (int64_t) h_idx * sv1)[dv_base + lane];
+    }
 
+    for (int t = 0; t < n_tokens; ++t) {
         const int64_t gb_off   = (int64_t) sequence * sb3 + (int64_t) t * sb2 + (int64_t) h_idx * sb1;
-        const float   beta_val = beta[gb_off];
+        const float   beta_val = beta_next;
 
         __align__(16) float alpha_lane[d_qk_per_lane];
         float               alpha_scalar = 0.0f;
@@ -141,10 +146,7 @@ __global__ void __launch_bounds__(ggml_cuda_get_physical_warp_size() * num_warps
         }
 
         // only first d_v_per_warp lanes hold a real v[dv_base + lane]; broadcast via __shfl_sync
-        float v_local = 0.0f;
-        if (lane < d_v_per_warp) {
-            v_local = v_t[dv_base + lane];
-        }
+        const float v_local = v_local_next;
 
         // stage A: state update
 #pragma unroll
@@ -173,9 +175,15 @@ __global__ void __launch_bounds__(ggml_cuda_get_physical_warp_size() * num_warps
             }
         }
 
-        // prefetch k for next token while issuing the q load for this token
+        // prefetch k + beta + v for the next token while this token's compute drains
         if (t + 1 < n_tokens) {
             load_qk_lane(k_reg, k + (int64_t) iq3 * sq3 + (int64_t) (t + 1) * sq2 + (int64_t) iq1 * sq1);
+            const int64_t gb_next = (int64_t) sequence * sb3 + (int64_t) (t + 1) * sb2 + (int64_t) h_idx * sb1;
+            beta_next = beta[gb_next];
+            if (lane < d_v_per_warp) {
+                const float * v_next = v + (int64_t) sequence * sv3 + (int64_t) (t + 1) * sv2 + (int64_t) h_idx * sv1;
+                v_local_next = v_next[dv_base + lane];
+            }
         }
 
         __align__(16) float q_reg[d_qk_per_lane];
