@@ -359,3 +359,21 @@ ACCEPTED WITH RATIONALE (no change):
 REFUTED BY VERIFIERS (recorded in workflow transcript): 12 findings incl.
 deploy-mirror drift (checked clean), several severity-inflated variants of
 the above.
+
+### P4-EXT [T] TESTED 2026-08-17 — n_max=4 REJECTED, KEEP n3 (community-repo follow-up)
+Trigger: sudoingX/qwen38-mtp — 4+ desktop-5090 sweeps peak at ungated n4
+(thinking-off shallow probes). Our on-stack A/B (raw /completion, ignore_eos,
+temp 1.0, seeds 42/43 paired, arms repeated, ORIGINAL weights, 320K config;
+harness quality-tests/nmax/, arm-repeat variance <1%):
+- shallow 2.5K: n4 −4 to −16% EVERYWHERE (accept collapses .77→.61 code)
+- 38K: code n4 +3.3/+9.5% (only reproducible win); prose wash
+- deep: code@160K split (−3.8/+8.9); prose@187K n4 LOSES (−16.1/−4.0)
+- VRAM: n4 +150 MiB (31,843 vs 31,693; headroom 764 vs 914 MiB)
+VERDICT: KEEP n3. n4's lone win (38K code) loses the portfolio: shallow and
+prose/thinking-class (the BULK of xhigh Hermes tokens) degrade at all depths,
++150 MiB in a VRAM-pressure week. Mechanism per P9/P1 doctrine: n4 drafts →
+verify batch 5 falls OFF the fused Q≤4 window; only very-high-acceptance
+content overcomes the unfused verify tax — community thinking-off shallow
+probes on stock kernels do not transfer. (Third confirmation of the
+fused-economics inversion law.) Deep-prose depth label note: n4 arm restored
+a ctx-checkpoint (52,414 reused) — both arms decoded at identical 187K.
