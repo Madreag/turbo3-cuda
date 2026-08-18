@@ -365,6 +365,11 @@ AND what it didn't · verify every claim with a command first.
   harnesses go in g1/quality-tests/; nohup'd probes survive the 120s guillotine
   group-kill (pidfile the probe, poll with until-loops).
 
+## >>> MORNING 2026-08-18 ENTRYPOINT: read OVERNIGHT-REPORT-2026-08-18.md
+## first — GPU died at stock clocks 00:27 (OC refuted), two software suspects
+## isolated (PDL launches / row-per-warp GDN), instruments built. FIRST ACTION
+## after reboot: quality-tests/yarnB/morning-protocol.sh phase 1 (babysat).
+
 ## 2026-08-17 EVENING/NIGHT ADDENDUM — OC root-cause arc + quant lab + disk law
 ## (READ THIS FIRST if resuming after 2026-08-17; supersedes conflicting bits above)
 
