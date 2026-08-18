@@ -76,7 +76,20 @@ the reboot; the proof fires the moment it returns.
   discarded the detail (instrument lesson: gates keep FULL logs). Re-runs:
   GDN 36/36, GET_ROWS 111/111, FULL SUITE 13,253/13,253 GREEN. Classified:
   post-reboot first-touch transient; watch for recurrence. PHASE 0: PASS.
-- PHASE 1 (killer x2, fixed stack, PDL=0): RUNNING (launched ~post-phase0).
+- PHASE 1: **MACHINE DIED 05:59 (~2 min into run 1) + residual 06:03 boot
+  bugcheck — both 0x116. FIX-AS-ROOT-CAUSE REFUTED at the execution gate.**
+  Three-way elimination now: clocks (OC removed->died), our software (PDL
+  off + restrict-clean + 13253 green->died), and the user's counter-evidence:
+  GAMES RUN STABLE AT HIGHER POWER (graphics path) — every death is on the
+  CUDA-compute + WSL dxg path games never touch. Surviving suspects:
+  WSL2 dxg layer / driver compute mode / b10448-era base beyond our fixes.
+- DISCRIMINATION TESTS (2026-08-18 ~11:30):
+  TEST A = OFFICIAL native Windows b10488 build, same killer workload, zero
+  WSL, zero fork code. Native survives -> WSL/dxg or fork-base convicted.
+  TEST B = .pre-sync binary (pre-b10448, no PDL infra, no GDN/MMA) + Qwen3.6
+  under WSL. Survives -> new-base convicted -> bisect.
+  DEADMAN: if this machine is found dead, the ledger line below names the
+  arm that was executing.
 
 ## KERNEL AUDIT LEDGER (goal v2, all-night pass — grows as audits complete)
 
