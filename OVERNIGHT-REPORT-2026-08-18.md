@@ -5,7 +5,42 @@ lands at the top by morning. Raw data: quality-tests/yarnB/ (ledger.txt =
 ground truth of progress), quality-tests/kldnvfp4/ (quant gates),
 quality-tests/quant-lab/ (imatrices, recipes).
 
-## MEGA-ANALYSIS (as of ~02:00 — night investigation phase complete)
+## ROOT CAUSE FOUND (~03:00) — READ THIS FIRST
+
+**The GDN row-per-warp kernel (fork-only, shipped Aug 15 = instability day 1)
+violated upstream's documented PDL race rule.** Upstream commit 9e58d4d69:
+"Avoid PDL race conditions by disabling __restrict__ when PDL is used"
+(#24030). Under PDL, kernels launch with early-start overlap; __restrict__ on
+kernel-entry pointers licenses the compiler to hoist loads ACROSS
+cudaGridDependencySynchronize() into the window where the PREDECESSOR kernel
+still executes. Our hand-merged GDN kernel had raw __restrict__ on all 8
+entry pointers and fires ~millions of PDL launches/hour (48 layers x every
+batch). Per-kernel-entry audit of the whole tree: it was the ONLY violator in
+our active path (set_rows/ssm_conv/fattn-turbo entries all clean).
+Explains: non-determinism, sustained-load dose-response, ramp/warmup
+clustering, Aug-14-15 stability (kernel not yet shipped), community silence
+(nobody else runs this kernel), stock-clocks death (clocks irrelevant), and
+why op-tests pass (single-op tests never race the PDL boundary).
+OC and thermals: aggravators at most, both refuted as root.
+
+**Shipped tonight (defense in depth):**
+1. Binary D `llama-server.restrictfix` — entry restricts removed (upstream's
+   pattern; arch-conditional macro cannot appear in __global__ signatures —
+   first build attempt taught that). Committed+pushed on fix/vision-hybrid.
+2. `GGML_CUDA_PDL=0` in ALL launchers + gate + omega (independent layer;
+   class-wide; ~0-2% cost; re-enable = one env after post-vacation soak).
+3. Binary C `llama-server.gdnmainline` — full kernel revert fallback
+   (branch debug/gdn-mainline, pushed).
+4. Vacation watchdog drafted (vacation-mode/, DISARMED — user arms):
+   GPU-wedge -> auto-reboot -> auto-serve -> alert.
+
+**GUARANTEE STATUS: root-caused + double-mitigated, execution-proof pending
+GPU.** The proof ceremony = morning-protocol.sh: Phase 1 (D + PDL0, killer
+workload x2) -> Phase 3 (promote + full battery as soak). Phase 1b isolates
+whether the restrict fix alone suffices. Binary C + fault tree stand by if
+Phase 1 ever dies.
+
+## MEGA-ANALYSIS (as of ~02:00 — investigation log; superseded by ROOT CAUSE above)
 
 **USER'S CALL VINDICATED SO FAR: the software trail got hot.** After the
 stock-clocks death (00:27) refuted the OC theory, a from-scratch audit found

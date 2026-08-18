@@ -5,3 +5,5 @@ SOAKEVENT launch_125_Qwen3.8-27B-Q6_K.gguf
 SOAKEVENT launch_156_Qwen3.8-27B-Q6_K.gguf
 SOAKEVENT launch_125_Qwen3.8-27B-Q6_K.gguf
 COMPLETE 01:08:54
+DONE quants_built
+DONE quants_built

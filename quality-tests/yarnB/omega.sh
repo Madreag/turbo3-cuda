@@ -24,7 +24,7 @@ launch(){ # $1=scale(none|125|156) $2=model $3=extra flags
         125) ROPE="--rope-scaling yarn --rope-scale 1.25 --yarn-orig-ctx 262144";;
         156) ROPE="--rope-scaling yarn --rope-scale 1.5625 --yarn-orig-ctx 262144";;
     esac
-    export TURBO_NORM_ALPHA_V=1.00 TURBO4_NORM_ALPHA_V=1.00 GGML_TURBO_MMA_FUSED=1
+    export TURBO_NORM_ALPHA_V=1.00 TURBO4_NORM_ALPHA_V=1.00 GGML_TURBO_MMA_FUSED=1 && export GGML_CUDA_PDL=0
     setsid nohup $BIN -m "$2" \
       --spec-type draft-mtp --spec-draft-n-max 3 \
       -ctkd turbo4 -ctvd turbo4 -ctk turbo4 -ctv turbo4 \

@@ -1,37 +1,41 @@
 #!/bin/bash
-# MORNING PROTOCOL 2026-08-18 — PDL/GDN suspect isolation (run after reboot).
-# Phase 1: GGML_CUDA_PDL=0 + the exact killer workload (imatrix 1200 chunks,
-#          died at ~30min/[310] with PDL on). Twice. Survive = PDL convicted.
-# Phase 2 (only if Phase 1 dies): binary C (.gdnmainline, PDL ON) same test.
-# Verdict matrix in OVERNIGHT-REPORT. Run ONE phase at a time, babysat.
+# MORNING PROTOCOL 2026-08-18 (FINAL) — execute after reboot, ONE phase at a
+# time, babysat. Root cause identified overnight: GDN row-per-warp kernel
+# violated the PDL/__restrict__ race rule (#24030 class). Binary D carries the
+# fix; PDL=0 is layered in all launchers regardless.
 set -u
 Q=/home/erol/ai/turboquant/turboquant-g1/quality-tests
-IMX=/home/erol/ai/turboquant/turboquant-sync/build/bin/llama-imatrix
-PROD_BIN=/home/erol/ai/turboquant/turboquant-kv-cache/build-g1/bin/llama-server
+BG=/home/erol/ai/turboquant/turboquant-kv-cache/build-g1
+IMX_D=$BG/llama-imatrix.restrictfix
 MODEL=/home/erol/ai/turboquant/models/qwen38/Qwen3.8-27B-Q6_K.gguf
 PHASE="${1:-1}"
+run_killer(){ # $1=label $2=imatrix-binary $3=pdl(0/1)
+    echo "--- killer run [$1] PDL=$3 start $(date +%H:%M:%S)"
+    GGML_CUDA_PDL=$3 timeout 5400 "$2" -m $MODEL -f $Q/quant-lab/calib_v2.txt \
+      -o /tmp/imx-$1.dat -ngl 99 -c 4096 --chunks 1200 2>&1 | tail -2
+    nvidia-smi --query-gpu=memory.used --format=csv,noheader >/dev/null 2>&1 \
+      || { echo "!!! GPU LOST during [$1]"; return 2; }
+    echo "--- [$1] SURVIVED $(date +%H:%M:%S)"
+}
 case "$PHASE" in
-  1)
-    echo "PHASE 1: PDL OFF, killer workload x2"
-    for i in 1 2; do
-      echo "--- run $i start $(date +%H:%M:%S)"
-      GGML_CUDA_PDL=0 timeout 5400 $IMX -m $MODEL -f $Q/quant-lab/calib_v2.txt \
-        -o /tmp/imx-probe-$i.dat -ngl 99 -c 4096 --chunks 1200 2>&1 | tail -3
-      RC=$?
-      nvidia-smi --query-gpu=memory.used --format=csv,noheader || { echo "GPU LOST during run $i (PDL OFF!) — PDL exonerated, GDN/other still suspect"; exit 2; }
-      [ $RC -ne 0 ] && echo "run $i rc=$RC (nonzero but GPU alive)"
-      echo "--- run $i survived $(date +%H:%M:%S)"
-    done
-    echo "PHASE 1 PASS: PDL-off survives the killer x2 -> PDL CONVICTED."
-    echo "NEXT: add 'export GGML_CUDA_PDL=0' to all launchers, relaunch battery."
-    ;;
-  2)
-    echo "PHASE 2: binary C (mainline GDN kernel, PDL ON), killer workload"
-    # imatrix binary is from the same build tree as C after the revert build;
-    # rebuild imatrix target on debug/gdn-mainline first if not done.
-    timeout 5400 $IMX -m $MODEL -f $Q/quant-lab/calib_v2.txt \
-      -o /tmp/imx-probeC.dat -ngl 99 -c 4096 --chunks 1200 2>&1 | tail -3
-    nvidia-smi --query-gpu=memory.used --format=csv,noheader || { echo "GPU LOST on binary C too — kernel+PDL both exonerated -> driver/hw track"; exit 2; }
-    echo "PHASE 2 survived -> row-per-warp GDN kernel convicted (with PDL as trigger-amplifier)"
-    ;;
+  1) echo "PHASE 1: binary D (restrict-fixed) + PDL=0 — the shipping config, killer x2"
+     run_killer d-pdl0-a "$IMX_D" 0 || exit 2
+     run_killer d-pdl0-b "$IMX_D" 0 || exit 2
+     echo "PHASE 1 PASS -> run phase 3 (promote + battery soak). Optionally phase 1b for science."
+     ;;
+  1b) echo "PHASE 1b (science): binary D + PDL=1 — does the restrict fix alone hold?"
+     run_killer d-pdl1 "$IMX_D" 1 || { echo "D+PDL1 died -> PDL stays off permanently; fix insufficient alone"; exit 2; }
+     echo "D+PDL1 survived -> restrict fix alone suffices; PDL re-enable is a future option"
+     ;;
+  2) echo "PHASE 2 (only if phase 1 died): binary C mainline-GDN kernel"
+     IMX_C=/home/erol/ai/turboquant/turboquant-sync/build/bin/llama-imatrix  # rebuild on debug/gdn-mainline first!
+     run_killer c-test "$IMX_C" 1 || { echo "C died too -> driver/hw track (see report fault tree)"; exit 2; }
+     ;;
+  3) echo "PHASE 3: promote binary D to prod + relaunch omega battery as soak"
+     cp $BG/bin/llama-server $BG/bin/llama-server.pre-restrictfix
+     cp $BG/bin/llama-server.restrictfix $BG/bin/llama-server
+     echo "promoted (rollback: .pre-restrictfix). Relaunching omega (resumable ledger)..."
+     setsid nohup bash $Q/yarnB/omega.sh < /dev/null > $Q/yarnB/omega-nohup2.out 2>&1 &
+     sleep 3; pgrep -f "[o]mega.sh" >/dev/null && echo "omega running (battery+gates+DRY on fixed stack)"
+     ;;
 esac
