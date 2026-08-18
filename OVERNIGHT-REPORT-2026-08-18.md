@@ -85,7 +85,7 @@ the reboot; the proof fires the moment it returns.
 | ssm-scan (20 raw restricts) | reachability | — | EXCLUDED — zero refs in all qwen3* graphs (DeltaNet uses gated_delta_net + ssm_conv) |
 | **CHUNKED PREFILL (goal item 3)** | **MERGED: 26001x22587 dedicated merge done** | 3 kernels compiled; plain launches = PDL-exempt; all-NC loads safe by construction | branch feature/gdn-chunked-prefill; artifacts .chunked staged; op-test suite installed (PR-26001 + boundary killers); validation = protocol phase 4 |
 | tree-wide entry-grain re-audit (post all merges) | machine | ZERO violations | no regressions |
-| chunked kernel deep audit (fwdsub full-line; WMMA pair structural) | full/structural | smem accounting EXACT (fwdsub match; state 30KB<48KB as commented); pool scratch exactly-sized; state->dst-tail contract matches ours; plain launches; per-stage CUDA_CHECK | CLEAN — arithmetic correctness = morning 37-case GPU suite (protocol phase 4) |
+| chunked kernel deep audit — NOW 100% LINE COVERAGE (fwdsub + state + preqk all full) | full | smem accounting EXACT (fwdsub match; state 30KB<48KB as commented); pool scratch exactly-sized; state->dst-tail contract matches ours; plain launches; per-stage CUDA_CHECK | CLEAN — every overlay barriered, tails guarded (valid_cs), exp clamped, single-warp preqk exact; arithmetic = morning 37-case GPU suite (phase 4) |
 
 ## OPEN-ITEMS LIST (live — the /goal ledger; strike items as they close)
 
