@@ -348,6 +348,17 @@ AND what it didn't · verify every claim with a command first.
   thinking-class loses at all depths, +150MB VRAM. Third confirmation: fused
   Q≤4 verify window inverts community spec tuning. Harness (survives /tmp
   wipes now): g1/quality-tests/nmax/.
+- **Upstream picks SHIPPED (evening): #27278 + #27262 + #27274** — vision
+  chunks survive slot save/restore as placeholders + sha256 image hashing.
+  Gates: 13,253/13,253 op-tests, text path byte-identical vs prior prod,
+  vision slot-save round-trip PASS (175 tok saved/restored, continuation
+  reused cache, 75/203 reprocessed). Promoted; rollback .pre-slotvision.
+  T2 sync now CLOSED for this window (remaining 29 commits = UI/CI/other-
+  model noise; the community's +10-15% rebuild gains predate our base).
+  NVFP4 Q8attn artifact (17.8GB) downloaded to models/qwen38-nvfp4/ —
+  T1 ladder ready to run. Vision note: upstream recommends
+  --image-min-tokens 1024 for Qwen-VL grounding (issue 16842) — NOT set in
+  our launchers; fold into the vision re-baseline arc.
 - Sweep-era ops laws learned: /tmp scratch dies on every reboot — durable
   harnesses go in g1/quality-tests/; nohup'd probes survive the 120s guillotine
   group-kill (pidfile the probe, poll with until-loops).

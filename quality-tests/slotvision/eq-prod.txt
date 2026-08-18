@@ -1,0 +1,5 @@
+<think>
+We need to answer user: "Explain in exactly three sentences why the sky appears blue." Need final exactly three sentences. Ensure three sentences. Could be: "Sunlight contains all colors of the visible spectrum, and when it enters Earth's atmosphere it interacts with gas molecules. These molecules scatter shorter wavelengths, especially blue, much more strongly than longer wavelengths like red. Because blue light is scattered in all directions, our eyes receive it from across the sky, making the sky appear blue." Count sentences: 1 Sunlight... spectrum, and when... molecules. 2 These molecules... red. 3 Because... blue. Exactly three. Need no extra.
+</think>
+
+Sunlight contains all colors of the visible spectrum, and when it enters Earth's atmosphere it interacts with gas molecules. These molecules scatter shorter wavelengths, especially blue, much more strongly than longer wavelengths like red. Because blue light is scattered in all directions, our eyes receive it from across the sky, making the sky appear blue.
