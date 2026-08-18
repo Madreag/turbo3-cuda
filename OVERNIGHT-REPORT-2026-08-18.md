@@ -69,6 +69,21 @@ morning-protocol.sh phase 1 (killer workload x2 on the fixed stack) ->
 phase 3 (promote + full battery soak). The GPU is physically absent until
 the reboot; the proof fires the moment it returns.
 
+## OPEN-ITEMS LIST (live — the /goal ledger; strike items as they close)
+
+- [GATE: reboot] Phase 1 killer x2 on fixed stack -> phase 1b PDL-on
+  certification -> phase 3 battery soak + serving restore. THE guarantee rung.
+- [ready] .gdn-prefetch variant (side branch): post-stability A/B for extra
+  GDN speed (beta+v carried-register prefetch; SASS-checked, op-tests needed).
+- [ready] v3 imatrix A/B gates (both quants built, gate slots in omega).
+- [ready] DRY anti-spiral arm (in omega).
+- [closed tonight] ssm-scan raw restricts: UNREACHABLE in qwen3.5 graphs
+  (zero refs in all qwen3* model files — DeltaNet uses gated_delta_net +
+  ssm_conv, both verified clean). uid fast-path audit: sound (uid regenerates
+  per scheduler rebuild; pool-flush separately guarded); residual risk noted,
+  belt available (always-compare) if ever implicated.
+- [user, when convenient] vacation-mode arming; compaction; PL-cap optional.
+
 ## (superseded first-form analysis below)
 ## OLD: ROOT CAUSE FOUND (~03:00)
 
