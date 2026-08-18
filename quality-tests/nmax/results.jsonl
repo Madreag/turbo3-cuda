@@ -46,3 +46,11 @@
 {"arm": "n3-deep", "station": "121K", "cls": "code", "seed": 43, "depth": 160162, "decode_tps": 73.3, "n_gen": 700, "prefill_tps": 38.6, "accept": 0.724, "draft_n": 660, "draft_acc": 478, "ts": "18:14:56"}
 {"arm": "n3-deep", "station": "121K", "cls": "prose", "seed": 42, "depth": 187611, "decode_tps": 58.3, "n_gen": 700, "prefill_tps": 36.3, "accept": 0.583, "draft_n": 762, "draft_acc": 444, "ts": "18:17:31"}
 {"arm": "n3-deep", "station": "121K", "cls": "prose", "seed": 43, "depth": 187611, "decode_tps": 54.6, "n_gen": 700, "prefill_tps": 33.7, "accept": 0.519, "draft_n": 819, "draft_acc": 425, "ts": "18:17:44"}
+{"arm": "nvfp4-n3", "station": "shallow", "cls": "code", "seed": 42, "depth": 2465, "decode_tps": 161.9, "n_gen": 700, "prefill_tps": 104.8, "accept": 0.929, "draft_n": 553, "draft_acc": 514, "ts": "19:04:33"}
+{"arm": "nvfp4-n3", "station": "shallow", "cls": "code", "seed": 43, "depth": 2465, "decode_tps": 160.6, "n_gen": 700, "prefill_tps": 102.2, "accept": 0.89, "draft_n": 571, "draft_acc": 508, "ts": "19:04:37"}
+{"arm": "nvfp4-n3", "station": "shallow", "cls": "prose", "seed": 42, "depth": 2647, "decode_tps": 110.5, "n_gen": 700, "prefill_tps": 105.0, "accept": 0.485, "draft_n": 853, "draft_acc": 414, "ts": "19:04:42"}
+{"arm": "nvfp4-n3", "station": "shallow", "cls": "prose", "seed": 43, "depth": 2647, "decode_tps": 107.7, "n_gen": 700, "prefill_tps": 102.3, "accept": 0.475, "draft_n": 864, "draft_acc": 410, "ts": "19:04:49"}
+{"arm": "nvfp4-n3", "station": "38K", "cls": "code", "seed": 42, "depth": 38563, "decode_tps": 139.7, "n_gen": 700, "prefill_tps": 73.5, "accept": 0.942, "draft_n": 548, "draft_acc": 516, "ts": "19:05:05"}
+{"arm": "nvfp4-n3", "station": "38K", "cls": "code", "seed": 43, "depth": 38563, "decode_tps": 122.5, "n_gen": 700, "prefill_tps": 76.3, "accept": 0.75, "draft_n": 645, "draft_acc": 484, "ts": "19:05:11"}
+{"arm": "nvfp4-n3", "station": "38K", "cls": "prose", "seed": 42, "depth": 49775, "decode_tps": 90.6, "n_gen": 700, "prefill_tps": 68.6, "accept": 0.52, "draft_n": 818, "draft_acc": 425, "ts": "19:05:33"}
+{"arm": "nvfp4-n3", "station": "38K", "cls": "prose", "seed": 43, "depth": 49775, "decode_tps": 88.9, "n_gen": 700, "prefill_tps": 67.6, "accept": 0.503, "draft_n": 835, "draft_acc": 420, "ts": "19:05:41"}

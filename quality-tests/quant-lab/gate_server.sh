@@ -7,6 +7,7 @@ MODEL="$1"
 export TURBO_NORM_ALPHA_V=1.00
 export TURBO4_NORM_ALPHA_V=1.00
 export GGML_TURBO_MMA_FUSED=1
+export GGML_CUDA_PDL=0
 setsid nohup /home/erol/ai/turboquant/turboquant-kv-cache/build-g1/bin/llama-server \
   -m "$MODEL" \
   --spec-type draft-mtp --spec-draft-n-max 3 \

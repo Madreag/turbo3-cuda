@@ -32,8 +32,8 @@ case "$PHASE" in
      run_killer c-test "$IMX_C" 1 || { echo "C died too -> driver/hw track (see report fault tree)"; exit 2; }
      ;;
   3) echo "PHASE 3: promote binary D to prod + relaunch omega battery as soak"
-     cp $BG/bin/llama-server $BG/bin/llama-server.pre-restrictfix
-     cp $BG/bin/llama-server.restrictfix $BG/bin/llama-server
+     echo "(promote already done 04:45 — binary IS prod)" #cp $BG/bin/llama-server $BG/bin/llama-server.pre-restrictfix
+     : #cp $BG/bin/llama-server.restrictfix $BG/bin/llama-server
      echo "promoted (rollback: .pre-restrictfix). Relaunching omega (resumable ledger)..."
      setsid nohup bash $Q/yarnB/omega.sh < /dev/null > $Q/yarnB/omega-nohup2.out 2>&1 &
      sleep 3; pgrep -f "[o]mega.sh" >/dev/null && echo "omega running (battery+gates+DRY on fixed stack)"

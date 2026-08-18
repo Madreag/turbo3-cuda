@@ -15,7 +15,7 @@ import json, os, sys, time, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KEY = open("/home/erol/.config/llama-tcq/api.key").read().strip()
-BASE = "http://127.0.0.1:8131"
+BASE = f"http://127.0.0.1:{os.environ.get('PORT', '8131')}"
 HDR = {"Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
 SEEDS = [42, 43]
 N_PREDICT = 700

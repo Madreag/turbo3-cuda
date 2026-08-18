@@ -1,0 +1,3231 @@
+The following are engineering notes. Read them, then continue writing a detailed narrative essay about this project.
+
+# Auto-Tier Design — one Hermes model, silent 320K→409K profile handoff
+
+Status: DESIGN (2026-08-16). User ask: Hermes sees ONE model; we serve the
+320K speed profile and silently switch to the 409K max profile when a
+session crosses ~170K tokens — seamless except an acceptable switch delay.
+
+## Hardware feasibility (5090 32GB / 48GB RAM) — YES
+
+- Only ONE server can hold weights at a time (2×21.3 GB > 32 GB → no warm
+  standby process). Irrelevant in practice: with 48 GB RAM the 22.9 GB
+  model file stays fully page-cached → measured warm full-stack restart
+  ≈ 7-40 s. A standby process would save only seconds.
+- **The dominant switch cost is NOT the model reload — it is re-prefilling
+  the session** into the new server: ~1.7K tok/s at depth → 170K ≈ 100-115 s,
+  200K ≈ 2 min, 300K ≈ 3.2 min. (Why unavoidable today: the profiles use
+  different YaRN scales, and rope is baked into cached K — the old cache is
+  mathematically wrong for the new scale; slot files are also
+  config-validated. See Phase 2/3.)
+- Total switch experienced by the client: ~2-2.5 min inside ONE held
+  streaming turn, with keepalive heartbeats flowing. Matches the user's
+  "seamless except for maybe a delay".
+
+## Architecture: proxy-orchestrated auto-tiering (Phase 1)
+
+The proxy already sees every request, owns slot save/restore, has a
+circuit breaker for restart windows, and heartbeats both protocols — it is
+the natural orchestrator. Additions:
+
+1. **Unified model id**: both launchers started with `ALIAS=qwen3.8-27b`
+   (env knob already exists). Hermes gets ONE model entry. (The per-profile
+   ids remain available for manual mode.)
+2. **Exact token tracking, free**: the previous response's `usage`
+   (prompt+completion totals) is stored per user/slot; incoming delta
+   estimated at chars/3 + 8K margin. No /tokenize calls needed.
+3. **Trigger**: projected total > `TIER_UP_TOKENS` (default **180K**,
+   env-tunable; user floated 170K — anything in 150-250K is sane: past the
+   state-tracking envelope both profiles are quality-equal, and it leaves
+   ≥70K headroom before the 320K ceiling could hard-stop a turn).
+4. **The switch (hold-and-swap)**: hold the triggering request; drain any
+   in-flight stream; `stop.sh`; `start-max-38.sh` (health-gated); forward
+   the held request (first turn pays the re-prefill); keepalive frames the
+   whole time. Failure → boot speed profile back + proper SSE error frame
+   (never a silent dead stream).
+5. **Tier-down**: after `TIER_DOWN_IDLE_MIN` (default 15) with no traffic,
+   revert to the speed profile. A returning big session simply re-triggers
+   tier-up (its 409K slot file restores — slot files are per-profile dirs).
+6. Manual escape hatches unchanged: the two launchers + per-profile ids.
+
+## Alternatives ruled out (with numbers)
+
+- **One config that does both (409K + MTP)**: does not fit — vram_law says
+  −858 MiB at the 700-floor; closing it needs ub-cuts + weight-quant drops
+  (quality-first veto).
+- **Always-409K**: user-rejected; costs 113→30-80 t/s on all daily work.
+- **Warm standby process**: pointless (page cache already provides it);
+  impossible to hold both on GPU anyway.
+
+## Phase 2 (optional, later): fast handoff via matched YaRN
+
+Run BOTH profiles at YaRN 1.5625 (quality at 1.5625 measured
+equivalent-class: KLD 0.0052 / p99 0.028 / top-1 95.5% vs matched ref;
+NIAH 5/5 @380K) → cached-K semantics match → the only remaining barrier is
+server-side config validation of slot files (ctx size / spec flags). Relax
+that check in OUR fork for the blessed pair → switch becomes save-state
+(~2.8 GB) + restart + restore ≈ **30-60 s, no re-prefill**. Deferred until
+Phase 1 experience says the 2-min switch matters. Trade to re-gate: speed
+profile would carry the higher rope scale at short context (the yarn-tax
+axis — needs its own battery pass before adoption).
+
+## Phase 3 (research): re-rope the cache across scales
+
+The fork already has a rope-shift rebuild path (dequant → un-rotate →
+re-rope → re-quant, in-place) for position shifts. A SCALE-change variant
+(rotate each cached K by the Δangle between yarn scales) is mathematically
+straightforward and would make cross-scale handoff exact without Phase 2's
+unification. Real kernel work; only if auto-tiering becomes central.
+
+## Effort (Phase 1)
+
+Proxy patch ~150-250 lines + ~10 tests (hold-and-swap, trigger math,
+tier-down, failure paths), launcher alias unification via env, docs, and a
+live drill: synthetic session crossing the threshold → verify switch,
+continuity, and timing. ≈ half a day with gates.
+
+## Search-blast findings (3 agents, 2026-08-16) — DESIGN REVISED UP
+
+**1. KV-state agent (the game-changer).** Verified in OUR code: slot files
+validate KV type / v_trans / layer count / capacity — but NOT n_ctx (larger
+-c restore explicitly works), NOT --spec-type (draft ctx is separate; cold
+draft after restore = warm-up only), and NOT rope/YaRN (no field exists —
+cross-scale restore silently corrupts; HF's identical bug measured PPL 10.2
+vs 4.3). **The ONLY barrier between our two profiles is --rope-scale 1.25
+vs 1.5625.** Unify both at 1.5625 → slot files become PORTABLE long→max
+unconditionally (max→long when ≤320K). NO fork surgery needed. The
+mmproj-blocks-slot-save gate exists only in the old public tree — prod
+builds from turboquant-sync where it's removed (and proxy slot save runs
+daily in prod). Checkpoints persist in slot files in our tree (#26004 pick).
+→ **Phase 2 collapses into Phase 1: switch = save slot (~2.8 GB, seconds) +
+restart (~10-40 s warm) + restore + ~49-token reuse ≈ 20-50 s total, NO
+re-prefill.** Plain re-prefill remains the automatic fallback.
+Quality gate required first — and CORRECTED 2026-08-16: our existing KLD
+runs compared each scale against a SAME-SCALE f16 reference, which isolates
+QUANT error and cancels the yarn tax out entirely. "0.0052 at 1.5625" means
+quant stays transparent there — it says NOTHING about what yarn itself
+costs. The yarn tax (none vs 1.25 vs 1.5625) has never been measured on
+this stack; YARN-TAX-STUDY (menu presented to user) must run before rope
+unification is adopted.
+
+**2. Tooling agent.** Nothing off-the-shelf routes on token count locally
+(llama-swap + llama.cpp native router are name-driven; token triggers live
+in client-side routers — claude-code-router's longContextThreshold=200K
+validates the pattern). llama.cpp's new router mode holds connections with
+ZERO bytes during loads (worse than our heartbeating proxy) and its sleep
+mode has a compounding-fit bug class specifically with mmproj+draft configs
+(#24475). Community latency data confirms ours: warm weight load ≈ 3 s
+PCIe; "the cost nobody counts is the destroyed prompt cache" — which the
+slot-portability finding eliminates. VERDICT: build in our proxy.
+
+**3. Client-UX agent.** Timeout physics: idle watchdogs are beaten only by
+PROTOCOL-SHAPED no-op frames (bare SSE comments are invisible to several
+agent parsers — 4 documented bug reports); several clients carry 300 s
+TOTAL deadlines (configurable — Hermes is ours to configure high). Commit
+200+headers immediately, heartbeat every 10-15 s with comment + empty-delta
+chunk reusing the stream id (OpenAI) / event:ping (Anthropic), in-band
+shaped error frames after headers, 503 only pre-headers. Drain in-flight
+before swap (llama-swap pattern), health-gate on /health 200 with 500 =
+fail-fast, mutex-fenced writer handoff, heartbeat stays armed through the
+post-swap first turn, is_disconnected() aborts a swap nobody awaits.
+
+## REVISED PLAN (recommended)
+
+1. **Rope unification gate**: speed profile SCALE 1.25→1.5625; battery
+   2-3 seeds @64K on it (tail-KLD evidence already favorable). If it gates
+   clean → proceed; if not → Phase-1 re-prefill design stands at 1.25.
+2. **Proxy auto-tier**: unified alias, usage-based token tracking, trigger
+   TIER_UP_TOKENS (default 180K), hold-and-swap with save→restart→restore
+   (re-prefill fallback), shaped heartbeats per protocol, drain + health
+   gate + fenced handoff, idle tier-down (default 15 min), env-config all.
+3. **Drill**: synthetic session crossing the threshold → verify switch
+   time (~20-50 s), continuity (answer references pre-switch context),
+   fallback path, tier-down, and the proxy test suite extended (~12 tests).
+Effort: ~1 day including gates.
+
+## QUICK YARN-TAX RESULTS (2026-08-16, 1-hour suite; full A'+B' overnight pending)
+- Identity gate PASSED (yarn@1.0 ≡ none at noise floor, 99.991% same-top).
+- SHALLOW (full-vocab KLD, 32K samples): none→1.25 = 98.49% same-top
+  (-1.5%); none→1.5625 = 97.98% (-2.0%); **unification increment
+  1.25→1.5625 ≈ 0.5% top-1 at short context**, mean-Δp -0.03%. All far
+  below the KV-quant effect (96.2%).
+- DEEP (256K station, n=25 branch probes): the scales genuinely diverge —
+  1.25-vs-1.5625 top-1 agreement 80%, heavy tail. CANNOT be adjudicated by
+  distribution tools (no-yarn sits at its native cliff there; divergence ≠
+  worse). Deep-quality attribution = the overnight matched-config battery
+  (B') at 64K/128K/256K tiers × 3 scales.
+- Data: quality-tests/yarntax/*.json; analyzers yarn_stations.py /
+  yarn_tax_analyze.py.
+
+
+# Bug Hunt — 2026-08-15
+
+> **STATUS (2026-08-15 EOD): Batches 1+2 SHIPPED and verified in production.**
+> Batch 1 (proxy v6.3 + scripts): commit b6b480dff. Batch 2 (C++, 18 files):
+> commit 16b7f9272 on sync/2026-08; binary deployed (102.9MB static).
+> Every finding in sections A, C, D fixed except: C7 (upstream draft-KV note,
+> accepted), Anthropic thinking-memory/#5 + lock-timeout/#13 + key-reload/#21
+> (documented as by-design/deferred). Batch 3 shelved by user.
+> **Verification:** the exact stale slot file that aborted production this
+> morning now returns clean HTTP 400 with the server healthy (the A2 money
+> test); slot save/restore round-trips 158MB in 185/64ms; proxy 403s /slots
+> and raw completion paths; generation smoke 109.1 tok/s finish=stop;
+> test suite 49/49; VRAM 31534 MiB stable.
+> **Two corrections from deploy evidence:** D2 is REFUTED — GGML_USE_CUDA IS
+> defined for the llama lib in this build (flags.make), so the InnerQ hook is
+> real and inert only because uncalibrated. And the InnerQ identity-fill INFO
+> line does not appear in the live server.log — output verified coherent
+> (109 tok/s, exact-match smoke), consistent with the scale tensor not being
+> multiplicatively consumed on the current graph path; cosmetic follow-up.
+
+Four parallel read-only audits over the production stack (ops scripts, proxy.py, carried
+C++ patches in turboquant-sync, server flag/speculative semantics), findings verified
+against primary sources before recording. Production config for triage: Qwen3.8-27B
+(qwen35 hybrid, 16 attn layers, head_dim 256), turbo4/turbo4, FA on, MTP n_max=2,
+ctx 409600 YaRN, --parallel 1, vision on, SM120, TURBO_LAYER_ADAPTIVE unset.
+
+Legend: **[LIVE]** = affects production behavior today. **[DORMANT]** = real defect,
+not reachable in current config. **[HYGIENE]** = correctness-neutral debt.
+
+---
+
+## A. Production-impacting now
+
+### A1. [LIVE] Slot save/restore is effectively dead — proxy checks the wrong directory
+`proxy.py:906` hardcodes `slots/` but the long-38 profile saves to `slots-long/`
+(`--slot-save-path`). Verified on disk: `slots/` holds only a stale Jul-28 Qwen3.6-era
+`erol.bin` (acts as an accidental existence-sentinel), `slots-long/` currently has no
+`.bin`. Effect: `brother` NEVER gets a restore on owner swap (existence check always
+false → slot_erase); `erol` gets a restore *attempted* only because of the stale
+sentinel. Every owner swap = full re-prefill (minutes at long ctx).
+**Fix:** drop the existence check; always attempt restore and rely on the server's
+graceful 400 → slot_erase fallback (that path is verified correct). Derive any needed
+dir from config, never hardcode.
+
+### A2. [LIVE] The morning's slot-restore crash was NOT fixed — patch targets an unreachable assert
+Commit `1ad957c8e` hardened `state_seq_load_file`'s size check, but both disjuncts are
+provably unreachable (short reads throw in `llama_file::read_raw` first; the tell()
+identity holds by construction). The actual abort: Qwen3.8 is hybrid, and the
+**recurrent-memory** restore path uses raw `GGML_ASSERT`s
+(`llama-memory-recurrent.cpp:799,805,987-991`) where the attention path throws
+(→ graceful 400). Enabling MTP changed the recurrent state layout (`n_rs_seq` 0→2,
+rows ×3 — see D5), making the pre-MTP file trip a recurrent-section assert → abort.
+**Still live**: any future config change + a stale slot file reproduces it. Currently
+shielded only by bug A1 (restores rarely happen). The `slots/erol.bin` stale sentinel
+means fixing A1 *unshields* A2 — fix both together.
+**Fix:** convert recurrent state_read GGML_ASSERTs to `throw std::runtime_error`
+(mirrors attention-side contract; the catch → seq_rm → 400 machinery already exists).
+Keep 1ad957c8e as defence-in-depth. This is the real upstreamable fix.
+
+### A3. [LIVE] Proxy delivers truncated upstream streams as *successful* completions
+OpenAI path (`proxy.py:1216-1226`): on end-without-[DONE] it logs [ALERT] then
+`write_eof()` — client sees clean EOF, no error frame, no [DONE]. Anthropic path is
+worse: no tripwire at all, and `builder.close()` unconditionally synthesizes
+`end_turn` + `message_stop` — the exact 2026-08-08 corpse signature presented as a
+normal finished turn. Detection exists for *us*; repair for the *client* does not.
+Also: upstream death mid-stream (`ClientPayloadError`) propagates uncaught → raw
+transport drop (no error frame); unmatched `<think>` buffer is never flushed at
+stream end (silent tail loss); literal `<thinking>` in generated content (e.g. inside
+an artifact) reroutes the remainder of the response into reasoning.
+**Fix:** on both paths, when the stream ends without its terminator: emit
+`data: {"error":...}` + `data: [DONE]` (OpenAI) / `event: error` before
+`message_stop` (Anthropic); catch ClientPayloadError in the pump; flush think-buffer
+as content at end; only honor think-tag openers in the leading segment.
+
+### A4. [LIVE] Passthrough forwards ANY path upstream with the server's key, outside the owner lock
+`proxy.py:1250-1268`: any valid client key reaches every llama-server endpoint —
+including `POST /slots/0?action=save|restore|erase` — no lock, no owner-state update.
+A stray client call can erase/overwrite the other user's cache and desync
+`current_owner` (next swap then saves the wrong user's KV into the stale owner's
+file). `/completion`, `/v1/completions`, `/infill` also bypass slot pinning, and the
+passthrough buffers whole bodies with `total=120` (breaks streaming users of those
+endpoints).
+**Fix:** allowlist (`/v1/models`, `/props`, `/health`, `/tokenize`, `/metrics`), 403
+the rest, `/slots*` above all.
+
+### A5. [LIVE] stop.sh/start scripts: no guards, false green, log destruction, key exposure
+Verified against sources:
+- `stop.sh` sends one SIGTERM, immediately rm's pidfiles, then **unconditionally
+  pkills the same processes** (second SIGTERM lands mid-graceful-shutdown → aborts
+  the proxy's on_cleanup slot_save; "killed extra" prints on every healthy stop),
+  exits 0 without verifying death or port release. `stop.sh && start` can
+  deterministically reproduce the bind-conflict incident.
+- `start-long-38.sh`: no double-start guard; if run while up, new server dies on
+  bind, pidfile clobbered, and the health loop gets 200 **from the old server** —
+  success banner naming a dead PID. Health-timeout is not an error: after 180s it
+  launches the proxy against a possibly-still-loading server and reports success
+  (cold-cache model load alone can exceed the window at this box's 124 MB/s).
+- `>` log redirects truncate the LIVE processes' logs on double-start. Verified
+  casualty: current proxy.log contains only the dead duplicate's traceback; the live
+  proxy's fd sits at offset 3898 past a NUL hole (~3.9 KB of production log
+  destroyed).
+- API key passed via `--api-key "$TCQ_KEY"` → readable in `/proc/*/cmdline` by any
+  local process. Server supports `--api-key-file` (arg.cpp:3455). `keys.json` is 644.
+- Header comment still claims alphas 1.10/1.12 (live exports: 1.00) and pins binary
+  provenance to a superseded commit. Documented rollback line is broken (relative
+  paths not on PATH; `cp` onto a running binary → ETXTBSY; `.pre-nextn` target is
+  older than `.pre-sync` and dynamically linked against another tree). No backup of
+  the current static binary exists.
+- Latent stale systemd units (Apr 12: Qwopus model, no top-k 20, no slot-save-path,
+  `Restart=on-failure` — would fight manual scripts if ever enabled). Not in version
+  control.
+- `status.sh` checks PID liveness only (pidfile-missing-but-alive → "Not running" →
+  operator starts → bind conflict; wedged-but-alive → "Running").
+**Fix:** rewrite stop.sh (verified kill: poll `kill -0`, escalate to -9, confirm
+ports free; pkill net only after pidfile PIDs are gone); start guard (`ss` port
+check → abort); health-timeout → abort before proxy launch; append+rotate logs;
+`--api-key-file`; `chmod 600 keys.json`; fix comments + rollback text; back up the
+live binary; delete or regenerate systemd units; add port+health probe to status.sh.
+
+### A6. [LIVE] `python3 test_proxy.py` silently under-runs the suite: 37/37 reported, 42 exist
+The `TESTS` list + `__main__` block sit *before* five tripwire/capture tests defined
+later in the file; script mode exits early. Verified by running it. Two of the five
+need pytest fixtures. The "42 tests" claim we've been operating under was never
+exercised end-to-end in script mode.
+**Fix:** move `TESTS`/`__main__` to end; port the two fixture tests to script mode.
+Coverage gaps worth closing while there: zero handler-level (aiohttp test client)
+coverage — client-disconnect, upstream-death, lock, swap, heartbeat all untested;
+`maybe_swap_slot` has no test (a one-line assertion on the slots dir would have
+caught A1).
+
+---
+
+## B. Correct-but-notable semantics (no action required to stay correct)
+
+- **No per-request speculative control exists.** The request fields are `#if 0`-ed
+  out of `server-schema.cpp:197-227` AND dead-ended (task params never read by the
+  drafting decision — `server-context.cpp:2915-2957` consults only the server-wide
+  object). `"speculative.n_max": 0` in a request is silently ignored. Proxy-side
+  per-request MTP disable is impossible without a code change (see Improvements #1).
+- **Drafts are grammar-blind** (zero grammar references in common/speculative.cpp;
+  draft = bare top-k argmax) — rejection happens at the grammar-constrained target
+  verifier. With `tools` + auto choice the grammar is LAZY (active only inside the
+  tool-call JSON block); `tool_choice:"required"`/`json_schema` = active from token 0.
+- **Grammar disables GPU backend sampling on the target**
+  (`common/sampling.cpp:415-416`) — a per-request throughput tax on grammar turns
+  that applies WITH OR WITHOUT MTP. Part of the observed art-turn 0.6-0.85× is
+  likely this, not draft rejection. Measurable via `spec_decode_*` Prometheus
+  counters — requires `--metrics` at launch (not currently enabled).
+- **`--swa-full` is structurally dead** on qwen35 (sole consumer is the iSWA cache
+  ctor; qwen35 asserts `!is_swa_any()`). Safe to drop.
+- **`--no-context-shift` is clean** (overflow → `finish_reason:"length"`, never a
+  crash) and likely redundant: mmproj presence force-disables ctx_shift anyway.
+- **Sampling precedence is correct** (per-field request-over-CLI, null = server
+  default). Gotcha: the server's native `/v1/messages` endpoint injects
+  `max_tokens=4096` when the client omits it, and whitelists only
+  temp/top_p/top_k/stream/chat_template_kwargs.
+- **MTP n_max=2 geometry**: verification batch 3 tokens vs 2048 budget (~680×
+  headroom); `--parallel 1` optimal; n_max=2 sits exactly on the no-checkpoint
+  rollback fast path. BUT n_max sets `n_rs_seq` → recurrent-state rows ×(1+n_max):
+  raising n_max costs DeltaNet state VRAM linearly across 48 layers (D5) and was
+  the layout change that made pre-MTP slot files fatal (A2).
+
+## C. Dormant C++ defects (real, not reachable in today's config)
+
+- **C1 (was 4.1):** hand-port introduced shadowed `n_embd_head = k_cur->ne[0]` after
+  the merged-2D reassignment (`llama-kv-cache.cpp:1496,1539`) — reads n_embd_gqa
+  (1024) not head_dim (256). Same group size (128) selected either way today; the
+  64-group branch is dead and write/read sides derive groups from different
+  quantities. Fix: delete both inner declarations (2 lines, restores fork behavior).
+- **C2 (was 2.2):** ctx-cap fix `dc6f94ef2` tests only the CLI rope field; a GGUF
+  with native YaRN metadata run without `--rope-scaling` still gets capped — the
+  exact failure the commit meant to prevent. Fix: mirror library resolution
+  (CLI value, else hparams train type). Also doesn't check scale > 1×.
+- **C3 (was 3.1/3.3):** parse-degrade try/catch rethrows on the partial/streaming
+  path (`server-task.cpp:179`) — a partial parse failing at offset 0 still throws
+  (SSE lambda converts it to an in-stream error frame, so outcome ≠ bare EOF, but
+  the stated goal is only half-met). And the degraded final path uses the last good
+  incremental parse — can silently drop the un-parsed tail of generated_text with a
+  normal finish_reason, or (continuation+echo case) return prefill only. Fix: raw-
+  text fallback whenever the parse doesn't span the full text.
+- **C4 (was 5.1):** the D=512 turbo carve-out in fattn dispatch routes
+  MHA/batch>2 cases into an MMA path that `GGML_ABORT`s (`fattn.cu:499` →
+  `switch_ncols2<512,512>` tail). head_dim-512 turbo models + prefill = abort.
+  head_dim 256 unaffected. Fix: require `gqa_opt_applies || n_tokens<=2` for turbo
+  at D=512.
+- **C5 (was 4.2-4.4):** layer-adaptive machinery: kv-layer count diverges from old
+  `n_layer_kv()` semantics on MTP/filtered models (boundary modes shift); head-dim
+  fallback mutates ctor params for all later layers + warns only on il==0; adaptive
+  mode env is read into a function-local `static` → leaks across target/draft
+  contexts. All inert at mode 0/turbo4. Fix before ever using
+  TURBO_LAYER_ADAPTIVE in production.
+- **C6 (was 6.1-6.4):** CPU backend claims support for 4 turbo types with NULL
+  vec_dot/from_float (abort or infinite loop if a turbo op ever lands on CPU —
+  e.g. `--no-kv-offload` or the one reachable combo `-ctk turbo3_tcq -ctv f16
+  -fa off`); TCQ types missing from FA auto-enable + GQA-warn lists; SET_ROWS
+  supports_op tests %64 where turbo3/turbo2 blocks are 128 (wrong invariant, masked
+  by kv-cache's %128 fallback); TURBO1_5 missing from CUDA same-type CPY list.
+- **C7 (was 1.3):** upstream: file-based slot save/restore touches only the target
+  context — with MTP, a restored slot has no draft KV → silent perf cliff (drafts
+  re-verify against cold draft state) until re-warmed. Not correctness.
+
+## D. Hygiene / debt (fix before any upstream PR)
+
+- **D1 (was 4.5):** `turbo_rotation`/`turbo_rotation_inv` tensors: allocated,
+  filled, re-filled on every clear, exposed via accessors — zero consumers
+  (graph uses sign-table WHT + innerq scale only). 128 KiB VRAM per cache + labels
+  inverted (R vs R^T comments swapped). Delete or wire.
+- **D2 (was 4.7):** InnerQ update hook is compiled against `GGML_USE_CUDA` which is
+  (almost certainly) not defined for src/llama-kv-cache.cpp in current llama.cpp →
+  stubs selected → scale tensor stays identity forever. Confirms InnerQ inert at a
+  deeper level than "uncalibrated". Needs one `nm`/preprocessor check, then: wire
+  properly or delete the machinery.
+- **D3 (was 4.6):** `#include "turbo-rotation-data.h"` inside two function bodies;
+  header has no include guards; 128 KiB .rodata duplicated; adding a guard would
+  break clear(). Hoist to file scope.
+- **D4 (was 6.5-6.7):** `ggml_turbo_wht` writes op_params via
+  `op_params + sizeof(int)` (pointer arithmetic lands on [4] not [1] — all three
+  sites agree so it works, but it silently burns slots 1-3); CPU WHT kernel misses
+  the group-size assert the CUDA path has; stale "block size 32 / 3.5 bpv" comments
+  in ggml-common.h + turbo-quant.cuh (plausible origin of the %64 bug in C6).
+- **D5 (was Q6a):** `--spec-draft-n-max N` allocates recurrent state ×(1+N) across
+  all 48 DeltaNet layers (`n_rs_seq` plumbing) — document as the hidden VRAM cost
+  of raising n_max; 2 is the sweet spot (fast-path rollback preserved).
+- **D6:** HANDOFF.md/FUTUREPLAN records saying "slot crash fixed (graceful refusal)"
+  are wrong per A2 — corrected in those docs when the fix batch lands. Memory
+  updated 2026-08-15.
+
+## E. Verified-clean (worth knowing what held up)
+
+- Q-rotation coverage exact: 5 cached build_attn overloads rotated, no-cache and
+  cross-attention correctly bare; inverse-WHT keys on actual v->type (FA + non-FA);
+  per-layer Q8_0 promotion stays consistent on both sides.
+- op_params slot agreement write↔read (byte 0, defensive clamp in kernels).
+- supports_op ↔ dispatch are the same predicate by construction (C4/dispatch-hole
+  aside); all FATTN_VEC turbo cases have matching declarations; MMA/TILE prefill
+  fallback safe (to_fp16 converters exist for all six types; WHT linearity keeps
+  graph-level inverse valid).
+- ggml registration: 41/41 traits initialized, block sizes static_assert-backed,
+  op tables all at 102, GGML_OP_TURBO_WHT consistent at index 87.
+- Type-traits/type-size cross-checks; no zero-init holes in slots 80-85.
+- Proxy: owner_lock release is cancellation-safe (async with; no leak path);
+  auth ordering correct on both chat paths (key check before body read; exact-match
+  public paths = fail-closed); capture failures can't crash the request path;
+  client-disconnect cancels upstream and generation stops within a token; heartbeat
+  can't split a frame mid-write; no unsynchronized shared state (single-loop
+  asyncio); artifacts/reasoning-memory bounded (but see A3's persist-twice: every
+  artifact written twice → 20-cap holds ~10 real).
+- Sampling precedence + per-field fallback correct on /v1/chat/completions.
+- rope_scaling_type cannot be set by GGUF into the CLI field (C2 is about the
+  *effective* type, not an injection).
+- Drift check: all 8 deployed files byte-identical between ~/.config/llama-tcq and
+  turboquant-g1/deploy. Zero drift. (Gap: HANDOFF.md, SYSTEMD.md, systemd units,
+  start.sh.bak-qwopus not under version control.)
+
+---
+
+## Improvement plan (proposed, not started)
+
+**Batch 1 — proxy + scripts (no rebuild; needs one restart to deploy):**
+A1 slots-dir fix, A3 client-facing error frames + think-buffer flush, A4 passthrough
+allowlist, A5 script rewrite (guards, verified stop, log rotation, --api-key-file,
+600 keys.json, comment/rollback corrections, binary backup), A6 test suite fix +
+maybe_swap_slot test + handler-level smoke tests. Add `--metrics` to launch line
+(enables spec_decode_* counters for the grammar/MTP split measurement).
+
+**Batch 2 — C++ (rebuild + battery gate + restart):**
+A2 real crash fix (recurrent asserts → throws; upstreamable), C1 shadow deletion,
+C2 effective-rope resolution, C3 parse-degrade completion, C4 D=512 guard, C6 CPU
+claims minimally corrected (supports_op honesty), D1-D4 hygiene sweep. Then PR
+candidates upstream: A2, C2, C3 (+ existing parse-degrade), slot-restore refusal.
+
+**Batch 3 — capability:**
+1. Per-request speculative wiring (un-#if0 schema + honor task params in the
+   drafting decision) + proxy injects `speculative.n_max: 0` on tools-bearing
+   requests → keeps coding 1.7×, removes art-turn penalty automatically.
+2. Hermes-side: prefer lazy grammar (tools+auto) over required/json_schema where
+   possible — recovers GPU backend sampling for most of the turn regardless of MTP.
+3. Phase F coding battery (primary-use quality gate).
+4. Nightly canary cron (health + 1-token gen + VRAM + render-tally append).
+5. InnerQ: build-check → wire calibration or delete.
+6. Slot-restore draft-context warmup after restore (C7) if restore latency matters
+   post-A1.
+
+
+# club-3090 Port Board — what we copy, what we test, what we skip
+
+Source: review of https://github.com/noonghunna/club-3090 (clone at
+~/ai/review/club-3090), 2026-08-15. Community serving/bench corpus for
+3090-class rigs on OUR model family (Qwen3.6/3.8-27B hybrid, 48 GDN + 16
+attn, MTP). Rule: every adoption passes our gates (paired-run law, battery
+seed-42 columns, KLD, ops laws). Their numbers are THEIR rigs/engines —
+each claim gets validated on our stack before any adoption.
+
+Board status legend: [ ] open · [T] tested · [A] adopted · [R] rejected
+· [D] documented-only.
+
+────────────────────────────────────────────────────────────────────────
+## THE KEY ORIGINAL INSIGHT (read before P1)
+
+Their best speed claim — ik_llama two-stage ngram+MTP, code decode
+59.7→97.8 tok/s with a sharp inverted-U in ngram depth (2→78.8, 4→97.8,
+8→90.4, 16→81.5) — interacts with OUR kernel gate in a way theirs doesn't:
+
+Our fused MMA-turbo FA covers verify batches of **Q ≤ 4 rows** (dispatch
+gate; (8,1) template instances EXIST but the gate stops at 4). Verify batch
+= n_draft+1. So:
+- MTP n_max=2 → batch 3 ✓ fused
+- MTP n_max=3 → batch 4 ✓ fused (newly viable — the old verify-batch cliff
+  was the reason for n_max=2; the fused adoption changed the calculus)
+- ngram depth 4 → batch 5 ✗ → those steps fall to the MMA_F16 full-cache
+  dequant path (the 41 tok/s-class path at 38K) — at depth this can eat the
+  cascade's win. **This plausibly explains why OUR earlier cascade A/B
+  washed (85.5 vs 83.8) while ik's gained +64%: ik's kernels have no Q≤4
+  window.**
+Consequences for P1's design: sweep must include depth 3 (batch 4, stays
+fused), must measure BOTH shallow and 38K+, and if depth-4 wins shallow
+but loses deep, the stretch move is P1b: raise the fused dispatch gate to
+Q≤8 (instances already compiled; gate + validation only).
+
+────────────────────────────────────────────────────────────────────────
+## PORTS (claim → port → validation test → gate)
+
+### P1 [R] CLOSED 2026-08-16 — cascade REJECTED (superseded by P4/n3: casc2 warm-only upside, casc2n3 ≤ n3 and noisier; plain MTP n_max=3 beats every cascade arm).
+RESULT (temp 1.0, code+prose @38K, arms restarted, base repeated clean):
+base 95.9-96.5 code / 84.1-84.4 prose (accept .760/.582, rep-stable).
+casc2: cold ≈ base; WARM (ngram index has seen the text): code 108.5
+(+12%, accept .846), prose **132.3 (+57%, accept .981)**. Never worse than
+base in any cell; combined draft ≤3 → verify batch ≤4 → STAYS FUSED.
+casc3/casc4: code warm +5-10%, but prose REGRESSES (76.1/73.5, accept
+.48/.45 — wasted deep drafts + batches spill past the fused Q≤4 window).
+**The board's kernel-window prediction confirmed: their depth-4 peak does
+not transfer; ours is 2.** Their +64% decoded: their bench measures the
+WARM regime (5 repeats after warmups) — real for agentic loops (files
+re-read, edit retries) but the honest claim is "up to +12-57% warm,
+neutral cold." Gate in flight: battery @64K on casc2 + P4 n_max=3 arm.
+
+### (original P1 spec)
+- Their claim: chained ngram(n=4)+MTP(n=3) = +64% code decode, lossless
+  quality; inverted-U in ngram depth.
+- Port: likely config-only — pre-checked 2026-08-15: `--spec-ngram-mod-n-min`
+  exists and speculative.cpp respects per-drafter `dp.n_max` in the ngram
+  path (:349) → step 0 = find the exact per-stage n_max syntax; tiny patch
+  only if truly absent.
+- Test: paired A/B per our law (restarts between arms, ordering repeated):
+  arms = MTP-only(prod) vs cascade depth {2,3,4}; probes = code-continuation
+  AND prose-continuation, shallow + 38K, **temp 1.0 primary** (their
+  greedy-inflation lesson: greedy acceptance ≈2× inflated — one greedy pass
+  only as a comparison datum); record acceptance AND fire-rate telemetry
+  where logs allow. Battery @64K on any winner.
+- Gate: ≥ +10% code decode at temp 1.0 without >2% prose loss, battery
+  columns hold, no VRAM delta (ngram drafts are model-free — expect none).
+- Effort: 0.5-1 day incl. P1b if triggered. NOTE: our previous "wash"
+  verdict used default depth — this supersedes it only if a sweep was
+  actually absent (verify in RESEARCH-2026-08 first).
+
+### P2 [T→A] DONE 2026-08-15 — tail metric shipped; five-type ladder run.
+RESULT (157 prompts, fresh f16 ref archived as
+kld38/kld_logprobs_f16_qwen38_yarn_157tail.json; summaries kld38/*_tail):
+q8_0 mean .0019 p99 .056 max .089 top1 99.4% | **turbo4 .0060 / .062 /
+.064 / 96.2%** | q4_0 .0156 / .069 / **1.708** / 96.2% | turbo3_tcq .0154 /
+**.179 / .185** / 93.6% | turbo3 .0182 / .124 / .143 / 88.5%.
+VERDICTS: (1) turbo4 extreme tail = q8_0-class (max even lower) → the
+critique DOES NOT transfer to turbo4; community floor matched at half the
+bytes. (2) q4_0 = the mean-hides-tail cautionary tale (catastrophic 1.71
+single-position blowup). (3) turbo3_tcq independently CONFIRMS the
+critique's shape (better mean than turbo3, fattest extreme tail). (4)
+turbo3 is NOT lossless-class (88.5% top-1). Tail percentiles are now a
+standing gate metric in kl_divergence.py.
+
+### (original P2 spec, for the record)
+- Their claim (sharpest external critique of our tech family): TQ-class KV
+  quality claims are mean-level, not tail-level — Anbeeld's data puts
+  turbo3_tcq at ~82% precision on the worst 0.1% of positions (JSON keys,
+  braces, tool tokens); their policy floor is q8_0 KV ("sub-q8 never
+  depth-validated").
+- Port: extend quality-tests/kl_divergence.py to report per-position KLD
+  percentiles (p99 / p99.9 / max) + where top-1 flips concentrate.
+- Test: three arms on OUR server, config-only: turbo4 (prod) vs q8_0 KV vs
+  q4_0 KV — mean AND tail, same archived f16 reference, same prompts.
+- Gate/read: if turbo4 tail ≈ q8_0 tail at half the bytes → their floor
+  policy is beaten with data, and the turbo3_tcq critique measurably does
+  not transfer to turbo4. If turbo4 tail is bad → feeds bit-allocation
+  discussion (K-heavy splits). Either result is valuable. Record tail
+  baseline as a standing gate metric.
+- Effort: ~1-2 h total.
+
+### P3 [T] PASSED 2026-08-16 — the failure class DOES NOT EXIST on our stack.
+Speed profile (320K, n3): VRAM +80 MiB ONE-TIME at first prefill, then flat
+to 299,613 cached tokens (91.4%). Max profile (409K, MTP-off): +32 MiB flat
+to 329,249 cached. Bonus: first decode-vs-depth curve past 256K (~85 shallow
+→ ~55-60 @200K → ~40 @266K → 37 @300K on n3; 28-31 @274-329K MTP-off), and
+per-rung prefix-reuse verified at depth. fill_ladder.py is a standing tool.
+Original spec:
+- Their claim ("boots ≠ fills", most transferable ops finding): FA
+  transient scratch grows with FILL (~7.9 MB/1K tok their config); a 262K
+  alloc filled only to ~125K before OOM; fixed-depth probes give false
+  all-clears → the probe must scale to ~0.92 × n_ctx.
+- Port: quality-tests/fill_ladder.py — grow ONE slot via cache_prompt
+  continuation in 16K rungs to 0.92×n_ctx (294K today); per rung: VRAM,
+  /health, 20-token decode sanity.
+- Test: run at current 320K prod config.
+- Gate/read: VRAM static to 294K → our "ctx-fill VRAM-static" claim
+  (currently proven to 256K via battery) extends to spec; if growth
+  appears, measure OUR MB/1K-tok rate (fused nstages=0 path has a
+  different scratch profile than their mainline). MANDATORY before any
+  ctx>320K change; the ladder becomes the ctx-push acceptance test.
+- Effort: ~1 h build+run.
+
+### P4 [A] **ADOPTED 2026-08-16** (SPEC_NMAX default 3; slots archived; headroom ~840MB) — n3 ungated: code 112.7/113.3 (+17% vs
+base 96!), prose 79.3 (−6%), accept .75/.41, no clamp (head supports ≥3),
+batch 4 stays fused. The cross-rig shape reproduces. Decision folded into
+P9 (p-min gate may keep the code win and erase the prose tax). Original:
+### MTP n_max=3 re-test (fused changed the calculus)
+- Their data: vLLM n=3 AL 3.3-4.0; llama.cpp-family sweeps show shallow
+  optima (n=2 on one model, n=5 knee on another) — model-specific.
+- Ours: n_max=2 was chosen when batch>2 fell off the fast path. Post-fused,
+  batch 4 stays fused (see insight above).
+- Step 0: speculative.cpp clamps MTP n_max to the head's TRAINED block size
+  (:973-976, logs a clamp warning) — if our nextn head is block-size 2,
+  n_max=3 silently clamps and P4 is moot; check the server log first.
+- Test: paired A/B n_max 2 vs 3, temp 1.0, both probes, shallow+38K; VRAM
+  check first (+1 recurrent-state copy ≈ ~100 MB — fits ~900 MB headroom).
+- Gate: net decode win on the code probe without prose loss; battery @64K.
+- Effort: ~1 h. Fold into P1's session (shares harness).
+
+### P5 [T] DONE 2026-08-15 — CLEAN (triple-guarded: bounded rollback + explicit false-return contract, set_rs_idx clamp, kernel slot bounds). Original spec:
+### Rollback-clamp audit (vllm#50021 pattern insurance)
+- Their claim: vLLM's MTP×GDN spec path indexes state blocks by an
+  UNBOUNDED accepted-token count → wild write → Xid 13/31 dead worker on
+  5090-class cards; depth-independent, probabilistic.
+- Ours: kernel side bounds-checked (verified during #22587 merge:
+  `target_slot >= 0 && < K`). Audit the CONSUMER side — wherever
+  llama-context/speculative picks a snapshot slot from n_accepted, verify
+  clamping; add an assert if absent.
+- Test: code audit + existing soak/money-test pass on prod binary.
+- Effort: ~30 min. Cheap insurance on a crash class hitting our GPU class
+  in the wild.
+
+### P6 [ ] Launcher hardening: VRAM-settle + early-crash detect + swap line
+- Their patterns: (a) poll until used-VRAM stops falling before next boot
+  (compose down returns before CUDA releases — same class as our WSL
+  transient restart OOMs); (b) health-wait loop that detects server death
+  immediately (dump last 30 log lines, exit fast) instead of burning the
+  timeout; (c) swap check — serving-process pages in swap invalidate all
+  perf numbers (our "swap death" history!).
+- Port: start-long-38.sh gets vram-settle before launch + PID-death check
+  in the health wait; status.sh gets a `VmSwap` line for the server PID.
+- Test: 5× rapid stop/start cycles all boot clean; kill server mid-wait →
+  script exits fast with logs.
+- Effort: ~45 min.
+
+### P7 [A] SHIPPED+BASELINED 2026-08-16 — quality-tests/agentic_turns_probe.py.
+Baseline (prod n3, 12 turns to ~110K accumulated): TTFT tracks the DELTA
+(~0.8 ms/delta-token at turn 2 AND turn 12 — flat), prefix reuse perfect
+every turn, decode 70-105 t/s throughout. **vLLM Cliff-3 pathology (TTFT ∝
+total ctx despite cache hits) is ABSENT on our stack** — the checkpoint/
+reuse work measurably holds. Standing regression gate for cache/proxy
+changes. (Verdict math = per-delta-token, anchored turn 2.) Original spec:
+- Their bench-agentic: 15 turns of real tool-results ramping to ~53K,
+  per-turn TTFT + decode, growth anchored to turn 2 (turn 1 = cold-start),
+  verdict bands (≤1.5× stable … O(n)-like).
+- Our gap: depth_ab is single-shot; nothing continuously measures the
+  TURN-LOOP shape — per-turn TTFT is exactly what our checkpoint/restore
+  work improves and we have no standing probe for it.
+- Port: quality-tests/agentic_turns_probe.py with a captured fixture
+  (their turn-2 anchoring + bands copied).
+- Test/gate: baseline the curve on prod; standing regression gate for any
+  cache/checkpoint/proxy change.
+- Effort: ~2 h.
+
+### P8 [T→A] SHIPPED 2026-08-16 — tools/vram_law.py, two measured anchors
+(spec-n3 @320K: 31,768; MTP-off @376,832: 29,998 → spec-off drops ~1.9 GB
+of draft/spec compute overhead, not the estimated 350 MB). Option table
+drove the ctx decision: speed profile is AT its ceiling (~334K max); the
+max window lives on the MTP-off branch (~484K theoretical @700-floor, capped
+by YaRN validation at 1.5625/409K). Original spec:
+- Their kv-calc: calibrated predictor, PASS/TIGHT/FAIL verdicts, ±1.5 GB
+  band — but their own docs: it CANNOT model llama.cpp (no elastic pool;
+  "measured boot ladder only").
+- Port: small tools/vram_law.py encoding OUR law (weights + KV/token incl
+  draft + recurrent×(1+n_max) + 3 scratches + meta) with our measured rows
+  as calibration; used to plan ctx targets + the MTP-off max-ctx profile.
+  P3's ladder data feeds it.
+- Effort: ~1-2 h, wave 2.
+
+### P9 [R] TESTED-REJECTED 2026-08-16 — p-min 0.60 HURTS on our stack (n2+pmin prose 84→68, -20%; no gated arm beats ungated n3 on code: 92-104 vs 113). Kernel-economics inversion: our fused verify makes wasted drafts nearly free, so the gate only forfeits upside; community rigs pay full verify cost, hence their +21%. Second inversion of the review (after cascade depth). Original spec:
+- Their claim (cross-rig, RX9070 sweep is the clean one): `--spec-draft-p-min
+  0.60` makes deep drafts "nearly free" — gated n-max 4 beat ungated n-max 2
+  (+3% mixed, **+21% copy-heavy**, acceptance 0.86 vs 0.73, ~3.3 tok/round);
+  code climbs with depth on EVERY rig (A6000: 84.3 tok/s at n-max 6!), prose
+  pays ungated, the gate rescues it. We have NEVER swept p-min.
+- Test: arms {n2 (prod), n2+pmin.6, n3+pmin.6, n4+pmin.6} × probes {code,
+  prose, NEW copy-heavy probe (rename-and-echo over a 4K file ≈ agentic
+  edit-loop shape)} @38K temp 1.0, reps+ordering per our law. Interacts with
+  the fused Q≤4 window: gated deep drafts have VARIABLE batch — steps >4
+  fall off the fused path; measure, don't assume.
+- Gate: overall ≥ prod-n2 with prose ≥ −2%; battery on winner.
+
+### P10 [T] RUN 2026-08-16 — pass-with-known-class: n3 greedy self-consistent; n3 ≠ spec-off BUT n2 (months-old prod) ALSO ≠ spec-off (third hash) → divergence is inherent to spec verify-batch shape (fp tie-flips, accepted class; likely explains the community host's hash-gate instability). Original spec:
+- One qwen38-mtp host's greedy code-completion hash gate flagged
+  "chaining ngram-mod made n-max 2 unstable" → ships without ngram. Spec
+  decode should be distribution-preserving; before adopting ANY cascade/
+  p-min config: greedy same-prompt ×3 must produce IDENTICAL output
+  (cascade on vs off), plus battery. Cheap; catches implementation-level
+  divergence their gate may have seen.
+
+### B1 [D] Blog review (veladan.org Qwen3.8 FP8 benchmarks) — recorded intel
+- Their HermesAgent-20 91→79 shallow temp claim: **TESTED 2026-08-16
+  (B1-lite): does NOT transfer** — battery @16K, 0.6 vs 1.0 × 3 seeds =
+  identical per-seed on every axis ({6/6, 6/6, 5/6} both temps, even the
+  s44 miss mirrored). Depth-aware proxy-temp idea PARKED (motivating
+  evidence absent on our instrument). TEMP-STUDY verdict (1.0) stands at
+  every depth now. (Caveat: our battery ≠ their tool-call-format suite;
+  revisit only if real tool-call failures surface in production.)
+- YaRN tax warning for the ctx push: at YaRN 4.0 their BugFind dropped −12;
+  "'slightly impact short-context quality'… undersells it." Any YaRN
+  increase (409K profile) must re-gate KLD+battery vs the 1.25 baseline.
+- NVFP4 ≈ FP8 within noise on Blackwell/vLLM (weights axis, background).
+- Their gen numbers: 3.6→3.8 HermesAgent +29pts — matches our pilot.
+
+### U1 [ ] USER-SIDE (Windows) — two .wslconfig/registry changes
+- `networkingMode=mirrored` in .wslconfig (Win11 22H2+): permanently ends
+  the portproxy-after-reboot chore (their WSL doc; matches our handoff
+  annoyance).
+- Registry TdrDelay=60: Windows force-resets the GPU after 2 s kernels
+  (their 156K-prompt repro). Our llama.cpp kernels are short (we prefill
+  315K fine) so this is prophylactic — but it removes a whole class of
+  "transient device not ready".
+- Validation: after reboot — clients reach 8130 with no portproxy; note in
+  handoff which mode is active.
+
+────────────────────────────────────────────────────────────────────────
+## DOC FIXES FROM THE REVIEW (do with wave 1)
+
+- F1 [ ] Handoff watchlist: reframe "Vulkan 92% acceptance gap" — their
+  cross-engine data shows greedy inflates spec acceptance ~2× (0.466
+  canonical vs 0.96 greedy); the 92% reference is almost certainly greedy.
+  Our 82.5% greedy / 67% temp-1.0 is expected physics, not a bug. The
+  remaining lever is tuning (P1/P4), not a mystery hunt.
+- F2 [ ] Handoff VRAM law: scope "ctx-fill VRAM-static" as "verified to
+  256K fill; 294K ladder = P3" until P3 runs.
+- F3 [ ] Ops laws: add "before ever raising --parallel>1: run the
+  distinct-answers gate (N identical greedy prompts concurrently must give
+  identical answers) — ik#2260 class: hybrid graph-reuse can cross
+  recurrent state between slots; also mainline may silently drop MTP at
+  np>1." We are immune today (parallel 1 + proxy serialization — a design
+  their np=4 aider 1/30 measurement independently validates).
+
+────────────────────────────────────────────────────────────────────────
+## SKIPS (with reasons, so nobody re-litigates)
+
+- DFlash-family external drafts: greedy-only (DDTree silently off at
+  temp>0 → ~20 tok/s), beellama path retired upstream, gibberish on newer
+  arches, drafter-pairing fragility (0.25% acceptance on a mispaired
+  target). Dead on arrival for a temp-1.0 serving stack.
+- LMCache / Genesis patches / kv-calc wholesale / Marlin W4A8: vLLM-side.
+  Our checkpoint cluster already beats LMCache's warm path (their own
+  breakdown: warm-load is 4.8 s GDN-state RECOMPUTE-bound — we restore
+  state directly).
+- Multi-GPU tooling (UUID pinning, placement asserts, -ts splits, TP
+  advice), c3 TUI, patch drift-guard framework: single-card single-config
+  reality; our status.sh + docs cover the need.
+- IQ4_KS/IQ5_KS weight quants: only relevant to a future "max-context over
+  quality" profile; we deliberately run Q6_K. Park.
+- Power-cap tuning: we run stock; their datum (GDN compute-bound → −34-42%
+  at 230 W on llama.cpp) recorded as a DON'T (never undervolt without a
+  paired A/B).
+- Concurrency >1: their N=2 aggregate datum (+19%) noted, but np>1 drops
+  MTP + state-crossover risk → stays closed until upstream fixes; proxy
+  serialization stands.
+
+────────────────────────────────────────────────────────────────────────
+## VALIDATION OF OUR STACK (no action — evidence bank)
+
+- vLLM-land fights our solved wars: SSM state not prefix-cacheable (TTFT
+  36× by turn 10 despite cache hits) vs our 49-token restore-reuse; GDN
+  prefill OOM cliffs vs our streaming path; MTP×prefix-cache recurrent
+  corruption (vllm#43559) vs our battery-verified restore; np>1 crossover
+  vs our serialization.
+- Their q8_0 KV floor ("sub-q8 never depth-validated") vs our
+  battery-validated 4.125 bpv to 256K: we exceed their bar at ~half the
+  bytes — P2 adds the tail data to make it airtight.
+- TurboQuant landed in upstream vLLM WITHOUT hybrid support; Genesis P67
+  may upstream. Our niche (hybrid + KV-quant + MTP, single card, depth-
+  validated) remains unique. Watch both.
+- Their measured Qwen3.8 ladder (24 GB: 131K ✓ / 196K ✗ compute / 262K ✗
+  rs-cache) is consistent with our law at 32.6 GB → 320K.
+
+────────────────────────────────────────────────────────────────────────
+## EXECUTION WAVES
+
+- Wave 1 (one session): P1 (+P4 same harness, +P1b if triggered) · P2 ·
+  P5 · P6 · F1-F3. Expected outcome: possible double-digit code-decode
+  win, tail-KLD baseline + three-way comparison, hardened launcher.
+- Wave 2 (context-push prerequisites): P3 → P8 → ctx targets + MTP-off
+  profile; P7 agentic-turns baseline.
+- Wave 3 (opportunistic): soak-gate upgrades, needle-pattern diversity,
+  IQ-quant max-ctx profile if ever wanted.
+
+────────────────────────────────────────────────────────────────────────
+## MEGA-BUGHUNT 2026-08-16 (35-agent workflow: 7 finders → adversarial verify)
+
+CONFIRMED + FIXED:
+- fill_ladder prefix-ratio bias + dishonest PASS line (reported nominal
+  target, not measured): auto-recalibration per rung + PASS/SHORT line now
+  prints MEASURED tokens_cached; earlier runs' true fills: 266K@"301K"
+  (320K profile), 329K@"346K" (409K) — VRAM-static conclusions unaffected.
+- HERMES-HANDOFF KLD gate quoted the superseded 0.00473 baseline (a healthy
+  run would read as a fake ~27% regression): gate now = the 157-prompt tail
+  baselines per profile; 0.00473 labelled historical.
+- Launcher header rot (BOTH profiles): 320K profile claimed "409,600/YaRN
+  1.5625" (pre-existing since the 409K era); "n_max 2 sweet spot" vs n3
+  default; rollback runbooks pointed at stale binaries AND the max profile's
+  runbook relaunched the SPEED profile; max profile carried the speed
+  profile's MTP paragraph. All rewritten.
+- VRAM-settle: threshold 24000→4000 (a half-freed 22 GB state passed the
+  old check → boot-into-OOM window) + loud give-up warning, both profiles.
+- status.sh: shows WHICH profile is live (n_ctx from boot log).
+- watch.sh: hardcoded 409,600 fill denominator → derived from boot log.
+- Legacy start.sh: deprecation guard (reproduced the A5 incident class).
+- battery: --temp/seed now recorded in artifacts (matched-temp gate rule
+  enforceable); depth-label honesty note (labels ~13% deeper than actual
+  fill — kept as tier names for baseline comparability).
+- kl_divergence: nearest-rank percentiles (p99==max at n=100 fixed),
+  prompt_tokens metadata stored + mismatch warning, loud no-reference
+  warning, length-clamp notice.
+- agentic probe: verdict anchor = first ≥2000-token turn (fixed-overhead
+  bias masked Cliff-3 class), artifacts persisted to trajbase/.
+- fattn.cu: last contradictory comment paragraph ("keep VEC the default")
+  aligned with the shipped default-ON reality (comment-only).
+
+ACCEPTED WITH RATIONALE (no change):
+- GDN kernel PDL+__restrict__: observation real, scenario non-exploitable
+  (pdl_sync fences before all loads; 36/36 op tests + A/B + battery gates
+  passed on the shipped kernel; changing it would need full re-gating).
+- Kill-switch parses only leading '0' ("=off" silently ON): documented
+  form is =0 everywhere; ergonomics nit.
+- GET_ROWS CPU supports_op keys on dst only (turbo src would abort IF
+  scheduled on CPU): pre-existing behavior, placement never routes it there.
+- stop.sh no post-SIGKILL verify: port-check invariant covers it.
+- test-backend-ops has zero fused-turbo FA coverage: known gap; our gates
+  are KLD/battery/A-B — upstream-grade tests queued for the PR-package era.
+REFUTED BY VERIFIERS (recorded in workflow transcript): 12 findings incl.
+deploy-mirror drift (checked clean), several severity-inflated variants of
+the above.
+
+
+# Contributors
+
+The project differentiates between 3 levels of contributors:
+
+- Contributors: people who have contributed before (no special privileges)
+- Collaborators (Triage): people with significant contributions, who may be responsible for some parts of the code, and are expected to maintain and review contributions for the code they own
+- Maintainers: responsible for reviewing and merging PRs, after approval from the code owners
+
+# AI Usage Policy
+
+> [!IMPORTANT]
+> This project does **not** accept pull requests that are fully or predominantly AI-generated. AI tools may be utilized solely in an assistive capacity.
+>
+> Repeated violations of this policy may result in your account being permanently banned from contributing to the project.
+>
+> Detailed information regarding permissible and restricted uses of AI can be found in the [AGENTS.md](AGENTS.md) file.
+
+Code that is initially generated by AI and subsequently edited will still be considered AI-generated. AI assistance is permissible only when the majority of the code is authored by a human contributor, with AI employed exclusively for corrections or to expand on verbose modifications that the contributor has already conceptualized (e.g., generating repeated lines with minor variations).
+
+If AI is used to generate any portion of the code, contributors must adhere to the following requirements:
+
+1. Explicitly disclose the manner in which AI was employed.
+2. Perform a comprehensive manual review prior to submitting the pull request.
+3. Be prepared to explain every line of code they submitted when asked about it by a maintainer.
+4. It is strictly prohibited to use AI to write your posts for you (bug reports, feature requests, pull request descriptions, Github discussions, responding to humans, ...).
+
+For more info, please refer to the [AGENTS.md](AGENTS.md) file.
+
+# Pull requests (for contributors & collaborators)
+
+Before submitting your PR:
+- Search for existing PRs to prevent duplicating efforts
+- llama.cpp uses the ggml tensor library for model evaluation. If you are unfamiliar with ggml, consider taking a look at the [examples in the ggml repository](https://github.com/ggml-org/ggml/tree/master/examples/). [simple](https://github.com/ggml-org/ggml/tree/master/examples/simple) shows the bare minimum for using ggml. [gpt-2](https://github.com/ggml-org/ggml/tree/master/examples/gpt-2) has minimal implementations for language model inference using GPT-2. [mnist](https://github.com/ggml-org/ggml/tree/master/examples/mnist) demonstrates how to train and evaluate a simple image classifier
+- Test your changes:
+  - Execute [the full CI locally on your machine](ci/README.md) before publishing
+  - Verify that the perplexity and the performance are not affected negatively by your changes (use `llama-perplexity` and `llama-bench`)
+  - If you modified the `ggml` source, run the `test-backend-ops` tool to check whether different backend implementations of the `ggml` operators produce consistent results (this requires access to at least two different `ggml` backends)
+  - If you modified a `ggml` operator or added a new one, add the corresponding test cases to `test-backend-ops`
+- Create separate PRs for each feature or fix:
+  - Avoid combining unrelated changes in a single PR
+  - For intricate features, consider opening a feature request first to discuss and align expectations
+  - When adding support for a new model or feature, focus on **CPU support only** in the initial PR unless you have a good reason not to. Add support for other backends like CUDA in follow-up PRs
+  - In particular, adding new data types (extension of the `ggml_type` enum) carries with it a disproportionate maintenance burden. As such, to add a new quantization type you will need to meet the following *additional* criteria *at minimum*:
+    - convert a small model to GGUF using the new type and upload it to HuggingFace
+    - provide [perplexity](https://github.com/ggml-org/llama.cpp/tree/master/tools/perplexity) comparisons to FP16/BF16 (whichever is the native precision) as well as to types of similar size
+    - provide KL divergence data calculated vs. the FP16/BF16 (whichever is the native precision) version for both the new type as well as types of similar size
+    - provide [performance data](https://github.com/ggml-org/llama.cpp/tree/master/tools/llama-bench) for the new type in comparison to types of similar size on pure CPU
+- Consider allowing write access to your branch for faster reviews, as reviewers can push commits directly
+- If you are a new contributor, limit your open PRs to 1.
+
+After submitting your PR:
+- Expect requests for modifications to ensure the code meets llama.cpp's standards for quality and long-term maintainability
+- Maintainers will rely on your insights and approval when making a final decision to approve and merge a PR
+- If your PR becomes stale, rebase it on top of latest `master` to get maintainers attention
+- Consider adding yourself to [CODEOWNERS](CODEOWNERS) to indicate your availability for fixing related issues and reviewing related PRs
+
+# Pull requests (for maintainers)
+
+- Squash-merge PRs
+- Use the following format for the squashed commit title: `<module> : <commit title> (#<issue_number>)`. For example: `utils : fix typo in utils.py (#1234)`
+- Optionally pick a `<module>` from here: https://github.com/ggml-org/llama.cpp/wiki/Modules
+- Let other maintainers merge their own PRs
+- When merging a PR, make sure you have a good understanding of the changes
+- Be mindful of maintenance: most of the work going into a feature happens after the PR is merged. If the PR author is not committed to contribute long-term, someone else needs to take responsibility (you)
+
+Maintainers reserve the right to decline review or close pull requests for any reason, without any questions, particularly under any of the following conditions:
+- The proposed change is already mentioned in the roadmap or an existing issue, and it has been assigned to someone.
+- The pull request duplicates an existing one.
+- The contributor fails to adhere to this contributing guide or the AI policy.
+
+# Coding guidelines
+
+- Avoid adding third-party dependencies, extra files, extra headers, etc.
+- Always consider cross-compatibility with other operating systems and architectures
+- Avoid fancy-looking modern STL constructs, use basic `for` loops, avoid templates, keep it simple
+- Vertical alignment makes things more readable and easier to batch edit
+- Clean-up any trailing whitespaces, use 4 spaces for indentation, brackets on the same line, `void * ptr`, `int & a`
+- Use sized integer types such as `int32_t` in the public API, e.g. `size_t` may also be appropriate for allocation sizes or byte offsets
+- Declare structs with `struct foo {}` instead of `typedef struct foo {} foo`
+    - In C++ code omit optional `struct` and `enum` keyword whenever they are not necessary
+    ```cpp
+    // OK
+    llama_context * ctx;
+    const llama_rope_type rope_type;
+
+    // not OK
+    struct llama_context * ctx;
+    const enum llama_rope_type rope_type;
+    ```
+
+    _(NOTE: this guideline is yet to be applied to the `llama.cpp` codebase. New code should follow this guideline.)_
+
+- Try to follow the existing patterns in the code (indentation, spaces, etc.). In case of doubt use `clang-format` (from clang-tools v15+) to format the added code
+- For anything not covered in the current guidelines, refer to the [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines)
+- Tensors store data in row-major order. We refer to dimension 0 as columns, 1 as rows, 2 as matrices
+- Matrix multiplication is unconventional: [`C = ggml_mul_mat(ctx, A, B)`](https://github.com/ggml-org/llama.cpp/blob/880e352277fc017df4d5794f0c21c44e1eae2b84/ggml.h#L1058-L1064) means $C^T = A B^T \Leftrightarrow C = B A^T.$
+
+![matmul](media/matmul.png)
+
+# Naming guidelines
+
+- Use `snake_case` for function, variable and type names
+- Naming usually optimizes for longest common prefix (see https://github.com/ggml-org/ggml/pull/302#discussion_r1243240963)
+
+    ```cpp
+    // not OK
+    int small_number;
+    int big_number;
+
+    // OK
+    int number_small;
+    int number_big;
+    ```
+
+- Enum values are always in upper case and prefixed with the enum name
+
+    ```cpp
+    enum llama_vocab_type {
+        LLAMA_VOCAB_TYPE_NONE = 0,
+        LLAMA_VOCAB_TYPE_SPM  = 1,
+        LLAMA_VOCAB_TYPE_BPE  = 2,
+        LLAMA_VOCAB_TYPE_WPM  = 3,
+        LLAMA_VOCAB_TYPE_UGM  = 4,
+        LLAMA_VOCAB_TYPE_RWKV = 5,
+    };
+    ```
+
+- The general naming pattern is `<class>_<method>`, with `<method>` being `<action>_<noun>`
+
+    ```cpp
+    llama_model_init();           // class: "llama_model",         method: "init"
+    llama_sampler_chain_remove(); // class: "llama_sampler_chain", method: "remove"
+    llama_sampler_get_seed();     // class: "llama_sampler",       method: "get_seed"
+    llama_set_embeddings();       // class: "llama_context",       method: "set_embeddings"
+    llama_n_threads();            // class: "llama_context",       method: "n_threads"
+    llama_adapter_lora_free();    // class: "llama_adapter_lora",  method: "free"
+    ```
+
+    - The `get` `<action>` can be omitted
+    - The `<noun>` can be omitted if not necessary
+    - The `_context` suffix of the `<class>` is optional. Use it to disambiguate symbols when needed
+    - Use `init`/`free` for constructor/destructor `<action>`
+
+- Use the `_t` suffix when a type is supposed to be opaque to the user - it's not relevant to them if it is a struct or anything else
+
+    ```cpp
+    typedef struct llama_context * llama_context_t;
+
+    enum llama_pooling_type llama_pooling_type(const llama_context_t ctx);
+    ```
+
+    _(NOTE: this guideline is yet to be applied to the `llama.cpp` codebase. New code should follow this guideline)_
+
+- C/C++ filenames are all lowercase with dashes. Headers use the `.h` extension. Source files use the `.c` or `.cpp` extension
+- Python filenames are all lowercase with underscores
+
+- _(TODO: abbreviations usage)_
+
+# Preprocessor directives
+
+- _(TODO: add guidelines with examples and apply them to the codebase)_
+
+    ```cpp
+    #ifdef FOO
+    #endif // FOO
+    ```
+
+# Code maintenance
+
+- Existing code should have designated collaborators and/or maintainers specified in the [CODEOWNERS](CODEOWNERS) file responsible for:
+  - Reviewing and merging related PRs
+  - Fixing related bugs
+  - Providing developer guidance/support
+
+- When adding or modifying a large piece of code:
+  - If you are a collaborator, make sure to add yourself to [CODEOWNERS](CODEOWNERS) to indicate your availability for reviewing related PRs
+  - If you are a contributor, find an existing collaborator who is willing to review and maintain your code long-term
+  - Provide the necessary CI workflow (and hardware) to test your changes (see [ci/README.md](https://github.com/ggml-org/llama.cpp/tree/master/ci))
+
+- New code should follow the guidelines (coding, naming, etc.) outlined in this document. Exceptions are allowed in isolated, backend-specific parts of the code that do not interface directly with the `ggml` interfaces.
+  _(NOTE: for legacy reasons, existing code is not required to follow this guideline)_
+
+- For changes in server, please make sure to refer to the [server development documentation](./tools/server/README-dev.md)
+
+# Documentation
+
+- Documentation is a community effort
+- When you need to look into the source code to figure out how to use an API consider adding a short summary to the header file for future reference
+- When you notice incorrect or outdated documentation, please update it
+
+# Resources
+
+The Github issues, PRs and discussions contain a lot of information that can be useful to get familiar with the codebase. For convenience, some of the more important information is referenced from Github projects:
+
+https://github.com/ggml-org/llama.cpp/projects
+
+
+> **HISTORICAL (closed 2026-08-15).** All phases executed or superseded.
+> Outcomes and every later verdict live in WORKPLAN-BESTAPP.md (authoritative)
+> and HERMES-HANDOFF.md (current state). Notable supersessions: MTP adopted
+> then re-based on MMA-turbo kernels; q8-K option deprioritized (pure turbo4
+> with corrected centroids beats the old hybrid arm); art-turn 'grammar
+> penalty' was VRAM paging.
+
+# FUTUREPLAN — Quality & Speed Roadmap (drafted 2026-08-15)
+
+## OUTCOMES (updated 2026-08-15, A+B evening executed)
+- Phase 0: DONE (branch pushed; deploy/ versioned; scorer fixed+validated).
+- Phase A: DONE, ADOPTED — alpha 1.00/1.00 in production (was 1.10/1.12);
+  KLD 0.0087 vs 0.0200, confirmed under YaRN; gated by preverify + render
+  PASS. Methodology finding: the 3.6-era KLD runs never actually measured
+  quantized-cache readback (single-ubatch prefill) and hid a 503 cascade;
+  tool fixed (2048-tok prompts, cache_prompt off, skip-count surfaced,
+  noise floor). Full data + caveats: quality-tests/kld38/README.md.
+- Phase B: DONE, NOT ADOPTED — q8_0 K gives a real-but-modest gain (KLD
+  0.0054 vs 0.0087) that doesn't justify −70K ctx or CPU-vision today;
+  data preserved for future re-evaluation. Long-ctx q8K spots skipped
+  (only needed for adoption).
+- Phase C (MTP): ADOPTED 2026-08-15 (verdict REVERSED by coding A/B after
+  user challenge — the first rejection sampled only art turns). At production
+  sampling: coding 89-98 tok/s vs 57.4 baseline (1.55-1.71x, acceptance
+  59-63%), general 95.4 vs 57.5 (1.66x); art/tool-grammar turns 0.6-0.85x
+  (n=2, grammar-draft interaction suspected — investigation lever). Enabled
+  globally (no per-request toggle exists) per coding-primary usage. Zero VRAM
+  cost at full profile. Bonus fix: stale slot-state files from config changes
+  crashed the server via GGML_ASSERT in state_seq_load_file — now refuses
+  gracefully (upstreamable). Slot saves archived on config change as ops rule.
+- Phases D/E: pending (Hermes-side).
+
+Planning document. Nothing here is executed until the user says go.
+Production baseline this plan measures against: Qwen3.8-27B Q6_K, 409600 ctx
+YaRN 1.5625, turbo4/turbo4 KV, alphas 1.10/1.12, temp 1.0, reasoning_effort
+xhigh, vision (mmproj F16) live. Validated 2026-08-14: ladder xhigh 3/4 clean
+renders; NIAH eff. 5/5 @130K+380K; acceptance 1/1, 0 tripwire alerts.
+
+Ordering: A+B share one box window (~5h). C depends on UPSTREAMSYNC.md.
+D and E are Hermes-side and need no server window.
+
+## Phase 0 — safety pre-flight (before ANY phase; no GPU; ~15 min)
+1. Push `hermes/server-foundation` to myfork (Madreag/turbo3-cuda) — two
+   weeks of fixes and these plans currently exist on one disk only.
+2. Version the production config: create repo `deploy/` with proxy.py,
+   test_proxy.py, start*.sh, watch.sh — KEYS EXCLUDED (api.key, keys.json
+   never enter the repo). Deployed copies in ~/.config/llama-tcq/ remain the
+   live ones; deploy/ is the versioned source of truth going forward.
+3. Note the newest real-traffic capture's date; battery replays must use the
+   newest capture, refreshed by one live Hermes turn if the tool set changed
+   since (also recorded in UPSTREAMSYNC Layer 4).
+
+─────────────────────────────────────────────────────────────────────────────
+## Phase A — turbo4 alpha KLD sweep on Qwen3.8            (~3-4h, one window)
+
+WHY: TURBO_NORM_ALPHA_V=1.10 / TURBO4_NORM_ALPHA_V=1.12 are reconstruction
+gain corrections tuned on Qwen3.6's activation statistics. 3.8 shares KV
+geometry but not necessarily V-norm distributions. Outcome is either written
+confirmation or a small free quality gain on every generated token.
+
+PROCEDURE
+0. DRY RUN FIRST (15 min): validate the 3.6-era kl_divergence.py pipeline
+   against 3.8 on 2 chunks — the vocab grew to 248,320, so confirm the
+   logprob-capture format and check the reference file's disk size scales
+   sanely before committing to 32 chunks. Fix-forward here, not mid-sweep.
+1. Corpus: wiki.test.raw, 32 chunks × 2048 tokens (same recipe as the 3.6-era
+   kld_logprobs_*.json runs in quality-tests/).
+2. Reference pass: server at `-ctk f16 -ctv f16`, ctx 16384, vision off,
+   NO YaRN (short-context purity, matching how the 3.6 alphas were tuned)
+   → logprobs → kld_logprobs_38_f16.json. REUSED BY PHASE B — run once.
+3. Sweep passes: same server config but turbo4/turbo4, one pass per alpha in
+   {1.00, 1.05, 1.10 (current), 1.12, 1.15} — alphas set via env pair; keep
+   the V-alpha pair moving together first; only split-tune if the best value
+   disagrees with current by ≥0.05.
+4. Compute mean KLD per alpha vs reference (quality-tests/kl_divergence.py).
+5. Decision rule: adopt new alpha only if KLD improves ≥3% vs 1.10/1.12
+   (below that = noise; keep current).
+5b. CONFIRMATION PASS: one extra KLD pass at the winning alpha with the
+   PRODUCTION config (YaRN 1.5625, ctx 409600 server settings) — the sweep
+   runs YaRN-off for method consistency with 3.6, so confirm the winner holds
+   under production RoPE conditions before adopting. If adopted → edit
+   start-long-38.sh → one battery preverify + render gate before declaring
+   done.
+6. OPTIONAL (+1h, novel data): vision-token probe — 5 image prompts, compare
+   answer distributions f16-KV vs turbo4-KV. No one has this data anywhere.
+
+GATES: every server restart follows kill-then-launch-in-separate-calls; one
+corpus pass at a time; production restored via start-long-38.sh at window end.
+ROLLBACK: alphas are env values in one script line.
+
+─────────────────────────────────────────────────────────────────────────────
+## Phase B — q8_0 K-cache evaluation                       (+1.5-2h, same window)
+
+WHY: keys do attention addressing; K-cache quantization damages retrieval
+more than V. Old 3.6 daily profile ran q8_0 K for exactly this reason.
+
+PROCEDURE
+1. Reuse Phase A reference logprobs.
+2. KLD pass: `-ctk q8_0 -ctv turbo4` (best alphas from A), same corpus →
+   ΔKLD(q8K vs turbo4K).
+3. Long-context spot: NIAH 130K point on q8K config (ctx 200000, vision off
+   for the test server — fits easily).
+4. One artifact preverify + render gate on q8K config.
+5. Production trade decision (user call, data in hand):
+   - q8_0 K costs +4.25 KiB/token → +1.7GB at 409600. Does NOT fit with
+     GPU-resident vision at current ctx.
+   - Fit options, best first: (a) ctx 340000 + vision moved to CPU via
+     `--no-mmproj-offload` (reclaims ~0.9GB; headroom ≈ 1.8GB — healthy;
+     image encode gets a few seconds slower); (b) ctx 340000 + GPU vision →
+     headroom ≈ 0.9GB — BELOW our volatility comfort line, not recommended;
+     (c) ctx 350000 + vision-off; (d) stay full-turbo4 at 409600.
+   - Adopt only if ΔKLD is decisively better AND the artifact/NIAH spots
+     show no regression; otherwise document and close.
+
+─────────────────────────────────────────────────────────────────────────────
+## Phase C — MTP speculative decode                        (rides UPSTREAMSYNC)
+
+WHY: the MTP head already ships in our GGUF (blk.64, loaded-and-skipped).
+Upstream has mature runtime (60 MTP/NextN commits since our base era,
+auto-detect draft support). Expected 1.4-2× decode → xhigh art turns drop
+from ~30 min toward ~15-20. Single biggest felt improvement available.
+
+PLAN: do NOT hand-port. Absorb via the upstream sync (UPSTREAMSYNC.md), then:
+1. Enable spec-decode MTP flags on a test profile (upstream flag names to be
+   confirmed at sync time; community guidance: draft-n 2, acceptance drops
+   hard at 4+).
+2. Verify: tok/s ladder (0K/30K/100K ctx); correctness via GREEDY identity —
+   temp 0 + fixed seed on N=5 prompts, MTP-on output must match MTP-off
+   byte-for-byte (spec decode is distribution-preserving; at temp 1.0 outputs
+   differ by sampling, so greedy is the only honest identity test); then one
+   battery preverify + render.
+3. VRAM: +~1GB working memory reported by community — headroom math BEFORE
+   enabling with vision resident; may require ctx 380K or vision-off choice.
+
+─────────────────────────────────────────────────────────────────────────────
+## Phase D — Vision self-repair loop                       (Hermes-side design)
+
+WHY: residual art failure is now ~25% visual/logic misses (ladder: fails were
+monochrome washes and silent dead scenes, not JS crashes). The model can now
+SEE screenshots of its own artifacts (proven: read its own UI text verbatim).
+Post-hoc self-correction — the sanctioned no-caging direction.
+
+SKETCH (needs Hermes-side skill work, no server changes):
+1. After write_file of an artifact, Hermes (skill/rule) renders headless,
+   screenshots, and sends the image back: "this is your page as rendered —
+   fix what's wrong" with the repair patch as a follow-up write.
+2. Server side is READY: image_url parts work through the proxy end-to-end.
+3. Success metric: ladder clean-rate with one repair round vs without —
+   target 75% → 90%+.
+4. Open questions for the user: where the render step runs (Hermes host has
+   Chrome? or reuse our render_arm plumbing?); loop budget (1 repair max?);
+   per-screenshot context cost — roughly 1-3K tokens per image at typical
+   patching (measure exactly from usage stats on the first real run), plus
+   the repair turn's own thinking budget.
+
+─────────────────────────────────────────────────────────────────────────────
+## Phase E — reasoning_effort routing                      (Hermes-side, free)
+
+Verified: per-request `chat_template_kwargs.reasoning_effort` works through
+the proxy (xhigh/medium/low render correctly via /apply-template).
+Recommendation to encode in Hermes: art/complex turns = xhigh (default);
+quick tool loops (ls/bash/todo) = medium. NEVER low (ladder: 0/2 clean,
+no token savings, indecisive tool retries). This is a client-side choice —
+does not touch the no-caging law. Latency win on the majority of turns.
+
+─────────────────────────────────────────────────────────────────────────────
+## Standing rules for every phase
+
+- One GPU job at a time, babysat via Monitor events; no work while Hermes may
+  be active; production restored at every window end.
+- Kill and relaunch in separate calls; pgrep -x / bracket patterns only.
+- Render truth = pixels + console (render_arm), never file size.
+- Every adopted change lands in: start script → handoff → memory → commit.
+- Rollback pairs preserved before any adoption.
+
+
+# GPU-LOST bug — root cause + corrective action plan (2026-08-16)
+
+STATUS: root cause identified with high confidence. Vision DISABLED in all three
+launchers as mitigation. Fix not yet implemented. Forensic logs:
+crash-forensics/gpulost1-server.log, gpulost2-server.log.
+
+## Symptom
+
+Twice on 2026-08-16 (~16:3x and ~17:45): RTX 5090 falls off the PCIe bus
+(nvidia-smi: "GPU is lost. Reboot the system"), display dead, WSL survives,
+server becomes a zombie (HTTP health 200, all inference hangs, client cancels
+every ~10 min). Reboot required. Both times the user had just sent a photo to
+Hermes, then stopped and resumed the chat.
+
+## Root cause chain (evidence-backed)
+
+1. Hermes (fixed by user's agent earlier that day) sends the image INLINE ->
+   it reaches llama-server's mtmd path. NOTE: log shows no "image" strings at
+   this verbosity — detection was via the position-warning fingerprint below.
+2. Qwen-VL uses MTMD_POS_TYPE_MROPE: "each image takes max(t,h,w) position
+   indexes" (tools/mtmd/mtmd.cpp:199). ~1450 image-embedding tokens occupy
+   only ~53 llama_pos values. Confirmed in logs: 512+512+426-token embd
+   ubatches whose positions sit at ~136, then text resumes at 189.
+3. llama-memory-recurrent::find_slot (src/llama-memory-recurrent.cpp:609)
+   receives these non-monotonic positions. The code path explicitly does not
+   support them: "What should happen when the pos backtracks or skips a
+   value? Clearing the state mid-batch would require special-casing which
+   isn't done." It WARNS AND PROCEEDS -> DeltaNet cell bookkeeping
+   (pos/tail/src/src0) corrupts. Warnings print twice per ubatch (main ctx +
+   MTP draft ctx recurrent memories).
+4. Corrupted recurrent-state metadata feeds the GDN CUDA kernel path
+   (row-per-warp kernel, adopted this week, WITH MTP rs slots x(1+n_max)) ->
+   out-of-range state access -> wild VRAM write -> WSL dxg escalates to
+   device-lost (not a catchable CUDA error).
+5. Death timing: crash 1 died during the resumed re-prefill (which re-encoded
+   the image: 40s silent CPU-encode gap then warnings then death). Crash 2's
+   state corrupted at image time (69.07), died on the next forced full
+   re-prefill (69.33).
+
+## Exonerated
+
+- The uncensored finetune: same code path any weights (it was merely loaded
+  both times because vision requests only started today).
+- stop/resume alone: text-only forced re-prefills ran 3x same morning, clean.
+- The uploader's vision file specifically: plausibly irrelevant (mrope layout
+  is model-family behavior), unproven either way.
+- Power delivery: pattern too correlated with images to be transients.
+
+## Why the pilot's vision tests didn't kill it
+
+Pilot vision smoke tests (2026-08-1x, "vision live", 21s/img) ran on the OLD
+GDN kernel. The row-per-warp kernel (#22587, adopted 2026-08-16) had never
+seen an image until today. Old kernel: tolerated the corrupt bookkeeping
+(warn-only era). New kernel: fatal. Secondary confirmation available via
+.pre-gdn22587 rollback binary under the repro (Phase 2).
+
+## Corrective action plan
+
+### Phase 0 — mitigation (DONE 2026-08-16)
+- --mmproj removed from start-long-38.sh, start-max-38.sh, start-long-38u.sh
+  (restoration note above the launch command in each). Server now cleanly
+  rejects image content. No image can enter the death path.
+
+### Phase 1 — fixes (fork, in order)
+1. SAFETY FLOOR: llama-memory-recurrent::find_slot must REJECT (return false)
+   non-monotonic-position batches instead of warn-and-proceed -> llama_decode
+   fails -> server returns a clean error. Converts GPU-death into a 4xx/5xx.
+   Small, surgical, ship first.
+2. UPSTREAM CHECK: Qwen3.5-VL hybrids exist upstream — check master's
+   handling of mrope-on-recurrent (mtmd + memory-recurrent + hybrid memory).
+   If upstream solved it, cherry-pick semantics (snapshot slots — same merge
+   discipline as #22587). If not, implement: decouple the recurrent branch's
+   position domain from mrope (recurrent state needs a per-token monotonic
+   counter, not rope positions; hybrid memory should feed each sub-memory its
+   own pos domain).
+3. KERNEL GUARDS: bounds-check rs slot indices / s_copy values at GDN launch
+   (cheap in release). Any future bookkeeping bug fails the request, never
+   the GPU.
+4. MTP HOOK DESYNC: process() skips embd batches -> draft ctx position desync
+   after any image (degraded acceptance). Fix alongside (2).
+
+### Phase 2 — verification (reboot-safe protocol)
+1. CPU-only build: replay the mrope position pattern (tiny image, small ctx)
+   -> confirm bookkeeping corruption pre-fix, absence post-fix. Zero GPU risk.
+2. GPU, old-kernel binary (.pre-gdn22587): one babysat image test — validates
+   the kernel-differential theory. Accept one reboot risk.
+3. GPU, fixed build: image -> stop -> resume -> re-prefill (the exact killer
+   sequence), babysat.
+4. Standard gates: test-backend-ops, text KLD unchanged, vision smoke on
+   ORIGINAL model + original mmproj, battery spot-check.
+
+### Phase 3 — policy
+- Vision stays OFF in every launcher until Phase 1+2 complete.
+- CLAUDE.md ops laws updated: images on hybrid = known GPU-killer until fixed.
+- After fix: re-run BestApp-era vision measurements (21s/img baseline) before
+  telling Hermes vision is available again.
+
+## Open questions
+
+- Exact faulting kernel/instruction (GDN rs slots vs s_copy gather vs other):
+  Phase 2.1 CPU repro + Phase 2.2 kernel differential will localize. Not
+  required for the fix set above (defense in depth covers all candidates).
+- Whether crash 1's PC-wide death vs crash 2's GPU-only death is severity
+  variance of the same fault (assumed yes).
+
+## STATUS UPDATE 2026-08-16 late — FIX IMPLEMENTED, CPU-VALIDATED
+
+Branch: turboquant-sync fix/vision-hybrid @ 72fa4ca4e (F1 kernel bounds, F2
+recurrent mrope handling, F3 MTP draft resync). Build clean (CUDA compiled).
+
+CPU-mode live repro (crash-forensics/cpu-repro-PASS.log), fix build, ORIGINAL
+model + mmproj, MTP n3:
+- Phase 1 image request: clean 200; no recurrent warnings (F2 silent-forward
+  path); F3 fired as designed ("draft ctx desync ... clearing draft state").
+- Phase 2 EXACT killer sequence (abort mid-gen -> resume w/ rewritten history
+  -> forced full re-prefill incl. image re-encode): clean 200; identical log
+  fingerprint to both crashes (cancel/forcing-full/erased-checkpoints) with a
+  healthy server at the end.
+
+REMAINING GATES (post-reboot, in order): CUDA test-backend-ops GDN 36/36;
+same two-phase repro on GPU babysat (accepts one reboot risk); text KLD spot
+vs prod baseline; battery spot; THEN restore --mmproj in launchers + rebuild
+prod binary from the fix branch + re-baseline vision (21s/img). Prod stays on
+the unmodified binary + vision-off until all gates pass.
+
+## CLOSED 2026-08-16 ~23:15 — SHIPPED TO PROD, ALL GATES GREEN
+
+GPU gates (post-reboot): CUDA test-backend-ops GDN 36/36; Phase-1 heavy image
+on GPU (2,116 embd tokens, 5 batches — heavier than the crashes): clean;
+Phase-2 exact killer sequence on GPU (abort -> resume -> forced full
+re-prefill + image re-encode, crash-identical log fingerprint): clean, GPU
+alive; text path byte-identical to prior prod binary (greedy 537/537).
+
+PROMOTED: build-g1/bin/llama-server = fix/vision-hybrid build (rollback
+.pre-visionfix). Vision RESTORED in all three launchers using the
+gate-validated ORIGINAL mmproj (incl. the uncensored launcher). Live prod
+smoke through the proxy: 2,176-token image prompt, HTTP 200, server + GPU
+healthy after. CLAUDE.md law updated. Fix branch pushed to myfork
+(fix/vision-hybrid @ 72fa4ca4e) — upstream-contribution candidate (master
+carries the same defect).
+
+
+# TurboQuant Serving Stack — Handoff (2026-08-16 LATE — post GPU-lost fix ship)
+
+Supersedes the 2026-08-09 Failure-B edition (git history holds it; its
+grammar-bomb forensics remain valid record).
+
+## BRANCH MAP (ONE git repo, four worktrees, ONE GitHub remote:
+## github.com/Madreag/turbo3-cuda — consolidated 2026-08-16, 8→6 branches)
+
+| branch | worktree | what it is |
+|---|---|---|
+| `release/cuda-optimized` | turboquant-kv-cache | PUBLIC MAIN: README/showcase, kernel-optimization history, TCQ |
+| `sync/2026-08` | turboquant-sync | **THE FORK / PROD SOURCE** — upstream b10448 + all carries + sparse-P0 tooling + fused-default + get_rows_keep + GDN #22587. Tip == the shipped prod binary. (feature/sparse-decode and feature/gdn-22587 were linear ancestors — fast-forwarded in and deleted.) |
+| `hermes/server-foundation` | turboquant-g1 | ops docs, quality-tests, deploy mirrors, boards/ledgers (this file) |
+| `pr/ctx-cap-rope-scaling` ·  `pr/parse-degrade-safety` · `pr/state-restore-hardening` | tq-prstage | staged upstream-ready PRs — USER opens them; assistant never submits to external repos |
+
+Everything is pushed; all six tips verified == GitHub 2026-08-16.
+
+## CURRENT STATE — one screen
+
+- **Model roster (2026-08-16 late):** TWO weight sets, ONE serving at a time,
+  BOTH advertised under the FIXED ids qwen3.8-27b-320k/409k (Hermes breaks on
+  any other name — law in repo CLAUDE.md). (a) Original Qwen3.8-27B Q6_K
+  (hybrid: 48 DeltaNet + 16 attention layers, head_dim 256, GQA-4, native MTP
+  head) via start-long-38.sh / start-max-38.sh. (b) TRIAL:
+  JonathanColetti/Qwen3.8-27B-Uncensored Q6_K (same arch, with-MTP variant,
+  models/qwen38-uncensored/) via start-long-38u.sh — quality UNGATED (no
+  KLD/battery run on it), user-requested serving choice. CURRENTLY SERVING:
+  the uncensored trial. Which weights answer = which launcher ran; check
+  status.sh/log, never the API label. Vision via ORIGINAL mmproj **on CPU**
+  (~21-60 s/image encode, once per image; text speed unaffected) — all three
+  launchers use the gate-validated original mmproj.
+- **Context:** TWO PROFILES (2026-08-16, ctx push executed). Default =
+  SPEED: 327,680 (320K), YaRN 1.25, MTP n3 — at its VRAM ceiling (~334K
+  max per vram_law.py). Opt-in = MAX-CTX: 409,600, YaRN 1.5625, MTP OFF
+  (spec-off frees ~1.9 GB of draft/spec compute — measured, not the old
+  0.8 GB estimate). Both fill-ladder-verified VRAM-static. Theoretical
+  MTP-off ceiling ~484K but that needs YaRN ~1.85 — beyond validated
+  territory; 1.5625 is the NIAH-validated boundary.
+- **KV cache:** turbo4 (66-byte blocks, 4.125 bpv, corrected Lloyd-Max
+  centroids) K+V, target AND draft (`-ctkd/-ctvd turbo4`). Alphas 1.00.
+  MMA-turbo fused decode kernels (kill-switch `GGML_TURBO_MMA_FUSED=0`).
+- **Speculative:** `--spec-type draft-mtp --spec-draft-n-max 3` (n3 ADOPTED
+  2026-08-16: code decode 96→113 +17%, copy/edit-loop 115→140 +22%, prose
+  −6% — coding-primary trade; 5-seed ledger gate passed; p-min gate and
+  ngram cascades measured WORSE on our fused stack — board P9/P1).
+  Acceptance is temp/content-dependent: ~0.88/0.77 greedy, ~0.75/0.41
+  code/prose at temp 1.0 (the old "67%" was a blend; entropy-explained,
+  TEMP-STUDY). Spec-vs-off greedy output differs by fp-tie class at ANY
+  n_max (accepted; P10).
+- **Fork:** prod source = branch `fix/vision-hybrid` @ 72fa4ca4e (on top of
+  `sync/2026-08`, which sits 4 commits behind upstream master — verified
+  2026-08-16, nothing relevant missing). Binary: `build-g1/bin/llama-server`
+  = fix/vision-hybrid build (gdn22587 + GPU-lost fix trio: recurrent mrope
+  handling, GDN kernel state-write bounds, MTP draft auto-resync; gates all
+  green incl. byte-identical text path). Rollback chain: `.pre-visionfix` →
+  `.pre-gdn22587` → `.mainline` → `.pre-bughunt`. Fused
+  MMA-turbo decode is ON via launcher env (2026-08-15 adoption: +2.2% @38K,
+  +8.7% @121K decode); GDN #22587 adopted same day (+2.8% decode @38K,
+  +1.7-1.8% prefill both depths, +0.4% @121K).
+- **Measured (fitted, unpaged, post-adoptions):** at temp 1.0 @38K: code
+  ~113 decode (n3), prose ~79, copy/edit-loop ~140; greedy @38K ~108-113;
+  121K ~77 (n2-era, pre-n3); prefill ~2,700 @38K / ~1,715 @121K. VRAM
+  31.77/32.61 GB (~840 MB headroom post-n3 — the +1 recurrent copy;
+  fill-ladder P3 required before ANY ctx increase).
+  (Older "84-89 @38K" figures were VEC-path temp-1.0 probes — superseded.)
+  KLD vs archived f16 ref: 0.0050-0.0059 / top-1 96.7-98.3% (same-day binary
+  pair; the archived 0.00473 predates b10448+24565 binary evolution).
+  Battery @64K on the shipped binary: 6/6, ledger 8/8 (traj_gdn64.json).
+  VRAM 31.1-31.7 of 32.6 GB.
+
+## OPERATE
+
+```bash
+~/.config/llama-tcq/start-long-38.sh   # SPEED profile (default): 320K,
+                                       # MTP n3 — code ~113 t/s @38K, ORIGINAL weights
+~/.config/llama-tcq/start-max-38.sh    # MAX-CTX profile (opt-in): 409,600
+                                       # ctx, YaRN 1.5625, MTP OFF —
+                                       # ~28-31 t/s deep, 329K fill-proven
+~/.config/llama-tcq/start-long-38u.sh  # TRIAL: uncensored weights, SPEED params,
+                                       # own slot dir (slots-long-unc/), SAME
+                                       # advertised id qwen3.8-27b-320k
+~/.config/llama-tcq/stop.sh            # the ONLY sanctioned stop
+~/.config/llama-tcq/status.sh          # ports + /health + VRAM + swap line
+```
+PROCESS LIFECYCLE LAW (2026-08-16, double outage): launchers use
+`setsid nohup ... </dev/null` = fully detached — nothing kills the stack
+except stop.sh, closing the LAST WSL window (that ends WSL itself on this
+box), `wsl --shutdown`, or reboot. USER'S CHOICE: no auto-start on boot —
+after any reboot the stack is DOWN until a launcher runs (first load
+cold-disk slow = minutes, not hung). If you ever touch launch lines:
+verify PGID=SID=PID and TT=? on the server pid before claiming detachment.
+One profile at a time (same ports; double-start guard enforces). Slot dirs
+are per-profile (slots-long/ vs slots-max/) — switching profiles never
+poisons the other's slot files. Max-profile gates (2026-08-16): fill-ladder
+flat (+32 MiB to 329K cached), KLD@1.5625 mean 0.0052 / p99 0.028 / top-1
+95.5% (quant transparency holds at the higher YaRN), battery @64K 2-of-3
+(seed-42 spiral = the known trajectory-luck mode), NIAH 5/5 @380K
+(pre-validated at this scale). VRAM ~30.7 GB used, ~1.9 GB free.
+Clients: `http://192.168.50.130:8130/v1` (OpenAI) or `/v1/messages`
+(Anthropic), keys in `keys.json`. After a Windows reboot re-add the portproxy
+if clients can't reach 8130 (WSL IP rotation).
+
+Rollback: stop → `cp build-g1/bin/llama-server.pre-visionfix build-g1/bin/llama-server`
+→ start (drops the GPU-lost fix trio — ONLY do this with vision re-disabled!).
+Deeper: `.pre-gdn22587` (also drops the row-per-warp kernel), `.mainline`,
+`.pre-bughunt`. Fused-MMA kill-switch: GGML_TURBO_MMA_FUSED=0 env
+(no binary swap needed).
+**Slot files are config-specific** — archive `slots-long/*.bin` on any config
+change (server refuses stale ones gracefully; proxy erases and re-prefills).
+
+## HERMES CLIENT SETTINGS (3.8-era, 2026-08-16 — supersedes 3.5 tuning)
+
+- **Provider**: `5090PC`, OpenAI-compatible, base `http://192.168.50.130:8130/v1`,
+  key from keys.json. **Two model ids** (served one-at-a-time, launcher
+  `--alias`): `qwen3.8-27b-320k` (speed profile) · `qwen3.8-27b-409k`
+  (max-ctx profile). Wrong-id requests still serve the running model.
+- **ctx-checkpoints stays 2** (tested 2026-08-16: 2 vs 4 token-identical
+  reprocess at 25/50/75% edit depths — 11586/11876/13432 both — while 4
+  costs +700 MB host RSS; the cap is NOT a stale limitation).
+
+- **Context to declare**: 320,000 (speed profile). Max profile: 400,000.
+- **Compaction trigger — user's choice on a measured spectrum, compact
+  down to ~40K whenever it fires:**
+  - **~250K trigger (max-window mode)**: recall, correction, and executable
+    code-trajectories are measured CLEAN through the 256K tier — only exact
+    state-tracking (ledger) degrades past ~128K, and decode slows toward
+    ~40 t/s. Maximum usable window.
+  - **~120K trigger (all-axes-clean mode)**: every measured quality axis
+    including exact state-tracking stays perfect, decode stays 65-77 t/s.
+  Pick per workload; nothing breaks either way. Post-compaction re-prefill
+  of a ~40K prefix ≈ 15-25 s.
+- **Sampler: DO NOT change.** temp 1.0 / top-p 0.95 / top-k 20 (client
+  already sends 1.0 ✓). Lower temps measured: no shallow benefit on our
+  instruments, think-spirals at depth (0.6 @128K-tier, 0.4 @64K).
+- **No reasoning_effort override** — template default (xhigh) won the
+  ladder; "low" scored 0/2 on renders.
+- **max_tokens: MAXED OUT — 131,072 (or omit the cap entirely; the only
+  real bound is remaining context).** USER DIRECTIVE 2026-08-16: never cap
+  output capability. Ceiling is graceful (finish_reason: length). If a
+  depth-spiral ever burns a long generation, kill the request client-side —
+  do NOT cap the model.
+- **Streaming ON, per-request client timeout ≥ 20 min** (deep 32K-token
+  thinks at depth take ~13 min; proxy heartbeats keep streams alive).
+- **Prefix stability**: never mutate the system prompt mid-session; keep
+  tool outputs append-only. Per-turn TTFT tracks the DELTA (~0.8 ms/token)
+  as long as the prefix is stable — compaction is the ONE intentional
+  prefix rewrite per cycle.
+- **One request at a time** — the proxy serializes per-slot; parallel
+  fan-out just queues.
+- **Images**: ~21 s first-encode each (mmproj on CPU), then cached in
+  context — batch/crop judiciously.
+- **Max output tokens: MAXED (131,072 / uncapped) — think-inclusive** on
+  this stack (preserve_thinking streams reasoning as output). Server sets
+  no cap; the ceiling is remaining context and it degrades gracefully.
+  Per user directive: output is never capped on this rig.
+- **Broom / pruning rules (prefix-break physics)**: kept old tool outputs
+  cost NOTHING per turn (already prefilled; TTFT tracks only the delta) —
+  but retroactively trimming/deleting an old message REWRITES THE PREFIX at
+  that point → full re-prefill of everything after it (~40-60 s mid-depth).
+  Therefore: (1) insertion-time truncation is purely a context-BUDGET
+  choice, not a stability need — single inserts to at least ~120K tokens
+  are proven on this stack; cap tool dumps only if you want to stretch the
+  window, never for safety;
+  (2) **rolling retro-trim NO** — an every-turn broom converts 0.8 ms/token
+  delta-TTFT into a fresh-prefill per turn, the single worst client setting
+  possible here; (3) **batch all cleanup into the compaction event** — one
+  intentional prefix rewrite per cycle at the ~120K trigger. A full-clear
+  broom (new session) is always fine.
+- **cache_prompt must stay enabled** (server-side prefix reuse is the
+  foundation of all of the above; verified live — do not send
+  cache_prompt:false).
+- **Max profile** (`start-max-38.sh`, 400K): for reference-heavy work that
+  genuinely needs >280K of un-compactable material; decode ~28-31 t/s deep
+  and NO MTP; recall axes (hops/needle) hold at depth but exact
+  state-tracking does not — treat it as read-heavy, reason-shallow mode,
+  and raise the compaction trigger to ~250K there.
+
+## THE VRAM LAW (hard-won 2026-08-15)
+
+Budget = weights (20.8 GB) + KV (17.5 KiB/token incl. draft) + recurrent ×(1+n_max)
++ **THREE compute scratches** (target/draft/vision — scale with ctx×batch)
++ ~250 MB meta. The stack ran silently WDDM-paged for two days because draft-KV
+(f16 default!) and the triple scratch were never budgeted — `nvidia-smi` pins at
+the residency cap and HIDES overcommit ("config changes don't move the number" =
+you are paged). Keep ≥1 GB free. Context-fill does NOT grow VRAM (static
+prealloc; checkpoints live in host RAM, ~8 KiB/token of depth, cap 2) —
+**verified to 256K fill** (battery); the 294K (0.92×n_ctx) fill-ladder is
+port-board P3 and MANDATORY before any ctx increase (club-3090's
+"boots ≠ fills" FA-scratch-at-fill failure class).
+Ceiling behavior is graceful: `finish_reason: length`, over-cap prompts → 400.
+
+## QUALITY GATES (all in quality-tests/)
+
+- `kl_divergence.py` — 2048-token prompts, cache_prompt=false, vs the ARCHIVED
+  same-model reference `kld38/kld_logprobs_f16_qwen38_yarn.json` (a stale
+  cross-model reference produces false-catastrophic numbers — 3.6-era file is
+  quarantined). CURRENT gate baseline (2026-08-16, 157-prompt tail set
+  `kld38/kld_logprobs_f16_qwen38_yarn_157tail.json`): mean 0.0060 / p99
+  0.062 / max 0.064 / top-1 96.2% at YaRN 1.25 (max profile @1.5625:
+  0.0052 / 0.028 / 0.064 / 95.5% vs its own matched ref). The old
+  0.00473/98.3% is a HISTORICAL datum from a pre-b10448 binary — comparing
+  against it reads a healthy run as a fake ~27% regression.
+- `trajectory_battery.py` — the agentic axis. Supports `--temp` (default 0
+  = greedy, the historical baseline mode). SERVING-TEMP baseline
+  (2026-08-15, temp 1.0, seeds 42/43, fused+GDN binary): hops-2/3/4,
+  correction, code-traj PASS at 64K/128K/256K; **ledger 8/8 clean through
+  128K (envelope doubled vs the stale greedy record "spiral@128K"), full
+  spiral at 256K**. Historical greedy baseline
+  (`trajbase/traj_b10448-320k-baseline2.json`) kept for greedy-mode
+  comparisons. Gate rule unchanged: changes must hold the perfect columns
+  and not lower ledger at matched temp/seed. Temp policy: 1.0 LOCKED (see
+  TEMP-STUDY.md — lower temps spiral at depth; 0.4 already at 64K).
+- Depth probe: `scratchpad/depth_decode_test.py` (recreate from WORKPLAN if
+  /tmp wiped). **Paired-run law:** single-arm vs historical baseline is
+  invalid on this box (echo noise ±20%, environmental confounds); A/B =
+  alternating binaries, minutes apart, ordering must repeat.
+
+## PROXY (deploy/proxy.py, v6.4, 49/49 tests via `python3 test_proxy.py`)
+
+Per-user keys → slot pinning with save/restore (now actually effective:
+checkpoint fix made post-restore reuse ~49 tokens instead of full re-prefill);
+think-tag extraction (literal tags after content start are preserved); stream
+tripwires WITH client-facing repair (truncation → error frame + [DONE] /
+error event — never a silent "finished" corpse); heartbeats both protocols;
+circuit breaker (fast 503 while server restarts); passthrough allowlisted
+(/slots and raw completion endpoints blocked); Anthropic images translated
+to image_url. Known accepted gaps: Anthropic-path thinking-memory;
+lock-acquire has no timeout (by design: two-user serialization).
+
+## DOC MAP (authority order for "what happened / what's next")
+
+1. `WORKPLAN-BESTAPP.md` — the marathon ledger: every verdict with numbers
+   (adopted / tested-not-needed / closed), VRAM autopsy, paired-run rule.
+2. `SPARSE-DECODE-BUILD.md` — the sparse-decode P0 execution ledger and
+   CLOSED verdict (tested-not-viable + the fused-gate discovery);
+   `SPARSE-DECODE-DESIGN.md` is its superseded design record.
+3. `BUGHUNT.md` — 2026-08-15 audit ledger (proxy/scripts/C++ fixes, all shipped).
+4. `RESEARCH-2026-08.md` — the research campaign board (several speed verdicts
+   superseded by later paired re-tests — WORKPLAN wins on conflict).
+5. `FUTUREPLAN.md` / `UPSTREAMSYNC.md` — historical (phases done; sync done).
+6. `CLUB3090-PORT-BOARD.md` — the standing NEXT queue: ports/tests/skips
+   from the club-3090 review, with per-item validation gates and waves.
+7. `pr-package/` — three upstream-ready PR branches staged on the user's fork
+   (state-restore hardening, ctx-cap rope scaling, parse-degrade). User opens
+   PRs; assistant never submits to external repos.
+
+## RESUME HERE (2026-08-16 LATE — post GPU-lost fix, second handoff point)
+
+**WHAT WE DID (2026-08-16, chronological):**
+1. Morning arcs (see prior sections): consolidation, README showcase,
+   mega-bughunt, two-profile ship, n3 adoption, ctx-checkpoints keep-2,
+   auto-tier design, QUICK yarn-tax suite (identity gate PASSED; shallow
+   unification increment ≈0.5% top-1; deep divergence needs the overnight
+   battery as arbiter — data in quality-tests/yarntax/, summary in
+   AUTO-TIER-DESIGN.md).
+2. Process-lifecycle hardening after a DOUBLE outage: plain nohup died with
+   the launching session → all launchers now `setsid nohup </dev/null`
+   (verified live-fire). Discovered: closing the LAST WSL window terminates
+   WSL itself on this box (VM teardown, graceful SIGTERM) — accepted
+   semantics, no auto-start by user's explicit choice. User closes windows
+   to reclaim VRAM (terminals cost GPU memory) — that's WHY windows close.
+3. Fixed advertised-id LAW: ONLY qwen3.8-27b-320k / qwen3.8-27b-409k.
+   Hermes = NousResearch/hermes-agent; its quirks we solved: (a) it sent
+   reasoning_effort "max" (Kimi value) → 500s; user's agent scoped qwen ids
+   to xhigh (model's legal ladder: xhigh/medium/low). (b) images route via
+   its vision_analyze tool unless the provider's model entries are marked
+   vision-capable → told user's agent to mark them; images then flow inline.
+4. Uncensored trial: downloaded JonathanColetti Q6_K with-MTP (+ its vision
+   file, unused — we use original mmproj), built start-long-38u.sh, serving
+   under the canonical 320k id. Quality ungated; user's call.
+5. Live MTP report on real Hermes traffic: 93K-token pagoda turn at 97 t/s,
+   70% acceptance (3.10 tok/verify-pass); tool-loop phase 61%; verdict KEEP.
+   Session monitoring: 56 turns clean, ctx-checkpoints restored 53× (feature
+   validated in prod), Hermes compaction at ~120K→40K worked as configured;
+   known cost = ~60-75s full re-prefill when Hermes rewrites history after
+   big thinks (thinking-drop is vendor-CORRECT for Qwen; do NOT "fix").
+6. Inference research blast → INFERENCE-RESEARCH-2026-08.md: T1 FP4/NVFP4
+   weights on Blackwell (~7GB VRAM free + speed; gate decides), T2 upstream
+   sync (we're 4 commits behind — current!), T3 per-layer mixed KV (q8_0 on
+   the 16 attn layers), T4 WSL ops wins (Defender vhdx exclusion for the
+   124MB/s cold loads, HAGS A/B), T5 grammar-turn spec toggle. EAGLE-3:
+   skip — our MTP already beats the 3.6 head's tau (3.1 vs 2.4).
+7. **THE BIG ONE — GPU-lost bug, root-caused → fixed → gated → SHIPPED.**
+   Two incidents (GPU off the PCIe bus, reboot required) whenever a photo +
+   stop/resume hit the stack. Root cause: Qwen-VL mrope image chunks
+   (N tokens over max(t,h,w) positions) meet llama-memory-recurrent's
+   explicit "special-casing isn't done" warn-and-proceed → DeltaNet
+   bookkeeping corrupts → new GDN row-per-warp kernel writes OOB → device
+   lost. Upstream master HAS THE SAME DEFECT (verified). Fix trio on branch
+   fix/vision-hybrid @72fa4ca4e (pushed to myfork): recurrent mrope
+   handling (forward-legal/regression-rejects), kernel state-write hard
+   bounds (fused + non-fused, extent from view root), MTP draft auto-resync
+   (also fixes draft-never-cleared-on-reset). Gates ALL GREEN: op-tests
+   36/36, CPU killer-sequence repro, GPU killer-sequence repro
+   (crash-identical fingerprint survived), text path byte-identical, live
+   prod image smoke. PROMOTED to prod binary; vision RESTORED in all three
+   launchers (original mmproj); rollback .pre-visionfix. Full story:
+   GPULOST-BUGREPORT.md + crash-forensics/.
+
+**WHAT IS RUNNING NOW:** uncensored trial weights + vision + fix binary,
+SPEED profile params, advertised as qwen3.8-27b-320k, healthy. Hermes may
+send images (first image per convo ~30-60s CPU encode).
+
+**WHAT WE WILL DO (priority order):**
+1. OVERNIGHT yarn A'+B' battery — ON USER'S WORD ("run the extended
+   battery"). Spec in AUTO-TIER-DESIGN.md + session notes: A' depth-station
+   KLD (stations 2K/32K/128K/200K/256K; llama-perplexity --kl-divergence for
+   shallow full-vocab; yarn_stations.py branch probes deep; --parallel 1
+   MANDATORY; no-yarn arm ≤262144) + B' matched-config battery (ctx=262144,
+   scales {none,1.25,1.5625} × tiers {64K,128K} × 3 seeds + 256K finalists).
+   Delivers the rope-unification verdict.
+2. Rope verdict → auto-tier proxy build per AUTO-TIER-DESIGN.md (~1 day:
+   unified id, TIER_UP_TOKENS≈180K, hold-and-swap 20-50s if unified at
+   1.5625, else ~2-min re-prefill variant).
+3. Vision perf re-baseline on the fix build (old 21s/img predates it) before
+   quoting numbers to the user.
+4. Research board tiers in order (T4 ops wins are cheap; T2 sync is 4
+   commits; T1 FP4 gate ladder is the big swing; T3 per-layer KV; T5
+   grammar toggle).
+5. pr-package: the vision-hybrid fix is an upstream-PR candidate — USER
+   OPENS PRs to external repos, never the agent (hard boundary).
+6. Uncensored trial: if it becomes permanent, run the quality gates on it
+   (tail-KLD 157 + battery) — currently ungated.
+
+**Standing doctrine:** QUALITY AND FEATURES OVER SPEED · never cap output ·
+only 2 advertised model ids · no upstream folklore without on-stack A/B ·
+options-before-execution on NEW test arcs · TLDR replies · state the plan
+BEFORE acting (2026-08-16 lesson) · claim-scoping: name what a test covered
+AND what it didn't · verify every claim with a command first.
+
+## OPEN ARCS
+
+- **GPU-lost / vision-on-hybrid: CLOSED+SHIPPED 2026-08-16** (fix trio gated
+  and promoted; see RESUME HERE item 7 + GPULOST-BUGREPORT.md). Residual:
+  vision perf re-baseline pending; upstream PR candidate (user opens).
+- **Inference research board: OPEN** — INFERENCE-RESEARCH-2026-08.md, five
+  tiers, FP4 weights = top strategic lever (quality gate decides).
+- **Yarn A'+B' overnight battery: ARMED, waiting on user's word** → rope
+  unification verdict → auto-tier build (AUTO-TIER-DESIGN.md).
+- **Uncensored trial weights: SERVING, quality UNGATED** — gate before
+  calling permanent.
+- **Sparse decode: CLOSED 2026-08-15 — tested, not viable** (P0 offline
+  validator: even oracle selection reads 30-50% of cache on this hybrid;
+  evidence in SPARSE-DECODE-BUILD.md). Collateral fix ADOPTED: prod was
+  silently running fused-MMA OFF — launcher now exports
+  GGML_TURBO_MMA_FUSED=1 (in-tree default also flipped on branch
+  feature/sparse-decode). Re-run the P0 probe (~30 min) before believing
+  the sparse verdict for any future model swap.
+- **TEMP-STUDY: CLOSED 2026-08-15 — KEEP temp 1.0** (community 0.6 claim
+  real at 64K, INVERTS at 128K — 0.6 spirals; 0.4 spirals at 64K; the
+  MTP-acceptance "gap" closed as entropy, +12-18 pts greedy vs 1.0, no
+  anomaly). Serving-temp envelope re-baselined: ledger clean through 128K
+  now (was spiral), 256K spiral. Zero config change. Full data:
+  TEMP-STUDY.md.
+- **NEXT: CLUB3090-PORT-BOARD.md** waves. Wave-1 progress: P5 rollback
+  audit DONE-clean (triple-guarded); P2 tail-KLD three-way IN PROGRESS;
+  remaining: P1 ngram+MTP depth sweep (with the fused-Q≤4 × draft-depth
+  interaction) + P4 n_max=3, P6 launcher hardening, F-doc fixes. Wave 2 =
+  fill-ladder P3 before any ctx push, VRAM calculator P8, agentic-turns
+  probe P7.
+- Post-testing-phase: context push + optional MTP-off profile (gated on P3).
+- **GDN #22587: ADOPTED 2026-08-15** (un-parked, merged with b10448
+  snapshot-slot semantics, all gates green — see WORKPLAN GDN section).
+- MTP acceptance note (reframed by the club-3090 review): greedy inflates
+  spec acceptance ~2× cross-engine; our 82.5% greedy / 67% temp-1.0 is
+  expected, the "Vulkan 92%" reference is presumed greedy. Lever = tuning
+  (board P1/P4), not a mystery.
+- Watchlist: upstream issues 27090/27102/26609/25717 (our shapes); Vulkan
+  92%-acceptance reference gap.
+
+## OPS LAWS (unchanged, blood-signed)
+
+USER STOP overrides goals. No pkill patterns matching your own cmdline; kill
+by pidfile. No background llama-bench/perplexity. One GPU workload at a time,
+babysat. Never run llama-cli non-interactively. Keys never enter the repo.
+120s Bash guillotine: long jobs → run_in_background. Loads ≠ hangs (cold disk
+124 MB/s). Render truth = pixels + console only. Multi-step background
+scripts: ABSOLUTE paths only (relative-after-cd killed two probes) and
+bounded health waits with process-death checks (never `until curl` alone).
+Before EVER raising --parallel>1: run the distinct-answers gate (N identical
+greedy prompts concurrently must return identical answers — hybrid
+graph-reuse state-crossover class, ik#2260) and confirm MTP isn't silently
+dropped; today's parallel-1 + proxy serialization is a validated design.
+
+
+# GOAL v3 — RENDER PARITY: find out WHY, then fix OURS. Non-stop.
+
+**THE QUESTION (the entire goal):** Others reportedly run this same model and get
+working voxel scenes. Ours fails ~50% of freeform one-shots. Something differs —
+config, runtime, sampling, quantization, context shape — and it is FINDABLE by
+controlled comparison. Find it. Fix ours. Prove it with pixels.
+
+**LAWS (absolute):**
+1. The MODEL is never modified, constrained, templated, or caged. Config/settings/
+   runtime changes are the only levers (sampling, KV cache type, rope, context shape
+   are config — allowed; prompts and weights are the model's — untouchable).
+2. The GPU never idles while a gate is open. Test batches queue back-to-back;
+   CPU verification runs in parallel with the next GPU batch, always.
+3. Evidence = headless-Chrome pixels + JS console only. n≥8 runs per config —
+   single runs prove nothing at a ~50% base rate.
+4. Non-stop: a finished batch immediately triggers analysis AND the next batch.
+   No idle turns, no waiting states, no "done" until the user says pagodas render.
+5. DIAGNOSTIC ARMS ARE NOT SHIP CANDIDATES. P1 flips variables (f16 KV, YaRN off,
+   etc.) only to LOCATE the cause. Production keeps the TurboQuant identity —
+   turbo KV compression and the long-context window stay, period. If a diagnostic
+   implicates one of our optimizations, the deliverable is a FIX INSIDE it
+   (kernel/calibration work — the repo's actual mission), never its removal.
+
+## P1 — Variable isolation on OUR stack (the suspects, each n≥8, fatal-rate table)
+Same prompt, same model file, one variable flipped at a time vs current baseline
+(temp 0.6, top-k 20, turbo4/turbo4 KV, YaRN 1.5625, 33K agent context):
+  a. Sampling: temp 1.0 / top-p 0.95 / top-k 20 / min-p 0 (Qwen's creative preset —
+     others' UIs pull THIS from GGUF metadata; we run 0.6)
+  b. KV cache: q8_0/q8_0, and f16/f16 — CACHE precision only, at diagnostic ctx
+     (~36K → f16 cache ≈ 2.3GB, total ~24GB, fits 32GB fine). WEIGHTS stay Q6_K in
+     every arm; f16/bf16 weights (~54GB) do not fit this card and are never used.
+     (Others run f16 cache — our turbo KV is a real differing variable; PPL cleared
+     it, but 800-line codegen ≠ PPL.)
+  c. YaRN: OFF at native ctx (others don't run rope scaling)
+  d. Context shape: bare 1-turn prompt (~200 tokens, like a chat UI) vs 33K agent shape
+Output: one table — config → fatal-JS rate → verdict per variable.
+
+**KNOWN SERVER BUG (found by arm c, 2026-08-08):** non-STREAMING /v1/chat/completions
+on the G1 binary 500s parsing Qwen3.6 think+fenced output ("Failed to parse input at
+pos 22: <think>" — peg-native full-completion parse path). Streaming path unaffected
+(all arms + Hermes stream). Documented, not production-blocking; candidate fix rides
+the next server-code sync.
+
+## P2 — External runtime ground truth (the "other apps" the user demanded)
+Install and run at least ONE independent runtime on this box (ollama first choice —
+scriptable; LM Studio if needed), same model family+quant class, same prompt, n≥8,
+identical pixel verification. Their real failure rate, measured — not reddit's word.
+
+## P3 — VERDICT with the table
+Name the variable(s) that move the rate, from data. Outcomes both count as answers:
+  - A config difference explains it → that's the fix.
+  - Every runtime/config shows the same rate → "others succeed" was survivorship,
+    proven with numbers nobody else has ever published.
+
+## P4 — OURS FIXED and re-verified
+Deploy the winning config to production (model untouched). ≥8/10 clean pixel-verified
+renders through the REAL proxy path at production settings. Then the user runs the
+pagoda in Hermes and confirms working scenes in their own Chrome — their words close
+the goal, nothing else.
+
+## Standing context (do not re-discover)
+Phase-1 transport: DONE (streaming/stalls/preserve_thinking all fixed and live-proven;
+branch hermes/server-foundation). R1 forensics: fatal JS slips reproduced (`dy` undefined,
+unbounded loop); artifact byte-capture live in proxy; headless render harness proven
+(Windows Chrome from WSL + timeout 45 + pixel analysis; venv+pillow in scratchpad).
+Baseline measured so far: freeform ≈ 3-4 clean of 6 draws at temp 0.6. Prior user laws:
+scaffold method BANNED; benchmarks babysat; socket-owner process management only.
+
+
+# Inference Improvement Research Board — 2026-08-16 search blast
+
+Rig: RTX 5090 32GB (SM120 Blackwell, FP4 tensor cores) / 48GB RAM / WSL2.
+Stack: fork w/ turbo4 KV (4.125bpv WHT+centroid), MTP n3, fused MMA verify,
+GDN row-per-warp, ctx-checkpoints, two-profile serving (320K/409K).
+Doctrine: QUALITY AND FEATURES OVER SPEED; nothing adopts without on-stack gates.
+
+## TIER 1 — FP4 weight track (biggest single lever found)
+
+FP4 (NVFP4/MXFP4) landed in llama.cpp upstream with native Blackwell tensor-core
+paths (PR #17906 era; correctness discussion #22042). Evidence:
+- Qwen3.6-27B NVFP4 GGUFs shipped (LibertAIDAI incl. MTP variant; williamliao);
+  community report: 24 t/s (Q4_K_M) -> 45 t/s @160K ctx with NVFP4+MTP.
+- Unsloth ships Qwen3.8 NVFP4/UD quants; claims 1.5x vs BF16, "92-97% top-1
+  accuracy" — that claim is BELOW our KV-gate bar; weight quality gate decides.
+- MTP verify batches "nearly free on FP4 tensor cores" (community note).
+Payoff for us: Q6_K 21.4GB -> ~14GB weights = ~7GB VRAM freed
+  => 409K + MTP in ONE profile (kills the two-profile trade), or 500K+ ctx,
+  PLUS prefill/decode speedup on FP4 cores.
+Cost/risk: (a) requires upstream sync (our fork predates FP4 kernels);
+  (b) Q6_K->4bit weight quality is a REAL drop class — full gate ladder
+  mandatory (tail-KLD 157, battery multi-seed, NIAH, fill-ladder);
+  (c) Q5_K_M (~15.5GB, -5.9GB) is the fallback middle rung if FP4 fails gates.
+Verdict: RESEARCH NOW, ADOPT ONLY THROUGH GATES.
+
+## TIER 2 — Upstream sync 2.0 (unlocks T1 + cheap A/Bs)
+
+Fork is months behind master. Landed upstream since our snapshot:
+- FP4 weight kernels (T1 dependency)
+- Unified spec framework: comma-COMBINED spec types (e.g. draft-mtp,ngram-mod),
+  new ngram-map-k / ngram-map-k4v, DFlash/DSpark block-diffusion drafts,
+  EAGLE-3 (incl. hybrid/recurrent support PR #21437 — mirrors our snapshot-slot
+  work), upstream MTP (#22673, different design than ours)
+- GGML_CUDA_MMVQ_MAX runtime crossover knob (PR #26079) — cheap decode A/B
+- SWA/hybrid checkpoint+MTP acceptance fixes (issue #23322 — matches bugs we
+  solved independently; compare approaches)
+Known trap (from #22587 merge): upstream semantic evolution — snapshot slots.
+Re-A/B after sync: combined ngram-mod+MTP (our ngram wash was pre-framework).
+
+## TIER 3 — Per-layer mixed-precision KV (quality-per-byte, our home turf)
+
+2026 literature: KVTuner (layer-wise pairs, ~3.25bpv near-lossless), RateQuant
+(rate-distortion per-head bit allocation), PM-KVQ (progressive for long CoT),
+KVSink, SKVQ (recent-window high precision).
+Our angle: P0 probe proved the 16 full-attn layers carry ALL global routing on
+this hybrid. Testable forks of the idea, using existing KLD/battery harness:
+  (a) q8_0 on 16 attn layers + turbo4 elsewhere  -> quality up, +~0.9GB
+  (b) turbo4 attn + turbo3_tcq on DeltaNet-adjacent -> bytes down, ctx up
+  (c) age-based: recent window turbo4/q8, old tokens turbo3_tcq
+Needs fork feature: per-layer -ctk/-ctv typing. Moderate effort, high fit.
+
+## TIER 4 — Ops quick wins (cheap, do soon)
+
+- WSL cold-load 124MB/s: add Defender exclusions (ext4.vhdx + vmmem), sparse
+  VHD (wsl --manage --set-sparse), fstrim + compact, wsl --update, verify vhdx
+  on fastest NVMe. Could turn 3-8min cold restarts into ~30s. USER-SIDE mostly.
+- HAGS (Windows hardware GPU scheduling) A/B: reports of notable gains
+  specifically WITH CUDA graphs (we use them). Toggle + measure decode.
+- Windows: networkingMode=mirrored still pending (U1, user-side).
+
+## TIER 5 — Spec-decode refinements
+
+- EAGLE-3: NO Qwen3.8-27B head exists yet. Qwen3.6-27B head (Ex0bit) reaches
+  tau=2.4 chain / 3.35 tree (tree throughput-neutral on hybrid GDN — matches
+  our arch). Our MTP n3 measured 2.98-3.10 tok/cycle TODAY => already ahead.
+  WATCH for a 3.8 head; training our own (SpecForge/TRT-MO) = real project.
+- Grammar-turn spec toggle: tool/grammar turns run 0.6-0.85x with MTP.
+  Small patch: proxy or server disables spec per-request when grammar present.
+  Recovers tool-loop tax; zero quality risk (spec is lossless either way).
+- Draft-model spec (repo's draft-Q8_0) vs MTP: A/B only out of curiosity; MTP
+  shares weights/cache (VRAM-free) — draft model unlikely to win here.
+
+## TIER 6 — Bigger swings (research-grade)
+
+- SageAttention2++/3: INT8/FP4 quantized attention. SA3 = 1038 TOPS on RTX5090
+  (5x FlashAttention); prebuilt sm_120 wheels exist (PyTorch world).
+  Port to our CUDA FA = heavy kernel work + interacts with turbo4 KV format
+  (K stored rotated+quantized). Prefill-first port is the plausible slice
+  (attention share of prefill grows with depth). Park unless prefill at depth
+  becomes the pain point.
+- Second GPU (heterogeneous): llama.cpp layer-split pools VRAM but SLOWS what
+  already fits on the 5090; auto-fit exists (#18049); ik_llama '-sm graph'
+  proves multi-GPU can scale (3-4x claims) but is a different fork.
+  Sensible uses if a card appears: +ctx overflow layers, second model, vision.
+  NOT recommended to buy for speed of the current model.
+- vLLM/TRT-LLM NVFP4 (5090 fixes exist): benchmark reference only — would
+  abandon turbo4/fork features. Use as external baseline for T1 expectations.
+
+## Examined & closed (do not re-tread without new evidence)
+
+- Sparse/paged attention decode: CLOSED at P0 (oracle needs 30-50% of cache;
+  hybrid arch concentrates routing in 16 layers). Same finding kills
+  token-eviction (H2O/SnapKV class) here.
+- ngram spec (our fork impl): wash. p-min gate, cascades: WORSE (fused-verify
+  economics invert community tuning).
+- Backend sampling: wash at np=1 (issue #27050 confirms it's a multi-slot win;
+  we serve single-slot by quality choice).
+- FWHT butterfly port: slower on SM120 (bank conflicts).
+- iGPU assist: WSL2 iGPU compute path (Dozen) is poor; CPU mmproj stays.
+- KV->RAM decode offload: decode is bandwidth-bound; only slot/checkpoint
+  storage belongs in RAM (already done).
+
+## Suggested sequence
+
+1. Tonight: yarn A'+B' battery (already queued) — unchanged.
+2. T4 ops wins (hours, mostly user-side clicks + one A/B).
+3. T2 upstream sync on a branch (snapshot slots; op-tests -> A/B -> KLD gates).
+4. T1 FP4 weight gate ladder on synced branch (NVFP4 vs Q5_K_M vs Q6_K).
+5. T3 per-layer KV mixed precision prototype + KLD.
+6. T5 grammar-turn spec toggle (small, anytime).
+
+Sources: llama.cpp docs/speculative.md; PRs #17906 #22673 #21437 #26079 #18039;
+discussions #22042 #18049 #15013; issues #23322 #27050; arXiv 2505.11594 (SA3),
+2505.21136 (SA2++), 2505.18610 (PM-KVQ), 2502.04420 (KVTuner), 2605.06675
+(RateQuant); HF: LibertAIDAI/williamliao NVFP4, Ex0bit PRISM-EAGLE3, unsloth
+qwen3.8 docs; InsiderLLM FP4 guide; Bored Consultant NVFP4 45t/s writeup;
+ceos3c WSL2 perf 2026.
+
+
+# llama.cpp + TurboQuant CUDA — Up to 8x KV Compression, Zero Speed Penalty
+
+CUDA implementation of [TurboQuant](https://arxiv.org/abs/2504.19874) (ICLR 2026) KV cache compression for llama.cpp, targeting NVIDIA GPUs (SM86+).
+
+## Why TurboQuant?
+
+The KV cache is the memory bottleneck for long-context LLM inference. At 32K+ tokens, the KV cache can exceed the model weights in size, consuming VRAM and bandwidth. TurboQuant compresses KV values from 8.5 bits (q8_0) down to 2-4 bits — **slashing memory 4-8x** while maintaining quality. The result: longer context, more concurrent users, and on bandwidth-limited GPUs, **faster decode**.
+
+### The 4 Turbo Types at a Glance
+
+| Type | Bits/Value | Compression | Best For | Trade-off |
+|------|:---------:|:-----------:|----------|-----------|
+| **turbo4** | 4.25 | 3.76x | Best quality | +0.97% PPL, lowest KL divergence |
+| **turbo3** | 3.125 | 5.12x | Best balance | +1.38% PPL at ctx=512, **equals q8_0 at ctx=2048** |
+| **turbo2** | 2.125 | 7.53x | Long context / speed | +5.35% PPL, but **fastest at 32K+** on all GPUs |
+| **turbo1.5** | 2.00 | 8x | Maximum compression | +8.18% PPL, most memory savings |
+
+### What This Fork Adds (over [TheTom's base implementation](https://github.com/TheTom/llama-cpp-turboquant))
+
+This fork by [@Madreag](https://github.com/Madreag) adds aggressive **CUDA kernel optimizations** that improve turbo decode by **13-69% at 32K context** over the base implementation (verified on 4 GPUs: 5090, 3090 Ti, 3090, 4090M):
+
+| Optimization | Impact |
+|---|---|
+| 8-wide LUT scoring (turbo3/turbo2) | +4.7% at 32K |
+| `nthreads_KQ=8` for all types | up to +17.7% at 32K |
+| Sparse V skip (type-adaptive thresholds) | +4.6% at 32K, zero PPL cost |
+| `__launch_bounds__(128, 3)` occupancy | +7-13% at 32K |
+| Half-precision LUT, `__expf` softmax, L2 prefetch | cumulative ~9% |
+
+At short context, both builds are identical or near-identical. The advantage shows at **32K+** where KV bandwidth dominates — the bigger the context, the larger the gain.
+
+Built on signalnine's pre-rotate-queries architecture with parallel SET_ROWS, native Flash Attention vec_dot, and MMA prefill. All 4 turbo types with 36 asymmetric K/V combinations. Validated across 5 models, 4 GPUs, 1,351+ stability iterations with zero failures.
+
+## Performance (RTX 5090, Qwen 3.5 27B Q6_K)
+
+| Type | Bits/Value | Compression | Short Decode | 32K Decode | PPL ctx=512 | PPL ctx=2048 |
+|------|:---------:|:-----------:|:------------:|:----------:|:-----------:|:------------:|
+| q8_0 | 8.5 | 1.88x | 63.40 tok/s | 55.60 | 6.759 | 5.674 |
+| turbo4 | 4.25 | 3.76x | 63.70 | **56.73** | 6.825 (+0.97%) | 5.694 |
+| turbo3 | 3.125 | 5.12x | 63.55 | **55.84** | 6.852 (+1.38%) | **5.674 (=q8_0)** |
+| **turbo2** | **2.125** | **7.53x** | **65.50** | **58.61** | 7.121 (+5.35%) | 5.873 |
+| turbo1.5 | 2.00 | 8.0x | 63.13 | 55.16 | 7.312 (+8.18%) | 6.103 |
+
+Speed measured with `llama-bench -d 32768` (tg128 @ depth), ±0.3% variance. PPL from wikitext-2, 8 chunks.
+
+Key takeaways from this table:
+- **turbo2 at 32K beats q8_0 by 5.4%** (58.61 vs 55.60) — the long-context champion at 7.5x compression
+- **turbo4 at 32K beats q8_0 by 2.0%** (56.73 vs 55.60) at 3.76x compression, best quality
+- **turbo3 PPL at ctx=2048 equals q8_0** (5.674 = 5.674) — lossless quality at 5.1x compression
+- **All types match or beat q8_0 at short context** — turbo2 +3.3%, others within 1%
+
+**More highlights across models and contexts:**
+
+| Result | Numbers |
+|--------|---------|
+| turbo2 32K decode | **58.61 tok/s** — 5.4% faster than q8_0 at 7.5x compression |
+| turbo2 at 256K tokens (Q4_K_M) | **42.57 tok/s** — consumer GPU, 8x cheaper KV than f16 |
+| Kernel optimization impact (4 GPUs) | **+13-69% at 32K** vs base implementation, confirmed on 5090/3090 Ti/3090/4090M |
+| NIAH retrieval (4 GPUs) | q8_0/turbo3/turbo2 **100% on 5090**, all types **92% on 3090 Ti** |
+| Stability across 4 GPUs | **1,351+ iterations, 0 failures, PPL bit-exact** |
+
+## Quality (Perplexity)
+
+| Type | bpv | PPL ctx=512 | vs q8_0 | PPL ctx=2048 | vs q8_0 |
+|------|----:|:-----------:|--------:|:------------:|--------:|
+| q8_0 | 8.5 | 6.759 | — | 5.674 | — |
+| turbo4 | 4.25 | 6.825 | +0.97% | 5.694 | +0.34% |
+| turbo3 | 3.125 | 6.852 | +1.38% | **5.674** | **0.00%** |
+| turbo2 | 2.125 | 7.121 | +5.35% | 5.873 | +3.50% |
+| turbo1.5 | 2.0 | 7.312 | +8.18% | 6.103 | +7.55% |
+
+## Which Mode Should I Use?
+
+| Your priority | Mode | Why | Command |
+|---|---|---|---|
+| **Best balance** | turbo3 | q8_0 quality at 5.1x compression | `-ctk turbo3 -ctv turbo3` |
+| **Long context** | turbo2 | 32K champion (+5.4% vs q8_0), 42 tok/s at 256K, 7.5x compression | `-ctk turbo2 -ctv turbo2` |
+| **Best quality** | turbo4 | +0.97% PPL at 3.76x compression | `-ctk turbo4 -ctv turbo4` |
+| **Maximum compression** | turbo1.5 | 8x compression, 212 tok/s MoE | `-ctk turbo1.5 -ctv turbo1.5` |
+
+## Q4_K_M Weight Quantization (Speed Champion)
+
+Combining Q4_K_M weight quantization with turbo KV cache compression enables extreme context lengths. Decode speed measured with `llama-bench -d [depth]` (tg128 @ depth):
+
+| KV Type | bpv | 32K | 65K | 131K | 256K |
+|---------|----:|----:|----:|-----:|-----:|
+| turbo4 | 4.25 | 66.33 | 60.41 | 49.06 | OOM |
+| **turbo3** | **3.125** | **66.88** | 58.37 | 47.36 | **35.38** |
+| **turbo2** | **2.125** | **70.65** | **63.94** | **51.23** | **42.57** |
+| turbo1.5 | 2.00 | 64.77 | 57.99 | 46.38 | 33.40 |
+
+turbo2 is the long-context champion at every depth. At 256K, turbo2 generates **42+ tok/s** on a consumer 5090 — a context length where q8_0 would OOM.
+
+PPL impact: Q4_K_M + turbo3 = 7.127 (+1.39% vs q8_0 = 7.030). Safe on 27B+ models.
+
+**Warning**: Small Q4_K_M models (<10B) may have catastrophic PPL with symmetric turbo K. Use asymmetric (`-ctk q8_0 -ctv turbo3`) for safety. See [TheTom's research](https://github.com/ggml-org/llama.cpp/discussions/20969).
+
+## Recommended Configurations
+
+| Goal | Config | Command |
+|------|--------|---------|
+| **Maximum short-ctx speed** | Q4_K_M weights + turbo3 KV | `-m model-Q4_K_M.gguf -ctk turbo3 -ctv turbo3 -fa` |
+| **Maximum long-ctx speed** | Q4_K_M weights + turbo2 KV | `-m model-Q4_K_M.gguf -ctk turbo2 -ctv turbo2 -fa` |
+| **Best quality** | Q6_K weights + turbo4 KV | `-m model-Q6_K.gguf -ctk turbo4 -ctv turbo4 -fa` |
+| **Quality-optimal asymmetric** | Q6_K weights + K=turbo4/V=q8_0 | `-m model-Q6_K.gguf -ctk turbo4 -ctv q8_0 -fa` |
+| **Maximum compression** | Q4_K_M weights + turbo1.5 KV | `-m model-Q4_K_M.gguf -ctk turbo1.5 -ctv turbo1.5 -fa` |
+| **Boundary V protection** | turbo2 V (auto-enabled) | `-m model.gguf -ctk turbo3 -ctv turbo2 -fa` (Boundary V activates automatically) |
+
+## Quick Start
+
+```bash
+cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="120"
+cmake --build build -j$(nproc)
+
+# turbo3 (best balance — matches q8_0 quality at 5.1x compression)
+./build/bin/llama-cli -hf your-model-GGUF -ctk turbo3 -ctv turbo3 -fa -ngl 99
+
+# turbo2 (long-context champion — beats q8_0 speed at 32K)
+./build/bin/llama-cli -hf your-model-GGUF -ctk turbo2 -ctv turbo2 -fa -ngl 99
+
+# turbo1.5 (8x compression, maximum memory savings)
+./build/bin/llama-cli -hf your-model-GGUF -ctk turbo1.5 -ctv turbo1.5 -fa -ngl 99
+
+# Server mode
+./build/bin/llama-server -hf your-model-GGUF -ctk turbo3 -ctv turbo3 -fa -ngl 99 --port 8080
+
+# Asymmetric (different K and V types)
+./build/bin/llama-cli -hf your-model-GGUF -ctk turbo4 -ctv turbo3 -fa -ngl 99
+```
+
+**Notes:**
+- `-fa` enables Flash Attention (required for native turbo decode)
+- Use `--no-mmap` on WSL2 to disable mmap (avoids GPU stalls from page cache)
+- Adjust `-DCMAKE_CUDA_ARCHITECTURES` for your GPU: `86` (3090 Ti), `89` (4090), `120` (5090)
+
+## Multi-Model Validation
+
+Tested across 5 model architectures with head dimensions D=64, 96, 128, 256 on RTX 5090:
+
+| Model | Params | D | GQA | Status | turbo3 tok/s | q8_0 tok/s | Prefill tok/s |
+|-------|-------:|:-:|:---:|:------:|---:|---:|---:|
+| Llama-3.2-1B | 1.24B | 64 | 4:1 | PASS | 672 | 691 | 38,930 |
+| Phi-3.5-mini | 3.82B | 96 | 1:1 | FALLBACK | 221* | 247 (f16) | N/A |
+| Phi-4-mini | 3.84B | 128 | 3:1 | PASS | 274 | 275 | 18,433 |
+| Llama-3.3-8B | 8.03B | 128 | 4:1 | PASS | 177 | 181 | 10,558 |
+| Gemma-3-12B | 12.2B | 256 | 2:1 | PASS | 106 | 91 | 6,632 |
+
+\* D=96: graceful fallback to non-FA attention. Slower but correct — not a crash.
+
+### Supported Head Dimensions
+
+The VEC Flash Attention kernel supports **D=64, D=128, D=256** (`D % 64 == 0` required). Models with other head dimensions (e.g., D=96) fall back to standard mul_mat attention automatically — slower but fully functional.
+
+## Cross-GPU Validation
+
+Validated on 4 NVIDIA GPUs across 3 architecture generations, **1,351+ total stability iterations, zero failures**:
+
+| GPU | SM | VRAM | Stability | PPL Drift | turbo2 > q8_0 at 32K? |
+|-----|:--:|-----:|:---------:|:---------:|:---------------------:|
+| RTX 5090 | SM120 | 32 GB | 340+ iterations | None | Yes (58.61 vs 55.60) |
+| RTX 3090 Ti (OC) | SM86 | 24 GB | 486+ iterations, 48 PPL checks | Bit-exact | Yes (81.58 vs 77.44) |
+| RTX 3090 | SM86 | 24 GB | 100+ iterations | PPL bit-exact | Yes (63.12 vs 61.0) |
+| RTX 4090M | SM89 | 16 GB | 425+ iterations, 14+ PPL checks | Bit-exact | Yes (52.7 vs 52.0) |
+
+### RTX 3090 Ti (SM86, 24 GB GDDR6X, OC +2200 mem, Qwen 3.5 9B Q8_0)
+
+| Type | bpv | Short | 32K | 64K | PPL ctx=512 |
+|------|----:|------:|----:|----:|:-----------:|
+| q8_0 | 8.5 | 91.01 | 77.44 | OOM | 8.525 |
+| turbo4 | 4.25 | 90.03 | 75.55 | OOM | 8.634 |
+| turbo3 | 3.125 | 90.35 | 75.01 | 61.47 | 8.624 |
+| **turbo2** | **2.125** | **90.75** | **81.58** | **72.79** | 8.747 |
+| turbo1.5 | 2.00 | 90.13 | 74.85 | 63.44 | 9.402 |
+
+turbo2 at 32K = **81.58 tok/s** — beats q8_0 (77.44) by 5.3% at 7.5x compression. turbo2 64K = **72.79 tok/s** where q8_0 OOMs. K=turbo3/V=q8_0 PPL (8.515) beats pure q8_0 (8.525) — K compression is free. OC: +100 core, +2200 mem (golden sample), 516W. Speed measured with `-d` flag (tg128 @ depth), ±0.3% variance.
+
+**NIAH** (25 tests, 4K-64K, max_tokens=4000): q8_0=turbo3=turbo2=**92%**, turbo1.5=**100%**. With sufficient token budget, all types converge — remaining failures at 32K/64K depth 10% are model-specific, not turbo degradation.
+
+### RTX 4090M Laptop (SM89, 16 GB GDDR6, Qwen 3.5 9B Q8_0)
+
+| Type | bpv | Short | 32K | PPL ctx=512 |
+|------|----:|------:|----:|:-----------:|
+| q8_0 | 8.5 | 55.5 | 52.0 | 9.374 |
+| turbo4 | 4.25 | 55.9 | 52.4 | 9.535 |
+| turbo3 | 3.125 | 55.7 | 49.0 | 9.683 |
+| **turbo2** | **2.125** | **55.9** | **52.7** | 9.584 |
+| turbo1.5 | 2.00 | 55.7 | 48.3 | 10.394 |
+
+All types ~55-56 tok/s at short context. turbo2 at 32K **matches q8_0** (52.7 vs 52.0) on a 16GB laptop GPU. Max context capped at 32K (65K crashes WSL2 OOM). Speed measured with `-d` flag (tg128 @ depth). NIAH (max_tokens=4000): q8_0=turbo3=**100%**, turbo2=**95%**, turbo1.5=50%.
+
+### 32K Context — turbo2 Beats q8_0 on ALL Models (RTX 5090)
+
+| Model | Params | D | turbo2 32K | q8_0 32K | Advantage |
+|-------|-------:|:-:|----------:|---------:|:---------:|
+| Phi-4-mini | 3.84B | 128 | 182.50 | 139.72 | **+31%** |
+| Llama-3.3-8B | 8.03B | 128 | 131.64 | 117.73 | **+12%** |
+| Gemma-3-12B | 12.2B | 256 | 104.50 | 95.76 | **+9%** |
+| Qwen 27B | 26.9B | 256 | 58.61 | 55.60 | **+5%** |
+
+turbo2 advantage scales with bandwidth-boundedness: smaller models benefit more.
+
+## KL Divergence vs f16 (RTX 5090, 27B Q6_K, 100 prompts)
+
+| Type | KL Divergence | Top-1 Agreement | Delta-p RMS |
+|------|:------------:|:---------------:|:-----------:|
+| q8_0 | 0.000408 | 100.0% | 0.0153 |
+| turbo4 | 0.006485 | 99.0% | 0.0488 |
+| turbo3 | 0.012495 | 93.0% | 0.0664 |
+| turbo2 | 0.032700 | 91.0% | 0.1146 |
+| turbo1.5 | 0.062681 | 88.0% | 0.1502 |
+
+## Prefill Context Scaling (RTX 5090, 27B Q6_K, tok/s)
+
+| Context | q8_0 | turbo4 | turbo3 | turbo2 | turbo1.5 |
+|---------|:----:|:------:|:------:|:------:|:--------:|
+| pp512 | 3,512 | 3,548 | 3,547 | 3,649 | 3,577 |
+| pp4096 | 3,457 | 3,494 | 3,495 | 3,452 | 3,467 |
+| pp8192 | 3,390 | 3,390 | 3,414 | 3,394 | 3,394 |
+| pp16384 | 3,347 | 3,304 | 3,304 | 3,304 | 3,304 |
+| pp32768 | 2,839 | 2,815 | 2,801 | 2,805 | 2,808 |
+
+Prefill auto-dequants turbo→fp16 and uses MMA/TILE kernels. All types track q8_0 with negligible overhead.
+
+## Sparse V Skip — Zero Quality Cost, Free Speed
+
+| Metric | Sparse V ON | Sparse V OFF | Delta |
+|--------|:-----------:|:------------:|:-----:|
+| turbo3 PPL ctx=512 | 6.7251 | 6.7251 | **0.000** |
+| turbo3 32K speed | +4.6% | baseline | **+4.6%** |
+
+Sparse V skips V dequantization for attention positions with negligible weight. Proven zero quality impact via controlled A/B test (PPL bit-identical). Type-adaptive thresholds: 5e-3 for turbo3/turbo4, 1e-2 for turbo2/turbo1.5.
+
+## Asymmetric K/V Quality Matrix (PPL ctx=512, 27B Q6_K, wikitext-103 50ch)
+
+| K \ V | q8_0 | turbo4 | turbo3 | turbo2 |
+|-------|:----:|:------:|:------:|:------:|
+| q8_0 | 6.6395 | 6.6935 | 6.6885 | 6.8630 |
+| turbo4 | 6.6580 | 6.7102 | 6.7088 | 6.8821 |
+| turbo3 | 6.6698 | 6.7259 | 6.7251 | 6.8849 |
+| turbo2 | 6.8168 | 6.8687 | 6.8429 | 7.0396 |
+
+V type dominates PPL (columns vary more than rows). K compression is nearly free — K=turbo3/V=q8_0 is almost identical to q8_0/q8_0.
+
+## Tips
+
+- **Best quality-per-bit**: `K=turbo4/V=q8_0` asymmetric config actually **beats pure q8_0 PPL** (6.155 vs 6.162 at ctx=2048 on 9B) while using less memory.
+- **Layer-adaptive mode 2**: `TURBO_LAYER_ADAPTIVE=2` closes 40% of the turbo3-to-q8_0 PPL gap at zero performance cost.
+- **Boundary V protection**: Auto-enabled when using `-ctv turbo2` (mode 12). Protects first4+last4 layers with q8_0-V, recovers 37-91% of the turbo2-to-turbo3 quality gap. Opt-out: `TURBO_LAYER_ADAPTIVE=0`.
+- **Q4_K_M stacking**: Safe on 27B+ models (PPL +1.39%). For small Q4_K_M models (<10B), use `-ctk q8_0 -ctv turbo3` to avoid catastrophic PPL from double quantization noise in K.
+
+## Limitations
+
+- **Head dimension**: Only D∈{64, 128, 256} use native Flash Attention. D=80, D=96, D=112, and others gracefully fall back to mul_mat attention (slower but correct).
+- **SM120 D=256 LUT**: Due to a confirmed NVIDIA compiler bug ([NVBUG 5218000](https://docs.nvidia.com/cuda/cublasdx/0.5.0/release_notes.html), [NVBUG 5288270](https://docs.nvidia.com/cuda/cusolverdx/release_notes.html)), the LUT scoring optimization is automatically disabled for D=256 models on SM120 (RTX 5090). The VEC kernel uses vec_dot scoring instead — same speed, correct output, zero PPL impact. D=64 and D=128 models use LUT normally. Tested across CUDA 12.8 through 13.2 — all affected. Will re-enable when NVIDIA fixes SM120 codegen.
+- **Attention sinks**: Implemented but provide 0% PPL improvement across all tested configurations. **Warning**: `TURBO_SINK_SIZE` values {1, 4, 16} crash on SM89 (RTX 4090). Sizes {0, 2, 8} work. SM86 and SM120 are unaffected.
+- **V sinks**: Dead end — register pressure causes -12.7% speed regression at 32K.
+- **FP4 tensor core acceleration**: Not viable. Q values are too small for E2M1 (99.5% map to zero), and no mixed fp16×E2M1 MMA instruction exists on SM120.
+- **Known Gemma 3 issues**: Gibberish after context shift and slow quantized KV cache are upstream llama.cpp bugs, not TurboQuant-specific.
+
+## Impact of CUDA Kernel Optimizations
+
+Measured by comparing the base TurboQuant implementation against the optimized fork on the same GPU, same model, back-to-back. All speed with `-d` flag (tg128 @ depth).
+
+### RTX 5090 (27B Q6_K)
+
+| Type | Before | After | Improvement |
+|------|:------:|:-----:|:-----------:|
+| Short (all types) | 63-65 | 63-65 | ~tie |
+| turbo4 32K | 38.88 | 56.73 | **+45.9%** |
+| turbo3 32K | 46.62 | 55.84 | **+19.8%** |
+| turbo2 32K | 51.69 | 58.61 | **+13.4%** |
+
+### RTX 3090 (9B Q8_0)
+
+| Type | Before | After | Improvement |
+|------|:------:|:-----:|:-----------:|
+| q8_0 32K | 56.91 | 61.0 | **+7.2%** |
+| turbo4 32K | 35.63 | 60.28 | **+69%** |
+| turbo3 32K | 44.79 | 56.82 | **+27%** |
+| turbo2 32K | 53.21 | 63.12 | **+19%** |
+| turbo3 64K | 33.43 | 49.27 | **+47%** |
+| turbo2 64K | 42.45 | 56.91 | **+34%** |
+
+### RTX 4090M (9B Q8_0)
+
+| Type | Before | After | Improvement |
+|------|:------:|:-----:|:-----------:|
+| Short (all types) | 55-56 | 55-56 | ~tie |
+| q8_0 32K | 48.2 | 52.0 | **+8%** |
+| turbo4 32K | 34.5 | 52.4 | **+52%** |
+| turbo3 32K | 40.3 | 49.0 | **+22%** |
+| turbo2 32K | 44.9 | 52.7 | **+17%** |
+
+**Pattern across 4 GPUs**: Short context is identical or near-identical (weight-loading bound). Optimizations show at **32K+** where KV bandwidth dominates — LUT scoring, nthreads_KQ=8, and sparse V skip reduce per-token KV access cost. turbo4 benefits most (+46-68%) because its larger KV amplifies the unoptimized dequant cost. Advantage grows with context depth: 32K → 64K shows +34-47% on the 3090.
+
+### Quality (wikitext-2, 8 chunks)
+
+| Metric | Before | After | Delta |
+|--------|:------:|:-----:|:-----:|
+| q8_0 PPL 512 | 6.7590 | 6.7590 | identical |
+| turbo3 PPL 512 | 6.8380 | 6.8522 | +0.2% |
+| turbo3 PPL 2048 | 5.6997 | **5.6744** (=q8_0) | **-0.4%** (better) |
+
+q8_0 identical. Optimized turbo3 at ctx=2048 equals q8_0 exactly (5.6744 = 5.6744).
+
+## Acknowledgments and Contributions
+
+### This Fork (Madreag)
+
+CUDA kernel optimizations, cross-GPU validation, and quality testing by [@Madreag](https://github.com/Madreag):
+
+**Kernel Optimizations:**
+- 8-wide LUT scoring for turbo3/turbo2 — 2 qs bytes per iteration, +4.7% at 32K
+- Half-precision shared memory LUT (float→half) — halves shmem bandwidth, +2.45% at 32K
+- `__expf` fast-math softmax — all 5 sites in VEC kernel, +3.69% at 32K, PPL bit-exact
+- `nthreads_KQ=8` for all turbo types — 4 interleaved dots/warp, up to +17.7% at 32K
+- `static constexpr __device__` centroid arrays — register-allocated, 0 latency
+- L2 prefetch hints in VEC decode loop — +2.9% at 32K
+- `__launch_bounds__(128, 3)` occupancy fix — 2→3 blocks/SM, +7-13% at 32K
+- Sparse V threshold escalation (1e-6→5e-3/1e-2) — type-adaptive, +5-28% at 32K, PPL bit-exact
+- D=256 LUT disable for SM120 — workaround for NVIDIA codegen bug (NVBUG 5218000/5288270)
+- Block-128 CUDA validation — turbo3 5.12x compression, turbo2 7.53x
+
+**Architecture & Features:**
+- All 4 turbo types ported to CUDA (turbo4, turbo3, turbo2, turbo1.5)
+- 36 asymmetric K×V combinations with full VEC template instances
+- 15 layer-adaptive modes (KV ordinal-based, hybrid architecture compatible)
+- Graph-compatible attention sinks (`__device__` + `cudaMemcpyAsync`)
+- D=64/128/256 FA dispatch with graceful D=96 fallback
+
+**Validation:**
+- 1,351+ stability iterations across 4 NVIDIA GPUs (SM86×2/SM89/SM120), zero failures
+- 5-model architecture sweep (D=64/96/128/256, GQA 1:1 to 4:1)
+- NIAH quality testing across 4 GPUs (4K-64K): q8_0/turbo3 **100%** on 5090, 3090, 4090M; all types **92%** on 3090 Ti
+- Extreme context: turbo2 at 256K = 42.57 tok/s on consumer RTX 5090
+
+### Upstream Contributors
+
+- **[TheTom](https://github.com/TheTom)** — Metal implementation, turbo4 resurrection (7 bugs fixed), asymmetric K/V discovery, turbo3 norm correction, block-128 storage research, sparse V concept, quality validation methodology
+- **[signalnine](https://github.com/signalnine)** — Original CUDA port of TurboQuant for llama.cpp (PR #3 to TheTom's repo), InnerQ per-channel equalization
+- **[spiritbuun](https://github.com/spiritbuun)** — turbo4 norm correction (separate CUDA fork), inverse FWHT prefill optimization
+- **[HyperionMS2040](https://github.com/HyperionMS2040)** — Block-128 SET_ROWS warp-to-block mapping fix (`7cb6edb`), validated PPL-identical on SM86
+
+### Paper
+
+[TurboQuant: Online Vector Quantization for KV Cache Compression](https://arxiv.org/abs/2504.19874) — Google Research, ICLR 2026.
+
+---
+
+*Below is the original llama.cpp README.*
+
+---
+
+# llama.cpp
+
+![llama](https://user-images.githubusercontent.com/1991296/230134379-7181e485-c521-4d23-a0d6-f7b3b61ba524.png)
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Release](https://img.shields.io/github/v/release/ggml-org/llama.cpp)](https://github.com/ggml-org/llama.cpp/releases)
+[![Server](https://github.com/ggml-org/llama.cpp/actions/workflows/server.yml/badge.svg)](https://github.com/ggml-org/llama.cpp/actions/workflows/server.yml)
+
+[Manifesto](https://github.com/ggml-org/llama.cpp/discussions/205) / [ggml](https://github.com/ggml-org/ggml) / [ops](https://github.com/ggml-org/llama.cpp/blob/master/docs/ops.md)
+
+LLM inference in C/C++
+
+## Recent API changes
+
+- [Changelog for `libllama` API](https://github.com/ggml-org/llama.cpp/issues/9289)
+- [Changelog for `llama-server` REST API](https://github.com/ggml-org/llama.cpp/issues/9291)
+
+## Hot topics
+
+- **Hugging Face cache migration: models downloaded with `-hf` are now stored in the standard Hugging Face cache directory, enabling sharing with other HF tools.**
+- **[guide : using the new WebUI of llama.cpp](https://github.com/ggml-org/llama.cpp/discussions/16938)**
+- [guide : running gpt-oss with llama.cpp](https://github.com/ggml-org/llama.cpp/discussions/15396)
+- [[FEEDBACK] Better packaging for llama.cpp to support downstream consumers 🤗](https://github.com/ggml-org/llama.cpp/discussions/15313)
+- Support for the `gpt-oss` model with native MXFP4 format has been added | [PR](https://github.com/ggml-org/llama.cpp/pull/15091) | [Collaboration with NVIDIA](https://blogs.nvidia.com/blog/rtx-ai-garage-openai-oss) | [Comment](https://github.com/ggml-org/llama.cpp/discussions/15095)
+- Multimodal support arrived in `llama-server`: [#12898](https://github.com/ggml-org/llama.cpp/pull/12898) | [documentation](./docs/multimodal.md)
+- VS Code extension for FIM completions: https://github.com/ggml-org/llama.vscode
+- Vim/Neovim plugin for FIM completions: https://github.com/ggml-org/llama.vim
+- Hugging Face Inference Endpoints now support GGUF out of the box! https://github.com/ggml-org/llama.cpp/discussions/9669
+- Hugging Face GGUF editor: [discussion](https://github.com/ggml-org/llama.cpp/discussions/9268) | [tool](https://huggingface.co/spaces/CISCai/gguf-editor)
+
+----
+
+## Quick start
+
+Getting started with llama.cpp is straightforward. Here are several ways to install it on your machine:
+
+- Install `llama.cpp` using [brew, nix or winget](docs/install.md)
+- Run with Docker - see our [Docker documentation](docs/docker.md)
+- Download pre-built binaries from the [releases page](https://github.com/ggml-org/llama.cpp/releases)
+- Build from source by cloning this repository - check out [our build guide](docs/build.md)
+
+Once installed, you'll need a model to work with. Head to the [Obtaining and quantizing models](#obtaining-and-quantizing-models) section to learn more.
+
+Example command:
+
+```sh
+# Use a local model file
+llama-cli -m my_model.gguf
+
+# Or download and run a model directly from Hugging Face
+llama-cli -hf ggml-org/gemma-3-1b-it-GGUF
+
+# Launch OpenAI-compatible API server
+llama-server -hf ggml-org/gemma-3-1b-it-GGUF
+```
+
+## Description
+
+The main goal of `llama.cpp` is to enable LLM inference with minimal setup and state-of-the-art performance on a wide
+range of hardware - locally and in the cloud.
+
+- Plain C/C++ implementation without any dependencies
+- Apple silicon is a first-class citizen - optimized via ARM NEON, Accelerate and Metal frameworks
+- AVX, AVX2, AVX512 and AMX support for x86 architectures
+- RVV, ZVFH, ZFH, ZICBOP and ZIHINTPAUSE support for RISC-V architectures
+- 1.5-bit, 2-bit, 3-bit, 4-bit, 5-bit, 6-bit, and 8-bit integer quantization for faster inference and reduced memory use
+- Custom CUDA kernels for running LLMs on NVIDIA GPUs (support for AMD GPUs via HIP and Moore Threads GPUs via MUSA)
+- Vulkan and SYCL backend support
+- CPU+GPU hybrid inference to partially accelerate models larger than the total VRAM capacity
+
+The `llama.cpp` project is the main playground for developing new features for the [ggml](https://github.com/ggml-org/ggml) library.
+
+<details>
+<summary>Models</summary>
+
+Typically finetunes of the base models below are supported as well.
+
+Instructions for adding support for new models: [HOWTO-add-model.md](docs/development/HOWTO-add-model.md)
+
+#### Text-only
+
+- [X] LLaMA 🦙
+- [x] LLaMA 2 🦙🦙
+- [x] LLaMA 3 🦙🦙🦙
+- [X] [Mistral 7B](https://huggingface.co/mistralai/Mistral-7B-v0.1)
+- [x] [Mixtral MoE](https://huggingface.co/models?search=mistral-ai/Mixtral)
+- [x] [DBRX](https://huggingface.co/databricks/dbrx-instruct)
+- [x] [Jamba](https://huggingface.co/ai21labs)
+- [X] [Falcon](https://huggingface.co/models?search=tiiuae/falcon)
+- [X] [Chinese LLaMA / Alpaca](https://github.com/ymcui/Chinese-LLaMA-Alpaca) and [Chinese LLaMA-2 / Alpaca-2](https://github.com/ymcui/Chinese-LLaMA-Alpaca-2)
+- [X] [Vigogne (French)](https://github.com/bofenghuang/vigogne)
+- [X] [BERT](https://github.com/ggml-org/llama.cpp/pull/5423)
+- [X] [Koala](https://bair.berkeley.edu/blog/2023/04/03/koala/)
+- [X] [Baichuan 1 & 2](https://huggingface.co/models?search=baichuan-inc/Baichuan) + [derivations](https://huggingface.co/hiyouga/baichuan-7b-sft)
+- [X] [Aquila 1 & 2](https://huggingface.co/models?search=BAAI/Aquila)
+- [X] [Starcoder models](https://github.com/ggml-org/llama.cpp/pull/3187)
+- [X] [Refact](https://huggingface.co/smallcloudai/Refact-1_6B-fim)
+- [X] [MPT](https://github.com/ggml-org/llama.cpp/pull/3417)
+- [X] [Bloom](https://github.com/ggml-org/llama.cpp/pull/3553)
+- [x] [Yi models](https://huggingface.co/models?search=01-ai/Yi)
+- [X] [StableLM models](https://huggingface.co/stabilityai)
+- [x] [Deepseek models](https://huggingface.co/models?search=deepseek-ai/deepseek)
+- [x] [Qwen models](https://huggingface.co/models?search=Qwen/Qwen)
+- [x] [PLaMo-13B](https://github.com/ggml-org/llama.cpp/pull/3557)
+- [x] [Phi models](https://huggingface.co/models?search=microsoft/phi)
+- [x] [PhiMoE](https://github.com/ggml-org/llama.cpp/pull/11003)
+- [x] [GPT-2](https://huggingface.co/gpt2)
+- [x] [Orion 14B](https://github.com/ggml-org/llama.cpp/pull/5118)
+- [x] [InternLM2](https://huggingface.co/models?search=internlm2)
+- [x] [CodeShell](https://github.com/WisdomShell/codeshell)
+- [x] [Gemma](https://ai.google.dev/gemma)
+- [x] [Mamba](https://github.com/state-spaces/mamba)
+- [x] [Grok-1](https://huggingface.co/keyfan/grok-1-hf)
+- [x] [Xverse](https://huggingface.co/models?search=xverse)
+- [x] [Command-R models](https://huggingface.co/models?search=CohereForAI/c4ai-command-r)
+- [x] [SEA-LION](https://huggingface.co/models?search=sea-lion)
+- [x] [GritLM-7B](https://huggingface.co/GritLM/GritLM-7B) + [GritLM-8x7B](https://huggingface.co/GritLM/GritLM-8x7B)
+- [x] [OLMo](https://allenai.org/olmo)
+- [x] [OLMo 2](https://allenai.org/olmo)
+- [x] [OLMoE](https://huggingface.co/allenai/OLMoE-1B-7B-0924)
+- [x] [Granite models](https://huggingface.co/collections/ibm-granite/granite-code-models-6624c5cec322e4c148c8b330)
+- [x] [GPT-NeoX](https://github.com/EleutherAI/gpt-neox) + [Pythia](https://github.com/EleutherAI/pythia)
+- [x] [Snowflake-Arctic MoE](https://huggingface.co/collections/Snowflake/arctic-66290090abe542894a5ac520)
+- [x] [Smaug](https://huggingface.co/models?search=Smaug)
+- [x] [Poro 34B](https://huggingface.co/LumiOpen/Poro-34B)
+- [x] [Bitnet b1.58 models](https://huggingface.co/1bitLLM)
+- [x] [Flan T5](https://huggingface.co/models?search=flan-t5)
+- [x] [Open Elm models](https://huggingface.co/collections/apple/openelm-instruct-models-6619ad295d7ae9f868b759ca)
+- [x] [ChatGLM3-6b](https://huggingface.co/THUDM/chatglm3-6b) + [ChatGLM4-9b](https://huggingface.co/THUDM/glm-4-9b) + [GLMEdge-1.5b](https://huggingface.co/THUDM/glm-edge-1.5b-chat) + [GLMEdge-4b](https://huggingface.co/THUDM/glm-edge-4b-chat)
+- [x] [GLM-4-0414](https://huggingface.co/collections/THUDM/glm-4-0414-67f3cbcb34dd9d252707cb2e)
+- [x] [SmolLM](https://huggingface.co/collections/HuggingFaceTB/smollm-6695016cad7167254ce15966)
+- [x] [EXAONE-3.0-7.8B-Instruct](https://huggingface.co/LGAI-EXAONE/EXAONE-3.0-7.8B-Instruct)
+- [x] [FalconMamba Models](https://huggingface.co/collections/tiiuae/falconmamba-7b-66b9a580324dd1598b0f6d4a)
+- [x] [Jais](https://huggingface.co/inceptionai/jais-13b-chat)
+- [x] [Bielik-11B-v2.3](https://huggingface.co/collections/speakleash/bielik-11b-v23-66ee813238d9b526a072408a)
+- [x] [RWKV-7](https://huggingface.co/collections/shoumenchougou/rwkv7-gxx-gguf)
+- [x] [RWKV-6](https://github.com/BlinkDL/RWKV-LM)
+- [x] [QRWKV-6](https://huggingface.co/recursal/QRWKV6-32B-Instruct-Preview-v0.1)
+- [x] [GigaChat-20B-A3B](https://huggingface.co/ai-sage/GigaChat-20B-A3B-instruct)
+- [X] [Trillion-7B-preview](https://huggingface.co/trillionlabs/Trillion-7B-preview)
+- [x] [Ling models](https://huggingface.co/collections/inclusionAI/ling-67c51c85b34a7ea0aba94c32)
+- [x] [LFM2 models](https://huggingface.co/collections/LiquidAI/lfm2-686d721927015b2ad73eaa38)
+- [x] [Hunyuan models](https://huggingface.co/collections/tencent/hunyuan-dense-model-6890632cda26b19119c9c5e7)
+- [x] [BailingMoeV2 (Ring/Ling 2.0) models](https://huggingface.co/collections/inclusionAI/ling-v2-68bf1dd2fc34c306c1fa6f86)
+
+#### Multimodal
+
+- [x] [LLaVA 1.5 models](https://huggingface.co/collections/liuhaotian/llava-15-653aac15d994e992e2677a7e), [LLaVA 1.6 models](https://huggingface.co/collections/liuhaotian/llava-16-65b9e40155f60fd046a5ccf2)
+- [x] [BakLLaVA](https://huggingface.co/models?search=SkunkworksAI/Bakllava)
+- [x] [Obsidian](https://huggingface.co/NousResearch/Obsidian-3B-V0.5)
+- [x] [ShareGPT4V](https://huggingface.co/models?search=Lin-Chen/ShareGPT4V)
+- [x] [MobileVLM 1.7B/3B models](https://huggingface.co/models?search=mobileVLM)
+- [x] [Yi-VL](https://huggingface.co/models?search=Yi-VL)
+- [x] [Mini CPM](https://huggingface.co/models?search=MiniCPM)
+- [x] [Moondream](https://huggingface.co/vikhyatk/moondream2)
+- [x] [Bunny](https://github.com/BAAI-DCAI/Bunny)
+- [x] [GLM-EDGE](https://huggingface.co/models?search=glm-edge)
+- [x] [Qwen2-VL](https://huggingface.co/collections/Qwen/qwen2-vl-66cee7455501d7126940800d)
+- [x] [LFM2-VL](https://huggingface.co/collections/LiquidAI/lfm2-vl-68963bbc84a610f7638d5ffa)
+
+</details>
+
+<details>
+<summary>Bindings</summary>
+
+- Python: [ddh0/easy-llama](https://github.com/ddh0/easy-llama)
+- Python: [abetlen/llama-cpp-python](https://github.com/abetlen/llama-cpp-python)
+- Go: [go-skynet/go-llama.cpp](https://github.com/go-skynet/go-llama.cpp)
+- Node.js: [withcatai/node-llama-cpp](https://github.com/withcatai/node-llama-cpp)
+- JS/TS (llama.cpp server client): [lgrammel/modelfusion](https://modelfusion.dev/integration/model-provider/llamacpp)
+- JS/TS (Programmable Prompt Engine CLI): [offline-ai/cli](https://github.com/offline-ai/cli)
+- JavaScript/Wasm (works in browser): [tangledgroup/llama-cpp-wasm](https://github.com/tangledgroup/llama-cpp-wasm)
+- Typescript/Wasm (nicer API, available on npm): [ngxson/wllama](https://github.com/ngxson/wllama)
+- Ruby: [yoshoku/llama_cpp.rb](https://github.com/yoshoku/llama_cpp.rb)
+- Rust (more features): [edgenai/llama_cpp-rs](https://github.com/edgenai/llama_cpp-rs)
+- Rust (nicer API): [mdrokz/rust-llama.cpp](https://github.com/mdrokz/rust-llama.cpp)
+- Rust (more direct bindings): [utilityai/llama-cpp-rs](https://github.com/utilityai/llama-cpp-rs)
+- Rust (automated build from crates.io): [ShelbyJenkins/llm_client](https://github.com/ShelbyJenkins/llm_client)
+- C#/.NET: [SciSharp/LLamaSharp](https://github.com/SciSharp/LLamaSharp)
+- C#/VB.NET (more features - community license): [LM-Kit.NET](https://docs.lm-kit.com/lm-kit-net/index.html)
+- Scala 3: [donderom/llm4s](https://github.com/donderom/llm4s)
+- Clojure: [phronmophobic/llama.clj](https://github.com/phronmophobic/llama.clj)
+- React Native: [mybigday/llama.rn](https://github.com/mybigday/llama.rn)
+- Java: [kherud/java-llama.cpp](https://github.com/kherud/java-llama.cpp)
+- Java: [QuasarByte/llama-cpp-jna](https://github.com/QuasarByte/llama-cpp-jna)
+- Zig: [deins/llama.cpp.zig](https://github.com/Deins/llama.cpp.zig)
+- Flutter/Dart: [netdur/llama_cpp_dart](https://github.com/netdur/llama_cpp_dart)
+- Flutter: [xuegao-tzx/Fllama](https://github.com/xuegao-tzx/Fllama)
+- PHP (API bindings and features built on top of llama.cpp): [distantmagic/resonance](https://github.com/distantmagic/resonance) [(more info)](https://github.com/ggml-org/llama.cpp/pull/6326)
+- Guile Scheme: [guile_llama_cpp](https://savannah.nongnu.org/projects/guile-llama-cpp)
+- Swift [srgtuszy/llama-cpp-swift](https://github.com/srgtuszy/llama-cpp-swift)
+- Swift [ShenghaiWang/SwiftLlama](https://github.com/ShenghaiWang/SwiftLlama)
+- Delphi [Embarcadero/llama-cpp-delphi](https://github.com/Embarcadero/llama-cpp-delphi)
+- Go (no CGo needed): [hybridgroup/yzma](https://github.com/hybridgroup/yzma)
+- Android: [llama.android](/examples/llama.android)
+
+</details>
+
+<details>
+<summary>UIs</summary>
+
+*(to have a project listed here, it should clearly state that it depends on `llama.cpp`)*
+
+- [AI Sublime Text plugin](https://github.com/yaroslavyaroslav/OpenAI-sublime-text) (MIT)
+- [BonzAI App](https://apps.apple.com/us/app/bonzai-your-local-ai-agent/id6752847988) (proprietary)
+- [cztomsik/ava](https://github.com/cztomsik/ava) (MIT)
+- [Dot](https://github.com/alexpinel/Dot) (GPL)
+- [eva](https://github.com/ylsdamxssjxxdd/eva) (MIT)
+- [iohub/collama](https://github.com/iohub/coLLaMA) (Apache-2.0)
+- [janhq/jan](https://github.com/janhq/jan) (AGPL)
+- [johnbean393/Sidekick](https://github.com/johnbean393/Sidekick) (MIT)
+- [KanTV](https://github.com/zhouwg/kantv?tab=readme-ov-file) (Apache-2.0)
+- [KodiBot](https://github.com/firatkiral/kodibot) (GPL)
+- [llama.vim](https://github.com/ggml-org/llama.vim) (MIT)
+- [LARS](https://github.com/abgulati/LARS) (AGPL)
+- [Llama Assistant](https://github.com/vietanhdev/llama-assistant) (GPL)
+- [LlamaLib](https://github.com/undreamai/LlamaLib) (Apache-2.0)
+- [LLMFarm](https://github.com/guinmoon/LLMFarm?tab=readme-ov-file) (MIT)
+- [LLMUnity](https://github.com/undreamai/LLMUnity) (MIT)
+- [LMStudio](https://lmstudio.ai/) (proprietary)
+- [LocalAI](https://github.com/mudler/LocalAI) (MIT)
+- [LostRuins/koboldcpp](https://github.com/LostRuins/koboldcpp) (AGPL)
+- [MindMac](https://mindmac.app) (proprietary)
+- [MindWorkAI/AI-Studio](https://github.com/MindWorkAI/AI-Studio) (FSL-1.1-MIT)
+- [Mobile-Artificial-Intelligence/maid](https://github.com/Mobile-Artificial-Intelligence/maid) (MIT)
+- [Mozilla-Ocho/llamafile](https://github.com/Mozilla-Ocho/llamafile) (Apache-2.0)
+- [nat/openplayground](https://github.com/nat/openplayground) (MIT)
+- [nomic-ai/gpt4all](https://github.com/nomic-ai/gpt4all) (MIT)
+- [ollama/ollama](https://github.com/ollama/ollama) (MIT)
+- [oobabooga/text-generation-webui](https://github.com/oobabooga/text-generation-webui) (AGPL)
+- [PocketPal AI](https://github.com/a-ghorbani/pocketpal-ai) (MIT)
+- [psugihara/FreeChat](https://github.com/psugihara/FreeChat) (MIT)
+- [ptsochantaris/emeltal](https://github.com/ptsochantaris/emeltal) (MIT)
+- [pythops/tenere](https://github.com/pythops/tenere) (AGPL)
+- [ramalama](https://github.com/containers/ramalama) (MIT)
+- [semperai/amica](https://github.com/semperai/amica) (MIT)
+- [withcatai/catai](https://github.com/withcatai/catai) (MIT)
+- [Autopen](https://github.com/blackhole89/autopen) (GPL)
+
+</details>
+
+<details>
+<summary>Tools</summary>
+
+- [akx/ggify](https://github.com/akx/ggify) – download PyTorch models from Hugging Face Hub and convert them to GGML
+- [akx/ollama-dl](https://github.com/akx/ollama-dl) – download models from the Ollama library to be used directly with llama.cpp
+- [crashr/gppm](https://github.com/crashr/gppm) – launch llama.cpp instances utilizing NVIDIA Tesla P40 or P100 GPUs with reduced idle power consumption
+- [gpustack/gguf-parser](https://github.com/gpustack/gguf-parser-go/tree/main/cmd/gguf-parser) - review/check the GGUF file and estimate the memory usage
+- [Styled Lines](https://marketplace.unity.com/packages/tools/generative-ai/styled-lines-llama-cpp-model-292902) (proprietary licensed, async wrapper of inference part for game development in Unity3d with pre-built Mobile and Web platform wrappers and a model example)
+- [unslothai/unsloth](https://github.com/unslothai/unsloth) – 🦥 exports/saves fine-tuned and trained models to GGUF (Apache-2.0)
+
+</details>
+
+<details>
+<summary>Infrastructure</summary>
+
+- [Paddler](https://github.com/intentee/paddler) - Open-source LLMOps platform for hosting and scaling AI in your own infrastructure
+- [GPUStack](https://github.com/gpustack/gpustack) - Manage GPU clusters for running LLMs
+- [llama_cpp_canister](https://github.com/onicai/llama_cpp_canister) - llama.cpp as a smart contract on the Internet Computer, using WebAssembly
+- [llama-swap](https://github.com/mostlygeek/llama-swap) - transparent proxy that adds automatic model switching with llama-server
+- [Kalavai](https://github.com/kalavai-net/kalavai-client) - Crowdsource end to end LLM deployment at any scale
+- [llmaz](https://github.com/InftyAI/llmaz) - ☸️ Easy, advanced inference platform for large language models on Kubernetes.
+- [LLMKube](https://github.com/defilantech/llmkube) - Kubernetes operator for llama.cpp with multi-GPU and Apple Silicon Metal
+  support"
+</details>
+
+<details>
+<summary>Games</summary>
+
+- [Lucy's Labyrinth](https://github.com/MorganRO8/Lucys_Labyrinth) - A simple maze game where agents controlled by an AI model will try to trick you.
+
+</details>
+
+
+## Supported backends
+
+| Backend | Target devices |
+| --- | --- |
+| [Metal](docs/build.md#metal-build) | Apple Silicon |
+| [BLAS](docs/build.md#blas-build) | All |
+| [BLIS](docs/backend/BLIS.md) | All |
+| [SYCL](docs/backend/SYCL.md) | Intel and Nvidia GPU |
+| [OpenVINO [In Progress]](docs/backend/OPENVINO.md) | Intel CPUs, GPUs, and NPUs |
+| [MUSA](docs/build.md#musa) | Moore Threads GPU |
+| [CUDA](docs/build.md#cuda) | Nvidia GPU |
+| [HIP](docs/build.md#hip) | AMD GPU |
+| [ZenDNN](docs/build.md#zendnn) | AMD CPU |
+| [Vulkan](docs/build.md#vulkan) | GPU |
+| [CANN](docs/build.md#cann) | Ascend NPU |
+| [OpenCL](docs/backend/OPENCL.md) | Adreno GPU |
+| [IBM zDNN](docs/backend/zDNN.md) | IBM Z & LinuxONE |
+| [WebGPU [In Progress]](docs/build.md#webgpu) | All |
+| [RPC](https://github.com/ggml-org/llama.cpp/tree/master/tools/rpc) | All |
+| [Hexagon [In Progress]](docs/backend/snapdragon/README.md) | Snapdragon |
+| [VirtGPU](docs/backend/VirtGPU.md) | VirtGPU APIR |
+
+## Obtaining and quantizing models
+
+The [Hugging Face](https://huggingface.co) platform hosts a [number of LLMs](https://huggingface.co/models?library=gguf&sort=trending) compatible with `llama.cpp`:
+
+- [Trending](https://huggingface.co/models?library=gguf&sort=trending)
+- [LLaMA](https://huggingface.co/models?sort=trending&search=llama+gguf)
+
+You can either manually download the GGUF file or directly use any `llama.cpp`-compatible models from [Hugging Face](https://huggingface.co/) or other model hosting sites, by using this CLI argument: `-hf <user>/<model>[:quant]`. For example:
+
+```sh
+llama-cli -hf ggml-org/gemma-3-1b-it-GGUF
+```
+
+By default, the CLI would download from Hugging Face, you can switch to other options with the environment variable `MODEL_ENDPOINT`. The `MODEL_ENDPOINT` must point to a Hugging Face compatible API endpoint.
+
+After downloading a model, use the CLI tools to run it locally - see below.
+
+`llama.cpp` requires the model to be stored in the [GGUF](https://github.com/ggml-org/ggml/blob/master/docs/gguf.md) file format. Models in other data formats can be converted to GGUF using the `convert_*.py` Python scripts in this repo.
+
+The Hugging Face platform provides a variety of online tools for converting, quantizing and hosting models with `llama.cpp`:
+
+- Use the [GGUF-my-repo space](https://huggingface.co/spaces/ggml-org/gguf-my-repo) to convert to GGUF format and quantize model weights to smaller sizes
+- Use the [GGUF-my-LoRA space](https://huggingface.co/spaces/ggml-org/gguf-my-lora) to convert LoRA adapters to GGUF format (more info: https://github.com/ggml-org/llama.cpp/discussions/10123)
+- Use the [GGUF-editor space](https://huggingface.co/spaces/CISCai/gguf-editor) to edit GGUF meta data in the browser (more info: https://github.com/ggml-org/llama.cpp/discussions/9268)
+- Use the [Inference Endpoints](https://ui.endpoints.huggingface.co/) to directly host `llama.cpp` in the cloud (more info: https://github.com/ggml-org/llama.cpp/discussions/9669)
+
+To learn more about model quantization, [read this documentation](tools/quantize/README.md)
+
+## [`llama-cli`](tools/cli)
+
+#### A CLI tool for accessing and experimenting with most of `llama.cpp`'s functionality.
+
+- <details open>
+    <summary>Run in conversation mode</summary>
+
+    Models with a built-in chat template will automatically activate conversation mode. If this doesn't occur, you can manually enable it by adding `-cnv` and specifying a suitable chat template with `--chat-template NAME`
+
+    ```bash
+    llama-cli -m model.gguf
+
+    # > hi, who are you?
+    # Hi there! I'm your helpful assistant! I'm an AI-powered chatbot designed to assist and provide information to users like you. I'm here to help answer your questions, provide guidance, and offer support on a wide range of topics. I'm a friendly and knowledgeable AI, and I'm always happy to help with anything you need. What's on your mind, and how can I assist you today?
+    #
+    # > what is 1+1?
+    # Easy peasy! The answer to 1+1 is... 2!
+    ```
+
+    </details>
+
+- <details>
+    <summary>Run in conversation mode with custom chat template</summary>
+
+    ```bash
+    # use the "chatml" template (use -h to see the list of supported templates)
+    llama-cli -m model.gguf -cnv --chat-template chatml
+
+    # use a custom template
+    llama-cli -m model.gguf -cnv --in-prefix 'User: ' --reverse-prompt 'User:'
+    ```
+
+    </details>
+
+- <details>
+    <summary>Constrain the output with a custom grammar</summary>
+
+    ```bash
+    llama-cli -m model.gguf -n 256 --grammar-file grammars/json.gbnf -p 'Request: schedule a call at 8pm; Command:'
+
+    # {"appointmentTime": "8pm", "appointmentDetails": "schedule a a call"}
+    ```
+
+    The [grammars/](grammars/) folder contains a handful of sample grammars. To write your own, check out the [GBNF Guide](grammars/README.md).
+
+    For authoring more complex JSON grammars, check out https://grammar.intrinsiclabs.ai/
+
+    </details>
+
+
+## [`llama-server`](tools/server)
+
+#### A lightweight, [OpenAI API](https://github.com/openai/openai-openapi) compatible, HTTP server for serving LLMs.
+
+- <details open>
+    <summary>Start a local HTTP server with default configuration on port 8080</summary>
+
+    ```bash
+    llama-server -m model.gguf --port 8080
+
+    # Basic web UI can be accessed via browser: http://localhost:8080
+    # Chat completion endpoint: http://localhost:8080/v1/chat/completions
+    ```
+
+    </details>
+
+- <details>
+    <summary>Support multiple-users and parallel decoding</summary>
+
+    ```bash
+    # up to 4 concurrent requests, each with 4096 max context
+    llama-server -m model.gguf -c 16384 -np 4
+    ```
+
+    </details>
+
+- <details>
+    <summary>Enable speculative decoding</summary>
+
+    ```bash
+    # the draft.gguf model should be a small variant of the target model.gguf
+    llama-server -m model.gguf -md draft.gguf
+    ```
+
+    </details>
+
+- <details>
+    <summary>Serve an embedding model</summary>
+
+    ```bash
+    # use the /embedding endpoint
+    llama-server -m model.gguf --embedding --pooling cls -ub 8192
+    ```
+
+    </details>
+
+- <details>
+    <summary>Serve a reranking model</summary>
+
+    ```bash
+    # use the /reranking endpoint
+    llama-server -m model.gguf --reranking
+    ```
+
+    </details>
+
+- <details>
+    <summary>Constrain all outputs with a grammar</summary>
+
+    ```bash
+    # custom grammar
+    llama-server -m model.gguf --grammar-file grammar.gbnf
+
+    # JSON
+    llama-server -m model.gguf --grammar-file grammars/json.gbnf
+    ```
+
+    </details>
+
+
+## [`llama-perplexity`](tools/perplexity)
+
+#### A tool for measuring the [perplexity](tools/perplexity/README.md) [^1] (and other quality metrics) of a model over a given text.
+
+- <details open>
+    <summary>Measure the perplexity over a text file</summary>
+
+    ```bash
+    llama-perplexity -m model.gguf -f file.txt
+
+    # [1]15.2701,[2]5.4007,[3]5.3073,[4]6.2965,[5]5.8940,[6]5.6096,[7]5.7942,[8]4.9297, ...
+    # Final estimate: PPL = 5.4007 +/- 0.67339
+    ```
+
+    </details>
+
+- <details>
+    <summary>Measure KL divergence</summary>
+
+    ```bash
+    # TODO
+    ```
+
+    </details>
+
+[^1]: [https://huggingface.co/docs/transformers/perplexity](https://huggingface.co/docs/transformers/perplexity)
+
+## [`llama-bench`](tools/llama-bench)
+
+#### Benchmark the performance of the inference for various parameters.
+
+- <details open>
+    <summary>Run default benchmark</summary>
+
+    ```bash
+    llama-bench -m model.gguf
+
+    # Output:
+    # | model               |       size |     params | backend    | threads |          test |                  t/s |
+    # | ------------------- | ---------: | ---------: | ---------- | ------: | ------------: | -------------------: |
+    # | qwen2 1.5B Q4_0     | 885.97 MiB |     1.54 B | Metal,BLAS |      16 |         pp512 |      5765.41 ± 20.55 |
+    # | qwen2 1.5B Q4_0     | 885.97 MiB |     1.54 B | Metal,BLAS |      16 |         tg128 |        197.71 ± 0.81 |
+    #
+    # build: 3e0ba0e60 (4229)
+    ```
+
+    </details>
+
+## [`llama-simple`](examples/simple)
+
+#### A minimal example for implementing apps with `llama.cpp`. Useful for developers.
+
+- <details>
+    <summary>Basic text completion</summary>
+
+    ```bash
+    llama-simple -m model.gguf
+
+    # Hello my name is Kaitlyn and I am a 16 year old girl. I am a junior in high school and I am currently taking a class called "The Art of
+    ```
+
+    </details>
+
+
+## Contributing
+
+- Contributors can open PRs
+- Collaborators will be invited based on contributions
+- Maintainers can push to branches in the `llama.cpp` repo and merge PRs into the `master` branch
+- Any help with managing issues, PRs and projects is very appreciated!
+- See [good first issues](https://github.com/ggml-org/llama.cpp/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) for tasks suitable for first contributions
+- Read the [CONTRIBUTING.md](CONTRIBUTING.md) for more information
+- Make sure to read this: [Inference at the edge](https://github.com/ggml-org/llama.cpp/discussions/205)
+- A bit of backstory for those who are interested: [Changelog podcast](https://changelog.com/podcast/532)
+
+## Other documentation
+
+- [cli](tools/cli/README.md)
+- [completion](tools/completion/README.md)
+- [server](tools/server/README.md)
+- [GBNF grammars](grammars/README.md)
+
+#### Development documentation
+
+- [How to build](docs/build.md)
+- [Running on Docker](docs/docker.md)
+- [Build on Android](docs/android.md)
+- [Performance troubleshooting](docs/development/token_generation_performance_tips.md)
+- [GGML tips & tricks](https://github.com/ggml-org/llama.cpp/wiki/GGML-Tips-&-Tricks)
+
+#### Seminal papers and background on the models
+
+If your issue is with model generation quality, then please at least scan the following links and papers to understand the limitations of LLaMA models. This is especially important when choosing an appropriate model size and appreciating both the significant and subtle differences between LLaMA models and ChatGPT:
+- LLaMA:
+    - [Introducing LLaMA: A foundational, 65-billion-parameter large language model](https://ai.facebook.com/blog/large-language-model-llama-meta-ai/)
+    - [LLaMA: Open and Efficient Foundation Language Models](https://arxiv.org/abs/2302.13971)
+- GPT-3
+    - [Language Models are Few-Shot Learners](https://arxiv.org/abs/2005.14165)
+- GPT-3.5 / InstructGPT / ChatGPT:
+    - [Aligning language models to follow instructions](https://openai.com/research/instruction-following)
+    - [Training language models to follow instructions with human feedback](https://arxiv.org/abs/2203.02155)
+
+## XCFramework
+The XCFramework is a precompiled version of the library for iOS, visionOS, tvOS,
+and macOS. It can be used in Swift projects without the need to compile the
+library from source. For example:
+```swift
+// swift-tools-version: 5.10
+// The swift-tools-version declares the minimum version of Swift required to build this package.
+
+import PackageDescription
+
+let package = Package(
+    name: "MyLlamaPackage",
+    targets: [
+        .executableTarget(
+            name: "MyLlamaPackage",
+            dependencies: [
+                "LlamaFramework"
+            ]),
+        .binaryTarget(
+            name: "LlamaFramework",
+            url: "https://github.com/ggml-org/llama.cpp/releases/download/b5046/llama-b5046-xcframework.zip",
+            checksum: "c19be78b5f00d8d29a25da41042cb7afa094cbf6280a225abe614b03b20029ab"
+        )
+    ]
+)
+```
+The above example is using an intermediate build `b5046` of the library. This can be modified
+to use a different version by changing the URL and checksum.
+
+## Completions
+Command-line completion is available for some environments.
+
+#### Bash Completion
+```bash
+$ build/bin/llama-cli --completion-bash > ~/.llama-completion.bash
+$ source ~/.llama-completion.bash
+```
+Optionally this can be added to your `.bashrc` or `.bash_profile` to load it
+automatically. For example:
+```console
+$ echo "source ~/.llama-completion.bash" >> ~/.bashrc
+```
+
+## Dependencies
+
+- [yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib) - Single-header HTTP server, used by `llama-server` - MIT license
+- [stb-image](https://github.com/nothings/stb) - Single-header image format decoder, used by multimodal subsystem - Public domain
+- [nlohmann/json](https://github.com/nlohmann/json) - Single-header JSON library, used by various tools/examples - MIT License
+- [miniaudio.h](https://github.com/mackron/miniaudio) - Single-header audio format decoder, used by multimodal subsystem - Public domain
+- [subprocess.h](https://github.com/sheredom/subprocess.h) - Single-header process launching solution for C and C++ - Public domain
+
+
+# Research Campaign — 2026-08-15
+
+> **PARTIALLY SUPERSEDED (same day, later hours).** The board below drove the
+> marathon; where verdicts conflict, WORKPLAN-BESTAPP.md wins. Superseded here:
+> the VEC-vs-MMA cliff table (native MMA-turbo kernels shipped: 84-89 tok/s
+> @38K); the art-turn grammar story (real-suite tax ~4%; the penalty was VRAM
+> paging); acceptance-regression bisect (fixed upstream by #27133); ngram/
+> backend-sampling (measured wash); DSpark (doesn't fit at 320K).
+
+> **TIER 0 EXECUTED same evening — measured outcomes:**
+> - Checkpoint cherry-picks (#26885, #25592×2, #24891, #26004) applied,
+>   built, deployed. **Restore-reuse hole CLOSED and verified**: post-restore
+>   turn now processes 49 tokens (was 4,166). Owner swaps at depth: minutes →
+>   ~1s. Conflicts resolved: 24891's n_past_common clamp kept; its
+>   invalidation condition subsumed by 25592's.
+> - **ngram-mod cascade: WASH on our model** (same-day same-prompt: 85.5 vs
+>   83.8 pure) — ngram drafts don't beat the trained MTP head on fresh code.
+>   Not adopted. `--spec-draft-backend-sampling`: also wash (83.0). Not
+>   adopted. Yesterday's 89-98 band was prompt-set variance.
+> - **Verify-batch cliff hypothesis INVERTED by measurement** at 38K depth:
+>   n_max=2 (batch 3 → MMA+F16-dequant) = 41.4 tok/s; n_max=1 (batch 2 →
+>   VEC) = **9.8 tok/s**. The F16-dequant MMA path is the FAST path at depth;
+>   VEC in-kernel dequant is the bottleneck. Implication: MTP-off (batch 1 =
+>   VEC) ≈ ≤10 tok/s at depth → MTP is ~4× at depth, and the **MMA-turbo
+>   kernel port (T1-6) is promoted to top strategic priority** (native turbo
+>   MMA skips the per-step F16 conversion). n_max=2 kept.
+> - Production final: checkpoint binary + unchanged validated flags, smoke
+>   96.7 tok/s finish=stop, VRAM 32039 MiB (+~500MB vs pre-checkpoint —
+>   in-memory checkpoints; monitor, reduce --ctx-checkpoints if WSL dxg
+>   squeezes reappear).
+
+Five parallel research tracks (fork ecosystem, upstream movement, KV-compression
+frontier, decode-speed frontier, serving/reliability) + local verification
+probes against the production tree. Full agent evidence in session; this file
+is the decision board. Production context: Qwen3.8-27B hybrid, turbo4 KV,
+409K YaRN, MTP n_max=2, vision, coding-agent primary. Pin = b10435 (Aug 14),
+11 commits behind master.
+
+## Verified locally during the campaign
+
+- **Prefix reuse WORKS in-lifetime** (turn-2 probe: 58 of 4,120 tokens
+  processed). The "hybrid models full-reprefill every turn" static-analysis
+  claim is REFUTED for our build (Aug-14 recurrent-rollback merges are in).
+- **Prefix reuse DIES across slot restore** (probe: save→erase→restore→turn
+  reprocessed 4,166 of 4,166). Hybrid context-checkpoints don't serialize
+  into slot files (upstream #26004, open). **Every owner swap pays full
+  re-prefill today** — restore is currently decorative for reuse.
+- **`return_progress` is ALIVE in our tree** (server-task.h:55) — the
+  bughunt-era "removed upstream, accepted degradation" record was wrong;
+  proxy progress-comments are presumably functional.
+- `-ctkd/-ctvd` (draft KV types) and `--spec-draft-backend-sampling` exist
+  in our binary, both unused.
+
+## TIER 0 — verified need, hours-to-days each
+
+1. **Checkpoint cherry-pick cluster**: #26004 (checkpoints into slot files,
+   +195) + #25592 (hybrid seq_pos_min gate) + #24891 (checkpoint invalidation
+   after tool-call turns — our exact workload). Closes the verified
+   restore-reuse hole; #25592 was validated upstream on Qwen3.8-27B + MTP on
+   2026-08-14. Payoff: owner swaps and restarts stop costing minutes of
+   re-prefill at depth. [speed+reliability]
+2. **#26885 grammar speedup** — 6 lines, 1.2-1.3× on grammar evaluation.
+   Trivial cherry-pick. [speed]
+3. **`--spec-type ngram-mod,draft-mtp` cascade A/B** — config-only; impls
+   cascade in order (speculative.cpp:2633-2670). Sibling-model measurement:
+   42 → 56.6 tok/s over MTP alone; n-gram drafting is strongest exactly on
+   code (SuffixDecoding 5.3× AgenticSQL; beats EAGLE-3 on code-editing
+   benches). One restart + coding battery. [speed]
+4. **FA verify-batch cliff measurement** — MTP n_max=2 makes the verify batch
+   3 rows; fattn dispatch sends >2 rows to MMA, which has NO turbo instances
+   → need_f16_K/V dequants the cache per step (fattn-common.cuh:1673,1701).
+   Suspect this is the REAL art-turn/depth MTP penalty (not just grammar).
+   A/B decode at ~50-100K ctx: n_max=2 vs n_max=1 (batch 2 = stays VEC).
+   If confirmed: either run n_max=1 or fast-track the MMA-turbo port (T1-6).
+   [speed at depth + closes an open mystery]
+5. **Small flags**: `--spec-draft-backend-sampling` (+~8% claimed at n_max=3,
+   less at 2); `-ctkd f16/q8_0` for the draft context; evaluate ik_llama
+   commit 7642ac3ec (CUDA Q↔f16 copy inefficiency, ~1 day). [speed, small]
+
+## TIER 1 — high value, medium effort
+
+6. **MMA-turbo decode path** (the standing TheTom debt; ecosystem-validated).
+   Now doubly motivated: also structurally fixes T0-4's verify-batch cliff
+   (no F16 fallback for batch>2). Read TheTom PR #234 ("OSCAR2 quantized
+   KV-cache", closed unmerged — CUDA MMA-turbo paths validated on Qwen3.6)
+   before writing anything. [speed, biggest kernel lever]
+7. **Quest-class sparse decode retrofit** — the strategic play at 400K.
+   Frontier consensus: at 4.25bpv we're at the quantization ceiling ("stop
+   optimizing bits, start optimizing reads"); SAW-INT4 (2604.19157) directly
+   validates turbo4's design. Upstream merged reusable block-sparse plumbing
+   (MSA #24908: block scoring → top-k → get_rows → FA over selected KV).
+   Open design problem: per-page min/max metadata over rotated+quantized K.
+   Kascade (2512.16391) anchor-layer reuse fits a 16-attn-layer model well.
+   [speed at depth; multi-week]
+8. **Trajectory/multi-hop quality battery** — highest-signal warning of the
+   scan: third-party REFRACT data (discussion #20969) shows ctv=turbo3 holds
+   PPL/KLD while trajectory score collapses (84→58 on 27B) — V-cache damage
+   that PPL/KLD/NIAH cannot see, aligned with our own "multi-hop is the
+   cliff" note. Unreplicated, but it means: (a) build a multi-hop/agentic
+   battery (Phase-F++) BEFORE any V-bit reduction; (b) it also gates T2-11.
+   We run turbo4-V (empirically clean renders/coding), but our gates are
+   blind on this axis. [quality measurement backbone]
+9. **Draft-context warmup after restore** + slot-restore draft-KV note
+   (upstream C7). [speed, small]
+
+## TIER 2 — strategic options
+
+10. **Grammar stack**: rebuild with `-DLLAMA_LLGUIDANCE=ON` (bundled version
+    in pin is v1.0.1 vs upstream ≥1.7.6 — bump), gate the %llguidance
+    non-llg-build DoS (#25960), measure vs native PEG on our captured tool
+    grammars. Mine #26551 (xgrammar-verified MTP drafts, 3156 lines, open)
+    for the grammar-masked-drafting design — recovers speculation on tool
+    turns (TRT-LLM ablation +6-12% accept length). Backend-sampling-under-
+    grammar remains disabled upstream (sampling.cpp:416) — no fix inbound.
+11. **Bit-allocation search** (free, config-only, GATED on T1-8 battery):
+    K-heavy splits validated by three papers (KQV>QKQV KLD at every budget;
+    K4/V2 75.2% vs K2/V4 54.7%). Our q8-K option: +8.5 KiB/tok → ~280-320K
+    ctx; NOTE #24403 (merged Jul 6) extended V-type FA validation — check
+    asymmetric configs against it. Per-layer via the (now-fixed) adaptive
+    modes. Block-GTQ (2606.24033, built on TurboQuant-MSE) only pays at
+    turbo2/3 (K2V2 NIAH 70.6→97.4; K3V3 +0.7). InnerQ calibration: honest
+    verdict — no published gains above 3 bits; park until a turbo2/3 push
+    (then OSCAR-style attention-aware rotations, arXiv 2605.17757, CUDA
+    port needed).
+12. **Upstream micro-sync to b10447** (11 commits) — cheap; watch
+    `--load-mode` flag rename and the yield_to_queue server thread redesign
+    (#27133). Also monitor #27109/#27140 (prefill collapse on 4-bit KV
+    qwen35 — our shape; check whether turbo converters are vectorized in
+    the MMA/prefill to_fp16 path).
+13. **Ops hardening round 3**: SSE resume tokens (id: + Last-Event-ID replay
+    from capture buffer); owner-lock circuit breaker (fail-fast during
+    server restart instead of queueing); WSL VRAM soft-margin (~256MB) +
+    `CUDA_ENABLE_COREDUMP_ON_EXCEPTION=1`; MTP+CUDA-graph crash tripwire
+    (#26558: KV-saturation → cuBLAS-7; fallback LLAMA_GRAPH_REUSE_DISABLE=1);
+    proxy tool-call salvage (repair malformed blocks instead of dropping).
+    `--cache-ram` (merged, host-RAM LRU prompt cache) as a complement to
+    slot files once checkpoints serialize.
+14. **Upstream PR karma**: our 4 hardening patches + the checkpoint-gap
+    verification evidence.
+
+## Explicit SKIPS (reasons on record)
+
+Token eviction (SnapKV/H2O/PyramidKV: NIAH −56pts, breaks agent prefix
+reuse); low-rank KV/Palu (quant beats rank by 4-364 PPL at matched budget,
+gap grows with GQA); draft trees (10-20% at bs=1, pathological on 48
+DeltaNet layers); layer-skip self-spec (0.77-1.28× < our 1.55×); CUDA-graph
+tuning (≤1.2× ceiling, disabled under MTP at batch>1); FP4-KV tensor cores
+(D=256 exceeds SM120 SMEM budget for tcgen05-less mma); batch-invariant
+kernels (bs=1); exllamav3 H32 Hadamard rotate (their own numbers: flat on
+GQA models); NSA/MLA/CLA retrofits (need training); craftogrammer (dead);
+eager per-request spec upstream fix (confirmed: none coming — fork patch
+remains the only path, currently SHELVED by user).
+
+## Record corrections from this campaign
+- return_progress: ALIVE in tree (bughunt record corrected).
+- "Full re-prefill every turn": refuted in-lifetime; CONFIRMED post-restore.
+- Pin freshness: b10435 = Aug 14 release; sync was near-tip, not "early Aug".
+
+
+# Security Policy
+
+ - [**Reporting a vulnerability**](#reporting-a-vulnerability)
+ - [**Requirements**](#requirements)
+ - [**Covered Topics**](#covered-topics)
+ - [**Using llama.cpp securely**](#using-llamacpp-securely)
+   - [Untrusted models](#untrusted-models)
+   - [Untrusted inputs](#untrusted-inputs)
+   - [Data privacy](#data-privacy)
+   - [Untrusted environments or networks](#untrusted-environments-or-networks)
+   - [Multi-Tenant environments](#multi-tenant-environments)
+
+## Reporting a vulnerability
+
+If you have discovered a security vulnerability in this project that falls inside the [covered topics](#covered-topics), please report it privately. **Do not disclose it as a public issue.** This gives us time to work with you to fix the issue before public exposure, reducing the chance that the exploit will be used before a patch is released.
+
+Please disclose it as a private [security advisory](https://github.com/ggml-org/llama.cpp/security/advisories/new).
+
+A team of volunteers on a reasonable-effort basis maintains this project. As such, please give us at least 90 days to work on a fix before public exposure.
+
+> [!IMPORTANT]
+> For collaborators: if you are interested in helping out with reviewing private security disclosures, please see: https://github.com/ggml-org/llama.cpp/discussions/18080
+
+## Requirements
+
+Before submitting your report, ensure you meet the following requirements:
+
+- You have read this policy and fully understand it.
+- AI is only permitted in an assistive capacity as stated in [AGENTS.md](AGENTS.md). We do not accept reports that are written exclusively by AI.
+- Your report must include a working Proof-of-Concept in the form of a script and/or attached files.
+
+Maintainers reserve the right to close the report if these requirements are not fulfilled.
+
+## Covered Topics
+
+Only vulnerabilities that fall within these parts of the project are considered valid. For problems falling outside of this list, please report them as issues.
+
+- `src/**/*`
+- `ggml/**/*`
+- `gguf-py/**/*`
+- `tools/server/*`, **excluding** the following topics:
+    - Web UI
+    - Features marked as experimental
+    - Features not recommended for use in untrusted environments (e.g., router, MCP)
+    - Bugs that can lead to Denial-of-Service attack
+
+Note that none of the topics under [Using llama.cpp securely](#using-llamacpp-securely) are considered vulnerabilities in LLaMA C++.
+
+For vulnerabilities that fall within the `vendor` directory, please report them directly to the third-party project.
+
+## Using llama.cpp securely
+
+### Untrusted models
+Be careful when running untrusted models. This classification includes models created by unknown developers or utilizing data obtained from unknown sources.
+
+*Always execute untrusted models within a secure, isolated environment such as a sandbox* (e.g., containers, virtual machines). This helps protect your system from potentially malicious code.
+
+> [!NOTE]
+> The trustworthiness of a model is not binary. You must always determine the proper level of caution depending on the specific model and how it matches your use case and risk tolerance.
+
+### Untrusted inputs
+
+Some models accept various input formats (text, images, audio, etc.). The libraries converting these inputs have varying security levels, so it's crucial to isolate the model and carefully pre-process inputs to mitigate script injection risks.
+
+For maximum security when handling untrusted inputs, you may need to employ the following:
+
+* Sandboxing: Isolate the environment where the inference happens.
+* Pre-analysis: Check how the model performs by default when exposed to prompt injection (e.g. using [fuzzing for prompt injection](https://github.com/FonduAI/awesome-prompt-injection?tab=readme-ov-file#tools)). This will give you leads on how hard you will have to work on the next topics.
+* Updates: Keep both LLaMA C++ and your libraries updated with the latest security patches.
+* Input Sanitation: Before feeding data to the model, sanitize inputs rigorously. This involves techniques such as:
+    * Validation: Enforce strict rules on allowed characters and data types.
+    * Filtering: Remove potentially malicious scripts or code fragments.
+    * Encoding: Convert special characters into safe representations.
+    * Verification: Run tooling that identifies potential script injections (e.g. [models that detect prompt injection attempts](https://python.langchain.com/docs/guides/safety/hugging_face_prompt_injection)).
+
+### Data privacy
+
+To protect sensitive data from potential leaks or unauthorized access, it is crucial to sandbox the model execution. This means running the model in a secure, isolated environment, which helps mitigate many attack vectors.
+
+### Untrusted environments or networks
+
+If you can't run your models in a secure and isolated environment or if it must be exposed to an untrusted network, make sure to take the following security precautions:
+* Do not use the RPC backend, [rpc-server](https://github.com/ggml-org/llama.cpp/tree/master/tools/rpc) and [llama-server](https://github.com/ggml-org/llama.cpp/tree/master/tools/server) functionality (see https://github.com/ggml-org/llama.cpp/pull/13061).
+* Confirm the hash of any downloaded artifact (e.g. pre-trained model weights) matches a known-good value.
+* Encrypt your data if sending it over the network.
+
+### Multi-Tenant environments
+
+If you intend to run multiple models in parallel with shared memory, it is your responsibility to ensure the models do not interact or access each other's data. The primary areas of concern are tenant isolation, resource allocation, model sharing and hardware attacks.
+
+1. Tenant Isolation: Models should run separately with strong isolation methods to prevent unwanted data access. Separating networks is crucial for isolation, as it prevents unauthorized access to data or models and malicious users from sending graphs to execute under another tenant's identity.
+
+2. Resource Allocation: A denial of service caused by one model can impact the overall system health. Implement safeguards like rate limits, access controls, and health monitoring.
+
+3. Model Sharing: In a multitenant model sharing design, tenants and users must understand the security risks of running code provided by others. Since there are no reliable methods to detect malicious models, sandboxing the model execution is the recommended approach to mitigate the risk.
+
+4. Hardware Attacks: GPUs or TPUs can also be attacked. [Researches](https://scholar.google.com/scholar?q=gpu+side+channel) has shown that side channel attacks on GPUs are possible, which can make data leak from other models or processes running on the same system at the same time.
+
+
+# Sparse Decode — BUILD LEDGER (2026-08-15 →)
+
+Executing SPARSE-DECODE-DESIGN.md ("go sparse" authorized). This file is the
+live build ledger: verified code facts, locked decisions, phase results.
+Resume rule: read this + SPARSE-DECODE-DESIGN.md + WORKPLAN-BESTAPP.md.
+
+## Working set
+- Branch: `feature/sparse-decode` off `sync/2026-08` tip 4858318a2 (= prod
+  binary source), worktree /home/erol/ai/turboquant/turboquant-sync.
+- Build dir: turboquant-sync/build (ccache, incremental). Prod binary safe at
+  build-g1/bin/llama-server (deploy-by-copy; candidates go to
+  llama-server.sparse, promote ONLY after P2 gates).
+- Model: models/qwen38/Qwen3.8-27B-Q6_K.gguf. Prod flags: see
+  ~/.config/llama-tcq/start-long-38.sh (320K YaRN 1.25, turbo4 K/V+draft,
+  MTP n_max 2, vision CPU).
+- GPU discipline: server stopped during any GPU experiment; restart after.
+  One GPU workload at a time. Long jobs run_in_background (120s guillotine).
+
+## Verified code facts (recon 2026-08-15, three agents, file:line in session)
+- A1 ROTATION IS TWO-LAYER. (i) learned Hadamard (`llama_mul_mat_hadamard`,
+  self_k_rot/self_v_rot, active for quantized KV, kill LLAMA_ATTN_ROT_DISABLE)
+  applied to q,k,v at graph level (llama-graph.cpp:2803-2810) + un-rot on
+  output :2848. (ii) turbo WHT: K/V INSIDE the set_rows quantize kernel
+  (set-rows.cu k_set_rows_turbo4:1111: innerq→L2-norm→WHT(signs,1/√128)→
+  centroid+pack); Q via graph op ggml_turbo_wht fwd (llama-graph.cpp:2836-43);
+  inverse WHT applied to FA OUTPUT keyed on v->type (llama-graph.cpp:2564-77).
+  CUDA dequant = centroid×norm ONLY → STORED (WHT) BASIS. FA q̃ and dequant-K
+  are the consistent basis pair → bounds must be built from DEQUANTIZED CACHE
+  BYTES, not from k_cur (k_cur is pre-WHT/pre-norm).
+- A1b CPU codec (ggml-turbo-quant.c) uses a DIFFERENT dense QR rotation —
+  NOT bit-compatible with CUDA. Never dequant GPU-written blocks on CPU.
+- A2 KV write = ggml_set_rows(full-cache-tensor, k_cur_2d f32, k_idxs I64
+  [n_tokens]) via kv_cache cpy_k/cpy_v (llama-kv-cache.cpp:1454/1501); wht
+  group smuggled in op_params. No cpy path for turbo.
+- A3 MMA-turbo fused: instances D∈{128,256}×{turbo4,3,2}(no turbo2@256),
+  Q≤4, K.type==V.type, raw BYTE strides from nb[] (no contiguity req; only
+  nb[0]==type_size), dequant into SMEM (no inverse WHT), nstages=0. Mask:
+  f16 [n_kv, n_batch] contiguous, ne[2]==1; with GQA packing (ncols2>1)
+  K->ne[1] % 256 == 0 REQUIRED (else falls to (8,1) instance). Gathered
+  contiguous turbo4 is consumable. FATTN_KQ_STRIDE=256.
+- A3b ⚠ GGML_TURBO_MMA_FUSED is DEFAULT OFF in-tree (fattn.cu:190-196,
+  opt-in =1; comment: fused faster at every depth + KLD-equal but not
+  token-identical to VEC — kept OFF for A/B hygiene) and PROD SERVER ENV
+  DOES NOT SET IT → live prod runs VEC(Q≤2)/MMA_F16-dequant(Q=3,4), NOT the
+  fused port. Handoff doc claims default ON. ACTION: sparse branch flips
+  default ON (=0 kill-switch); P2 measures dense fused-ON as the baseline.
+- A4 get_rows: dst ALWAYS F32 at API level (ggml.c:3941); CUDA supports
+  turbo src→F32 (dequant); NO quantized→quantized raw path — must add
+  (seams identified: ggml.c dst type entry, getrows.cu k_get_rows_float_vec
+  16B-copy kernel shape, dst switch :443, asserts :479; CPU must DENY).
+  MSA's decode gather does turbo→F32→cast F16 = full materialization (would
+  move MORE bytes than dense at 320K → raw gather is REQUIRED for the win).
+- A5 ggml_top_k real op (I32, contiguous), CUDA argsort bitonic ≤1024 cols
+  else CUB; ggml_cast I32↔F32 exists on CUDA (cpy.cu). MSA does index
+  arithmetic via cast→scale→add→cast (proven pattern).
+- A6 insertion point: build_attn(llm_graph_input_attn_kv) llama-graph.cpp
+  :2788-2850 between q-WHT and build_attn_mha. Draft/MTP uses the SAME
+  build_attn → exclude via params.gtype == LLM_GRAPH_TYPE_DECODER_MTP.
+  Decode signal: ubatch n_tokens (reserve-time tg graph uses n_kv=kv_size →
+  sparse topology gets reserved iff condition uses n_kv threshold ✓).
+- A7 mask [n_kv, n_tokens/stream, 1, n_stream] f16 (FA), 0/-inf; n_kv
+  GGML_PAD to max(n_pad,256); empty cells = -inf (pad rows safely masked).
+- A8 restore (state_read_data) writes cache via ggml_backend_tensor_set —
+  BYPASSES graph → meta stale ⇒ rebuild flag needed. seq_rm touches only
+  host cell metadata (ghost bytes remain → meta only WIDENS = still-valid
+  bounds ✓). No defrag exists. Cell reuse goes through set_rows ✓.
+- A9 cells.pos host-side (llama_kv_cells). RoPE-shift rebuild does
+  cast→hadamard→rope→hadamard→cpy in place (prod uses --no-context-shift).
+- A10 block_turbo4_0 = 66B {ggml_half norm; uint8 qs[64]} = 128 vals,
+  4.125bpv; nibble: elem j → qs[j/2], low=even. Row (n_embd_gqa=1024) =
+  8 blocks = 528B. Centroids TURBO_CENTROIDS_4BIT (turbo-quant.cuh:385):
+  symmetric 16-table [-0.241529..-0.011349, +0.011349..+0.241529].
+  norm stored WITH alpha correction (write-time).
+- MSA (MiniMax-M3) full plumbing in-tree: pos↔cell maps, +1e30 force-bias
+  before top_k, decode=gather(get_rows→cast f16→FA folded GQA-on-channel),
+  prefill=mask-scatter via set_rows-of-zeros; llama-kv-cache-msa dual-cache
+  precedent. DSA per-token top-k mask path also in-tree (deepseek32 etc.).
+- New-op registry checklist (fork precedent TURBO_WHT, op count 102):
+  ggml.h enum+API, ggml.c names+2×static_assert+ctor, ggml-cpu ops.h/.cpp+
+  ggml-cpu.c fwd+n_tasks, ggml-cuda <op>.cu/.cuh+dispatch+supports_op,
+  ggml-backend-meta.cpp split handler (EASY TO MISS).
+- kv_layer extra tensors: precedent turbo_innerq_scale_inv; bump ctx
+  mem_size at llama-kv-cache.cpp:135; state save iterates ONLY k/v layers →
+  slot format unchanged; extra tensors NOT persisted (⇒ rebuild on restore).
+
+## Locked design decisions (from design doc + this session)
+- Page = 64 cells (cache rows), metadata per (layer, kv-head, page):
+  f16 min[256]+max[256] ≈ +1 KiB/token ≈ 320 MB @320K. Meta = separate
+  per-layer tensors beside k_l (NOT serialized → slot format unchanged;
+  restore ⇒ full meta rebuild from quantized cache).
+- Bound validity under churn: meta only WIDENS on erase/ghosts (bounds stay
+  valid, just less tight); cell REUSE goes through the write path → updated.
+  Restore bypasses graph → rebuild flag. [verify A8/A9]
+- Scoring: score(page) = Σ_d max(q_d·min_d, q_d·max_d) = relu(q)·max + neg-
+  relu(q)·min. GQA: aggregate over the 4 q-heads/group; P0 decides per-kv-head
+  vs per-layer page set (P1 default: ONE page set per layer — enables whole-row
+  gather; per-head only if P0 shows a big recall gap).
+- Selection = {sink pages} ∪ {recent pages incl. current partial} ∪ {top-N}.
+  Force-list built host-side per step (host knows cell→pos), uploaded as tiny
+  I32 input; scores biased +inf for forced pages inside the kernel.
+- Custom CUDA ops (fork precedent: turbo types): GGML_OP_TURBO_META_UPDATE
+  (mode a: fold new rotated K rows by cell idx; mode b: full rebuild reading
+  quantized cache) + GGML_OP_TURBO_SPARSE_SELECT (q, meta_min, meta_max,
+  force-list → row indices I32 [N*64], fused score+bias+topk+expand).
+  Gather: extend GET_ROWS with same-type raw row copy (turbo4→turbo4,
+  f16→f16 for mask). FA: existing MMA-turbo kernels over gathered contiguous
+  turbo4 + gathered mask.
+- Sparse ONLY when: decode-shaped batch (n_tokens ≤ 4), n_kv ≥ threshold
+  (else dense), attention layers only, target model only (draft ctx small →
+  threshold naturally excludes). Env: TURBO_SPARSE_DECODE=N tokens effective
+  window (0/unset = off). Kascade anchor layers: P0 decides.
+- Shapes static per graph (fixed N at a given depth band) → CUDA-graph safe;
+  pos arrives via input tensor, not op_params.
+
+## P1 concrete spec (locked from recon; P0 may adjust aggregation/anchors)
+- Op A `GGML_OP_TURBO_META_UPDATE` — ggml_turbo_meta_update(ctx, meta,
+  k_after_setrows, idxs). Returns view of meta (set_rows in-place pattern);
+  src[0]=k set_rows RESULT (dependency ordering after cache write), src[1]=
+  idxs, src[2]=meta. Modes in op_params: fold (dequant just-written rows
+  centroid×norm → f16 CAS min/max into page meta) | rebuild (grid over all
+  pages, non-atomic). Meta reads the QUANTIZED CACHE (byte-faithful with FA).
+  Inserted whenever enabled (prefill too — maintenance).
+- Op B `GGML_OP_TURBO_SPARSE_SELECT` — (q̃ [256,n_head,n_tok] f32, meta f16,
+  forced I32 [n_forced_max, -1 pad]) → I32 [n_sel_rows]. Two-phase kernel:
+  scores[n_pages] = Σ_heads Σ_dims max(q⁺·M, q⁻·m) summed over tokens (one
+  page set per verify batch); +inf bias for forced; top n_sel_pages; bitmap→
+  ascending compact → expand ×64. n_sel_pag

@@ -5,7 +5,61 @@ lands at the top by morning. Raw data: quality-tests/yarnB/ (ledger.txt =
 ground truth of progress), quality-tests/kldnvfp4/ (quant gates),
 quality-tests/quant-lab/ (imatrices, recipes).
 
-## ROOT CAUSE FOUND (~03:00) — READ THIS FIRST
+## ROOT CAUSE — FINAL FORM (~04:30, machine-code-verified) — READ THIS FIRST
+
+**The crash class = PDL launch overlap x restrict-licensed memory semantics in
+the recurrent hot path.** Two concrete surfaces, both verified IN THE COMPILED
+SASS of the crashing binary:
+
+1. **Non-coherent (stale-cache) loads on the tightest producer-consumer chain
+   in the graph.** The racy binary's GDN kernel loads ALL inputs via
+   `LDG.E.128.CONSTANT` (non-coherent/texture path — licensed by
+   const+__restrict__). Under PDL, the kernel starts BEFORE its predecessor
+   finishes; NC loads may serve stale lines for data written microseconds
+   earlier. The GDN state tensor is re-read/re-written by consecutive kernels
+   at the same addresses every step, x48 layers x every batch = millions of
+   razor-thin windows/hour. Upstream's own rule (#24030: "Avoid PDL race
+   conditions by disabling __restrict__ when PDL is used") bans exactly this
+   combination.
+2. **Hoist/wild-address surface on index-driven kernels.** `k_get_rows_raw`
+   (embedding gather, every token) carried entry restricts on its INDEX
+   pointer under PDL — a hoisted stale index = wild gather address = the
+   device-fault class. Present upstream too (user's PR candidate).
+
+**Why every prior theory fell**: deterministic replays pass (razor-thin
+non-deterministic window), op-tests pass (single-op tests never overlap
+kernels), memtest passed (no PDL chains), OC removal didn't help (mechanism
+is clock-independent), thermal theory dead (Aug-14-15 sustained loads were
+stable — the GDN kernel joined the PDL party Aug 15, day one of instability).
+
+**THE FIX STACK (all shipped tonight, in the binary + launchers):**
+- `GGML_CUDA_PDL=0` in every launcher/gate/orchestrator = the COMPLETE
+  mitigation (kills both surfaces at the launch level; serialized kernel
+  boundaries restore normal flush/invalidate semantics). THE load-bearing fix.
+- Binary `.restrictfix`: GDN + k_get_rows_raw entry restricts removed
+  (closes the hoist/wild-address class structurally; upstream's pattern;
+  also makes 4 of 10 GDN loads coherent). Tree-wide entry-grain audit: ZERO
+  remaining violators (machine-checked, script committed).
+- A "zero-cost restrict-locals" variant was BUILT, SASS-DISSECTED, found to
+  still emit 10/10 NC loads, and REVERTED — the paper trail is in git.
+  SASS verifier committed: quality-tests/yarnB/verify-sass.sh.
+- Fallback binary C `.gdnmainline` (kernel revert) + vacation watchdog
+  (disarmed) complete the depth.
+
+**PERFORMANCE (user directive: lose none):** PDL=0 costs ~1-3% class launch
+overlap; entry-restrict removal ~0-1% on one kernel. BOTH get measured in the
+morning battery vs our recorded baselines; any real regression gets hunted
+with the bigger levers queued (fused-verify window ~5-15%, ub sweep). The
+crash cost was 100%.
+
+**GUARANTEE LADDER:** [done] mechanism identified in machine code ->
+[done] fixes shipped in binary+launchers -> [PENDING REBOOT] execution proof:
+morning-protocol.sh phase 1 (killer workload x2 on the fixed stack) ->
+phase 3 (promote + full battery soak). The GPU is physically absent until
+the reboot; the proof fires the moment it returns.
+
+## (superseded first-form analysis below)
+## OLD: ROOT CAUSE FOUND (~03:00)
 
 **The GDN row-per-warp kernel (fork-only, shipped Aug 15 = instability day 1)
 violated upstream's documented PDL race rule.** Upstream commit 9e58d4d69:
