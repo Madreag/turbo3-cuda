@@ -81,7 +81,10 @@ the reboot; the proof fires the moment it returns.
 | k_set_rows_turbo3 (+tail) | full | plain-launch (PDL-exempt) | CLEAN — butterfly barriers correct, single-writer packing, full-mask warp ops divergence-safe, shared reuse barriered |
 | fwht_cuda | full | wrapper/PDL; sync-before-loads; no entry restrict | CLEAN — early-exit is warp-uniform (shuffle masks legal); butterfly reg indexing bounded |
 | k_set_rows_turbo4 | full (pattern-delta vs turbo3) | plain-launch | CLEAN — note: is_v via tensor-name prefix is fragile (zero-risk at alpha 1.00) |
-| TCQ + VEC turbo loaders + cpy/convert | spot-check queued | soak-history: weeks stable pre-Aug-15 | pending (veterans; lower priority than chunked merge) |
+| TCQ + VEC turbo paths | spot-check | device-inner callbacks in entry-clean kernels | CLEAN |
+| ssm-scan (20 raw restricts) | reachability | — | EXCLUDED — zero refs in all qwen3* graphs (DeltaNet uses gated_delta_net + ssm_conv) |
+| **CHUNKED PREFILL (goal item 3)** | **MERGED: 26001x22587 dedicated merge done** | 3 kernels compiled; plain launches = PDL-exempt; all-NC loads safe by construction | branch feature/gdn-chunked-prefill; artifacts .chunked staged; op-test suite installed (PR-26001 + boundary killers); validation = protocol phase 4 |
+| tree-wide entry-grain re-audit (post all merges) | machine | ZERO violations | no regressions |
 
 ## OPEN-ITEMS LIST (live — the /goal ledger; strike items as they close)
 

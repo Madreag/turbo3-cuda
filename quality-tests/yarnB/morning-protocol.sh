@@ -39,3 +39,20 @@ case "$PHASE" in
      sleep 3; pgrep -f "[o]mega.sh" >/dev/null && echo "omega running (battery+gates+DRY on fixed stack)"
      ;;
 esac
+# --- appended (goal v2 night): phases 0 and 4 ---
+# Usage additions: "0" = op-test gate FIRST (run before phase 1);
+#                  "4" = chunked-prefill validation (after phase 3 stability)
+case "$PHASE" in
+  0)
+    echo "PHASE 0: op-test gate on prod binary (includes nothing new; sanity)"
+    timeout 2400 /home/erol/ai/turboquant/turboquant-sync/build/bin/test-backend-ops 2>&1 | tail -3
+    ;;
+  4)
+    echo "PHASE 4: chunked-prefill validation (feature/gdn-chunked-prefill)"
+    echo "  a) op-tests incl. chunked suite:"
+    timeout 3600 /home/erol/ai/turboquant/turboquant-kv-cache/build-g1/test-backend-ops.chunked -o GATED_DELTA_NET 2>&1 | tail -3
+    echo "  b) if PASS: prefill A/B — launch .chunked binary via gate_server.sh, run"
+    echo "     nmax probe prefill columns vs same-day prod numbers at 38K/121K depth."
+    echo "  c) promote decision per ledger gates (KLD not needed: same math, new schedule)."
+    ;;
+esac
