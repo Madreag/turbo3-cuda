@@ -12,14 +12,14 @@ constexpr int block_dv     = num_warps * d_v_per_warp;  // 16
 
 template <int S_v, bool KDA, bool keep_rs_t>
 __global__ void __launch_bounds__(ggml_cuda_get_physical_warp_size() * num_warps, 2) gated_delta_net_cuda(
-        const float * q,
-        const float * k,
-        const float * v,
-        const float * g,
-        const float * beta,
-        const float * curr_state,
-        float * dst,
-        float * state,
+        const float * q_p,
+        const float * k_p,
+        const float * v_p,
+        const float * g_p,
+        const float * beta_p,
+        const float * curr_state_p,
+        float * dst_p,
+        float * state_p,
         int64_t H,
         int64_t n_tokens,
         int64_t n_seqs,
@@ -54,6 +54,22 @@ __global__ void __launch_bounds__(ggml_cuda_get_physical_warp_size() * num_warps
     const uint32_t dv_base  = blockIdx.z * block_dv + warp_id * d_v_per_warp;
     const uint32_t dqk_base = lane * d_qk_per_lane;
 
+    // PDL wait FIRST, then a compiler fence so no memory access can be
+    // scheduled into the pre-sync window, then re-establish __restrict__
+    // aliasing guarantees BEHIND the fence. Zero-cost fix for the #24030
+    // PDL x __restrict__ race (entry restricts licensed pre-sync hoists =
+    // the 2026-08-17/18 device-loss class).
+    ggml_cuda_pdl_sync();
+    asm volatile("" ::: "memory");
+    const float * __restrict__ q          = q_p;
+    const float * __restrict__ k          = k_p;
+    const float * __restrict__ v          = v_p;
+    const float * __restrict__ g          = g_p;
+    const float * __restrict__ beta       = beta_p;
+    const float * __restrict__ curr_state = curr_state_p;
+    float       * __restrict__ dst        = dst_p;
+    float       * __restrict__ state      = state_p;
+
     const uint32_t iq1 = fastmodulo(h_idx, neqk1_magic);
     const uint32_t iq3 = fastdiv(sequence, rq3_magic);
 
@@ -87,8 +103,6 @@ __global__ void __launch_bounds__(ggml_cuda_get_physical_warp_size() * num_warps
             ggml_cuda_memcpy_1<d_qk_per_lane * sizeof(float)>(base + dqk_base, reg);
         }
     };
-
-    ggml_cuda_pdl_sync();
 
     // state is stored transposed: M[r][c] = S[c][r]
     __align__(16) float s_tile[d_v_per_warp][d_qk_per_lane];
