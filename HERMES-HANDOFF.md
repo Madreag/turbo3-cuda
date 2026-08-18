@@ -406,13 +406,20 @@ full soak passes. Serving DOWN pending verdict. All Aug-17/18 hardening KEEPS
 (innocent but correct); deferred science queue (yarn B', v3 imatrix A/B, DRY,
 chunked validation, prefetch A/B) runs once a soak-stable GPU exists.
 
-**VACATION PLAN (user leaves ~Aug 19-20): 3090 FALLBACK SERVING** — package
-being prepared at g1/fallback-3090/ (scripts + model staging + step-by-step
-for the 3090 PC; community-proven turboquant-on-3090 ~40-60 t/s, same
-advertised model ids so Hermes needs zero changes). Even if Gen4 stabilizes
-the 5090, vacation-trust requires a multi-hour soak PASS first; 3090 package
-is the safety floor either way. Vacation watchdog (g1/vacation-mode/) can now
-also poll nvlddmkm Event-14 CMDre as a pre-death signal.
+**VACATION PLAN (user leaves ~Aug 19-20): 3090 FALLBACK SERVING — PACKAGE
+COMPLETE (2026-08-18 ~14:45), staged at D:\spill\fallback-3090\ (17GB):**
+bin/ = relocatable sm_86 build of prod source 007892f31 (smoke-tested from the
+staging dir itself; launcher sets LD_LIBRARY_PATH — binaries carry absolute
+RUNPATH); models/ = qwen38-q4km-imx2.gguf (OUR Q4_K_M, imatrix-v2 calibrated,
+4.92 BPW, QUALITY-UNGATED by necessity — labeled in README) + mmproj;
+start/stop/status scripts (detach law, health gate, alias qwen3.8-27b-320k,
+default CTX 96K = ~1.3GB slack on 24GB, stretch 131K headless-only) + proxy +
+20-min deploy README. api.key ships separately (never in git). Scripts also in
+git at g1/fallback-3090/. Even if Gen4 stabilizes the 5090, vacation-trust
+requires a multi-hour soak PASS first; 3090 package is the safety floor either
+way. Vacation watchdog (g1/vacation-mode/) now also polls nvlddmkm Event-14
+CMDre as a pre-death signal (stops serving preemptively). Also staged on D::
+driver-610.88.exe (ladder rung 2, verified installer).
 
 ## 2026-08-17 EVENING/NIGHT ADDENDUM — OC root-cause arc + quant lab + disk law
 ## (READ THIS FIRST if resuming after 2026-08-17; supersedes conflicting bits above)
