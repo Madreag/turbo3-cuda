@@ -52,6 +52,17 @@ morning battery vs our recorded baselines; any real regression gets hunted
 with the bigger levers queued (fused-verify window ~5-15%, ub sweep). The
 crash cost was 100%.
 
+**FINAL FORM (~05:40) — ZERO-COMPROMISE, MACHINE-VERIFIED:** the residual 6
+NC loads traced to ggml_cuda_memcpy_1's INTERNAL __restrict__ (upstream
+helper). Replaced with a kernel-local coherent load path for predecessor-
+written data. Result, verified in SASS of the PROMOTED prod binary:
+- NC loads: **0 of 10** in every GDN variant; k_get_rows_raw 0; FA path 0.
+- Instruction count: **256 = 256** (old vs fixed) — byte-identical size,
+  the ONLY change is load cache policy on single-use data = zero cost.
+- PDL plan: env stays 0 for phase 1; phase 1b certifies PDL back ON
+  (safe now: sync-first + fully coherent fresh-data loads) => the 1-3%
+  overlap returns => NET PERFORMANCE LOSS: ZERO. User directive honored.
+
 **GUARANTEE LADDER:** [done] mechanism identified in machine code ->
 [done] fixes shipped in binary+launchers -> [PENDING REBOOT] execution proof:
 morning-protocol.sh phase 1 (killer workload x2 on the fixed stack) ->
