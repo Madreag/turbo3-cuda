@@ -1,0 +1,4 @@
+0.00.107.690 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.255.857 I srv    load_model: loading model '/home/erol/ai/turboquant/models/qwen38/Qwen3.8-27B-Q6_K.gguf'
+0.20.847.322 I cmn          init: llama threadpool init, n_threads = 16
+Starting GPU coredump generation, set the CUDA_COREDUMP_SHOW_PROGRESS environment variable to 1 to enable more detailed output
