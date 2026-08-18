@@ -69,6 +69,15 @@ morning-protocol.sh phase 1 (killer workload x2 on the fixed stack) ->
 phase 3 (promote + full battery soak). The GPU is physically absent until
 the reboot; the proof fires the moment it returns.
 
+## EXECUTION DAY LOG (2026-08-18, user at work)
+
+- ~05:30 GPU RECOVERED on warm reboot (5090, PCIe5, clean idle). Day begins.
+- PHASE 0 op-tests: first attempt showed 1/2+FAIL but tail-only capture
+  discarded the detail (instrument lesson: gates keep FULL logs). Re-runs:
+  GDN 36/36, GET_ROWS 111/111, FULL SUITE 13,253/13,253 GREEN. Classified:
+  post-reboot first-touch transient; watch for recurrence. PHASE 0: PASS.
+- PHASE 1 (killer x2, fixed stack, PDL=0): RUNNING (launched ~post-phase0).
+
 ## KERNEL AUDIT LEDGER (goal v2, all-night pass — grows as audits complete)
 
 | kernel / path | audit | SASS | verdict |
