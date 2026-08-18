@@ -69,6 +69,16 @@ morning-protocol.sh phase 1 (killer workload x2 on the fixed stack) ->
 phase 3 (promote + full battery soak). The GPU is physically absent until
 the reboot; the proof fires the moment it returns.
 
+## KERNEL AUDIT LEDGER (goal v2, all-night pass — grows as audits complete)
+
+| kernel / path | audit | SASS | verdict |
+|---|---|---|---|
+| gated_delta_net (row-per-warp) | full line audit x2 | nc=0, wait-first, instr parity 256=256 | FIXED (restrict race) + verified |
+| k_get_rows_raw | entry audit | nc=0 | FIXED + verified |
+| fattn-mma-turbo.cuh (host launcher) | full | n/a (host) | CLEAN — shmem sizing matches upstream formula; attr flags per-instantiation |
+| turbo4/3/2 FA tile loaders | full bounds/race audit | — | CLEAN — 66B/128-elem mapping exact; D=256 two-block span within pitch; turbo3 sign +1 shift safe by parity; per-cell disjoint writes |
+| turbo-typed flash_attn_ext_f16 instantiations | — | nc=0 of 69/129/81 loads; ACQBULK@2441 < firstLDG@3159 | CLEAN (both PDL surfaces) |
+
 ## OPEN-ITEMS LIST (live — the /goal ledger; strike items as they close)
 
 - [GATE: reboot] Phase 1 killer x2 on fixed stack -> phase 1b PDL-on
