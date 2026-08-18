@@ -365,10 +365,21 @@ AND what it didn't · verify every claim with a command first.
   harnesses go in g1/quality-tests/; nohup'd probes survive the 120s guillotine
   group-kill (pidfile the probe, poll with until-loops).
 
-## >>> MORNING 2026-08-18 ENTRYPOINT: read OVERNIGHT-REPORT-2026-08-18.md
-## first — GPU died at stock clocks 00:27 (OC refuted), two software suspects
-## isolated (PDL launches / row-per-warp GDN), instruments built. FIRST ACTION
-## after reboot: quality-tests/yarnB/morning-protocol.sh phase 1 (babysat).
+## >>> CURRENT ENTRYPOINT (2026-08-18 ~05:30, post-reboot, GPU RECOVERED):
+## Read OVERNIGHT-REPORT-2026-08-18.md first. ROOT CAUSE of the crash saga is
+## FOUND + FIXED + machine-verified (PDL x __restrict__ race, #24030 class —
+## NC-load + hoist surfaces in GDN/getrows; fix promoted to prod binary at
+## zero perf cost, PDL=0 layered in launchers, tree audit ZERO violators,
+## chunked-prefill kernel merged+audited on feature/gdn-chunked-prefill).
+## DAY PLAN (user at work; agent executes autonomously, ~in order):
+##   ph0 op-tests -> ph1 killer x2 (fixed stack) -> ph1b PDL-on certification
+##   -> ph3 omega battery (yarn verdict + v3 imatrix-A/B gates + DRY arm +
+##   soak; restores serving at end) -> ph4 chunked validation (op-tests +
+##   prefill A/B) -> .gdn-prefetch A/B -> mega-analysis into the report.
+## Scripts: quality-tests/yarnB/morning-protocol.sh {0,1,1b,2,3,4} + omega.sh.
+## If GPU dies at ANY point: forensics per repo CLAUDE.md 3.5/3.6; binary C
+## (.gdnmainline) + fault tree stand by; vacation watchdog drafts in
+## g1/vacation-mode/ (DISARMED — user arms).
 
 ## 2026-08-17 EVENING/NIGHT ADDENDUM — OC root-cause arc + quant lab + disk law
 ## (READ THIS FIRST if resuming after 2026-08-17; supersedes conflicting bits above)
