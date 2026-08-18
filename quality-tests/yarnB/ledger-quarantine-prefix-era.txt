@@ -1,0 +1,7 @@
+SOAKEVENT launch_none_Qwen3.8-27B-Q6_K.gguf
+SOAKEVENT launch_125_Qwen3.8-27B-Q6_K.gguf
+SOAKEVENT launch_156_Qwen3.8-27B-Q6_K.gguf
+SOAKEVENT launch_125_Qwen3.8-27B-Q6_K.gguf
+SOAKEVENT launch_156_Qwen3.8-27B-Q6_K.gguf
+SOAKEVENT launch_125_Qwen3.8-27B-Q6_K.gguf
+# NOTE: 6 SOAKEVENT lines quarantined to ledger-quarantine-prefix-era.txt — they were dead-GPU launch artifacts from the PRE-FIX night (root cause found after); NOT evidence against the fixed stack
