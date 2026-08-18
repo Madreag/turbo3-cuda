@@ -21,6 +21,9 @@ export TURBO_NORM_ALPHA_V=1.00
 export TURBO4_NORM_ALPHA_V=1.00
 export GGML_TURBO_MMA_FUSED=1
 export GGML_CUDA_PDL=0
+# Binaries carry an absolute RUNPATH from the build box — point the loader at
+# the packaged libs explicitly so the package is relocatable.
+export LD_LIBRARY_PATH="$HERE/bin:${LD_LIBRARY_PATH:-}"
 
 mkdir -p "$CONF/slots-3090"
 setsid nohup "$HERE/bin/llama-server" \
