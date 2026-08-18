@@ -328,6 +328,30 @@ options-before-execution on NEW test arcs · TLDR replies · state the plan
 BEFORE acting (2026-08-16 lesson) · claim-scoping: name what a test covered
 AND what it didn't · verify every claim with a command first.
 
+## 2026-08-17 SESSION ADDENDUM (crash forensics closed + n-max verdict)
+
+- **Two machine deaths 2026-08-17** (15:00 bugcheck 0x116 mid-decode; 17:15
+  adapter-lost during load) — forensics CLOSED as: [rare non-deterministic GPU
+  exception, source unproven] x [CUDA_ENABLE_COREDUMP_ON_EXCEPTION env freezing
+  a WDDM GPU during dump = severity amplifier, OURS since Aug-15 ops round] x
+  [TdrDelay=2s default]. Fixes SHIPPED: coredump env REMOVED from all launchers
+  (BANNED — repo CLAUDE.md 3.6); TdrDelay/TdrDdiDelay=60 applied+armed (reboot
+  done). Exonerated by test: VRAM (28.5GiB memtest 3x4 patterns clean + 60s
+  1.67TB/s burn), sustained power, driver (610.47 unchanged 3mo), load path,
+  and the EXACT 15:00 sequence (deterministic replay incl. death cell — clean).
+  17:15 reclassified: likely residual wedge (warm restart doesn't power-cycle a
+  bugchecked card; full power-off cleared it). 30-day event history: GPU errors
+  ONLY on Aug 16+17 (era-correlated). Evidence g1/crash-forensics/tdr-0x116-*,
+  gpulost3-*. Residual risk: contained (exception now = logged process error).
+- **n-max sweep DONE (community-repo follow-up): n4 REJECTED, KEEP n3** — see
+  CLUB3090-PORT-BOARD P4-EXT. Only win 38K code +3-10%; shallow −4-16%, prose/
+  thinking-class loses at all depths, +150MB VRAM. Third confirmation: fused
+  Q≤4 verify window inverts community spec tuning. Harness (survives /tmp
+  wipes now): g1/quality-tests/nmax/.
+- Sweep-era ops laws learned: /tmp scratch dies on every reboot — durable
+  harnesses go in g1/quality-tests/; nohup'd probes survive the 120s guillotine
+  group-kill (pidfile the probe, poll with until-loops).
+
 ## OPEN ARCS
 
 - **GPU-lost / vision-on-hybrid: CLOSED+SHIPPED 2026-08-16** (fix trio gated
