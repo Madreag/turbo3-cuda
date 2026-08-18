@@ -1,0 +1,23 @@
+/home/erol/.config/llama-tcq/start-long-38.sh: line 82: [: Failed to initialize NVML: N/A: integer expression expected
+/home/erol/.config/llama-tcq/start-long-38.sh: line 82: [: Failed to initialize NVML: N/A: integer expression expected
+/home/erol/.config/llama-tcq/start-long-38.sh: line 82: [: Failed to initialize NVML: N/A: integer expression expected
+/home/erol/.config/llama-tcq/start-long-38.sh: line 82: [: Failed to initialize NVML: N/A: integer expression expected
+/home/erol/.config/llama-tcq/start-long-38.sh: line 82: [: Failed to initialize NVML: N/A: integer expression expected
+/home/erol/.config/llama-tcq/start-long-38.sh: line 82: [: Failed to initialize NVML: N/A: integer expression expected
+/home/erol/.config/llama-tcq/start-long-38.sh: line 82: [: Failed to initialize NVML: N/A: integer expression expected
+/home/erol/.config/llama-tcq/start-long-38.sh: line 82: [: Failed to initialize NVML: N/A: integer expression expected
+/home/erol/.config/llama-tcq/start-long-38.sh: line 82: [: Failed to initialize NVML: N/A: integer expression expected
+/home/erol/.config/llama-tcq/start-long-38.sh: line 82: [: Failed to initialize NVML: N/A: integer expression expected
+/home/erol/.config/llama-tcq/start-long-38.sh: line 82: [: Failed to initialize NVML: N/A: integer expression expected
+/home/erol/.config/llama-tcq/start-long-38.sh: line 82: [: Failed to initialize NVML: N/A: integer expression expected
+/home/erol/.config/llama-tcq/start-long-38.sh: line 82: [: Failed to initialize NVML: N/A: integer expression expected
+/home/erol/.config/llama-tcq/start-long-38.sh: line 82: [: Failed to initialize NVML: N/A: integer expression expected
+/home/erol/.config/llama-tcq/start-long-38.sh: line 86: [: Failed to initialize NVML: N/A: integer expression expected
+/home/erol/.config/llama-tcq/start-long-38.sh: line 134: 25313 Aborted                 (core dumped) setsid nohup ./build-g1/bin/llama-server -m /home/erol/ai/turboquant/models/qwen38/Qwen3.8-27B-Q6_K.gguf --mmproj /home/erol/ai/turboquant/models/qwen38/mmproj-F16.gguf --no-mmproj-offload --spec-type $SPEC_TYPE --spec-draft-n-max $SPEC_NMAX ${SPEC_PMIN:+--spec-draft-p-min $SPEC_PMIN} $SPEC_EXTRA -ctkd turbo4 -ctvd turbo4 -ctk turbo4 -ctv turbo4 -fa on -ngl 99 -c $CTX --no-context-shift --rope-scaling yarn --rope-scale $SCALE --yarn-orig-ctx 262144 --jinja --reasoning-format none --chat-template-kwargs '{"preserve_thinking": true}' --parallel 1 -b 512 -ub 512 --temp 1.0 --top-p 0.95 --top-k 20 --ctx-checkpoints $CKPT --alias $ALIAS --slot-save-path "$CONF/slots-long/" --host 127.0.0.1 --port 8131 --api-key-file "$CONF/api.key" --metrics < /dev/null > "$CONF/server.log" 2>&1
+ERROR: server not healthy after wait (last: dead) — proxy NOT started
+--- server.log tail:
+warning: 58	../sysdeps/nptl/libc_start_call_main.h: No such file or directory
+#17 0x0000797846a2a28b in __libc_start_main_impl (main=0x6309198992b0 <main>, argc=61, argv=0x7fff5a6bb038, init=<optimized out>, fini=<optimized out>, rtld_fini=<optimized out>, stack_end=0x7fff5a6bb028) at ../csu/libc-start.c:360
+warning: 360	../csu/libc-start.c: No such file or directory
+#18 0x0000630919955915 in _start ()
+[Inferior 1 (process 25313) detached]
