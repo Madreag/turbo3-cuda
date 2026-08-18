@@ -133,7 +133,7 @@ static __global__ void k_get_rows_float_vec(
 // turbo4 KV pages). Copies row_bytes per gathered row; int4 fast path when
 // 16B-aligned, byte tail otherwise. No dequantization.
 static __global__ void k_get_rows_raw(
-        const char * __restrict__ src0_ptr, const int32_t * __restrict__ src1_ptr, char * __restrict__ dst_ptr,
+        const char * src0_ptr, const int32_t * src1_ptr, char * dst_ptr,
         const int64_t row_bytes,
         const int64_t ne11, const uint3 ne12_fdv,
         const size_t s1, const size_t s2, const size_t s3,      // dst strides in BYTES
