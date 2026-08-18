@@ -90,6 +90,13 @@ the reboot; the proof fires the moment it returns.
   under WSL. Survives -> new-base convicted -> bisect.
   DEADMAN: if this machine is found dead, the ledger line below names the
   arm that was executing.
+- ~11:20 TEST A EXECUTED: official b10488 native binary, killer workload.
+  **MACHINE DIED ~2 min into chunk compute (bugcheck ~11:22, boot 11:25).**
+  ZERO WSL, ZERO fork code in the dying process. -> WSL/dxg AND our software
+  BOTH eliminated by execution. Survivors: driver-state (DDU test, user
+  tonight) or hardware compute path (RMA). Full table in the handoff
+  entrypoint. No further GPU load on this box except the post-DDU
+  discriminator. Vacation shifts to the 3090 fallback package.
 
 ## KERNEL AUDIT LEDGER (goal v2, all-night pass — grows as audits complete)
 

@@ -365,21 +365,42 @@ AND what it didn't · verify every claim with a command first.
   harnesses go in g1/quality-tests/; nohup'd probes survive the 120s guillotine
   group-kill (pidfile the probe, poll with until-loops).
 
-## >>> CURRENT ENTRYPOINT (2026-08-18 ~05:30, post-reboot, GPU RECOVERED):
-## Read OVERNIGHT-REPORT-2026-08-18.md first. ROOT CAUSE of the crash saga is
-## FOUND + FIXED + machine-verified (PDL x __restrict__ race, #24030 class —
-## NC-load + hoist surfaces in GDN/getrows; fix promoted to prod binary at
-## zero perf cost, PDL=0 layered in launchers, tree audit ZERO violators,
-## chunked-prefill kernel merged+audited on feature/gdn-chunked-prefill).
-## DAY PLAN (user at work; agent executes autonomously, ~in order):
-##   ph0 op-tests -> ph1 killer x2 (fixed stack) -> ph1b PDL-on certification
-##   -> ph3 omega battery (yarn verdict + v3 imatrix-A/B gates + DRY arm +
-##   soak; restores serving at end) -> ph4 chunked validation (op-tests +
-##   prefill A/B) -> .gdn-prefetch A/B -> mega-analysis into the report.
-## Scripts: quality-tests/yarnB/morning-protocol.sh {0,1,1b,2,3,4} + omega.sh.
-## If GPU dies at ANY point: forensics per repo CLAUDE.md 3.5/3.6; binary C
-## (.gdnmainline) + fault tree stand by; vacation watchdog drafts in
-## g1/vacation-mode/ (DISARMED — user arms).
+## >>> CURRENT ENTRYPOINT (2026-08-18 ~11:45 — CRASH CAUSE ISOLATED TO
+## DRIVER-STATE-OR-HARDWARE; ALL SOFTWARE WE CONTROL EXONERATED BY EXECUTION)
+
+**THE ELIMINATION TABLE (each row = an executed test, not a theory):**
+| suspect | test | result |
+|---|---|---|
+| overclock/clocks | removed to stock -> killer workload | DIED - eliminated |
+| our fork software (PDL/restrict/kernels) | fixes shipped + 13253 op-tests green -> killer | DIED - eliminated |
+| WSL2/dxg layer | OFFICIAL ggml-org b10488 native Windows binary, zero WSL, zero fork code | DIED ~2 min into plain CUDA compute - eliminated |
+| VRAM-near-cap / vision-on-CPU | dying native run: ~23GB used (9GB free), no vision loaded | not present - eliminated |
+
+**SURVIVORS (the only two left):**
+1. NVIDIA driver STATE corruption (version 610.47 unchanged 3mo, but caches/
+   WDDM state can rot). TEST = USER runs DDU safe-mode wipe + clean latest
+   driver install, then agent reruns the official-binary killer
+   (D:\spill\native-test\bin\llama-imatrix.exe, same args as run1.log).
+   Survives -> SOLVED. 
+2. Hardware compute path (games-stable does NOT clear it: graphics engines
+   != CUDA compute engines/power signature). If DDU'd driver still dies on
+   the official binary -> RMA track; evidence dossier = g1/crash-forensics/
+   + OVERNIGHT-REPORT elimination table + Windows MEMORY.DMP files.
+
+**STANDING RULES NOW:** NO GPU load on the 5090 box except the single
+post-DDU discriminator run (user's word). Serving on this box is DOWN and
+stays down pending the DDU verdict. All Aug-17/18 software hardening KEEPS
+(restrict fixes, PDL=0 launchers, chunked-prefill branch, audits) — proven
+innocent but still correct hygiene; the deferred science queue (yarn B',
+v3 imatrix-A/B gates, DRY arm, chunked validation, prefetch A/B) runs
+whenever a stable GPU exists (this box post-fix, or never on this box).
+
+**VACATION PLAN (user leaves ~Aug 19-20): 3090 FALLBACK SERVING** — package
+being prepared at g1/fallback-3090/ (scripts + model staging + step-by-step
+for the 3090 PC; community-proven turboquant-on-3090 ~40-60 t/s, same
+advertised model ids so Hermes needs zero changes). User deploys on the
+3090 box in ~20 min. The 5090 box: leave OFF or ARM the vacation watchdog
+(g1/vacation-mode/) only if DDU proves it stable.
 
 ## 2026-08-17 EVENING/NIGHT ADDENDUM — OC root-cause arc + quant lab + disk law
 ## (READ THIS FIRST if resuming after 2026-08-17; supersedes conflicting bits above)
