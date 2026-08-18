@@ -6,6 +6,27 @@
 // checkpoint cluster), separate state output pointer + fused-cache path, and
 // PDL-aware launches. Each warp owns d_v_per_warp rows of the state matrix;
 // the warp's lanes shard the QK axis.
+// Coherent vectorized load for PREDECESSOR-WRITTEN data (q/k/g/state tiles).
+// Deliberately NOT ggml_cuda_memcpy_1: that helper carries __restrict__ on its
+// params, which licenses non-coherent (LDG..CONSTANT / tex-path) promotion —
+// unsafe for fresh data under PDL overlap (#24030 class; the 2026-08-17/18
+// device-loss chain). Plain int4 copies emit coherent LDG.E.128; this kernel
+// loads each value exactly once, so the tex path bought nothing anyway.
+template <int nbytes>
+static __device__ __forceinline__ void gdn_load_coherent(void * dst, const void * src) {
+    static_assert(nbytes == 4 || nbytes == 8 || nbytes % 16 == 0, "unsupported width");
+    if constexpr (nbytes == 4) {
+        *(int *) dst = *(const int *) src;
+    } else if constexpr (nbytes == 8) {
+        *(int2 *) dst = *(const int2 *) src;
+    } else {
+#pragma unroll
+        for (int i = 0; i < nbytes/16; ++i) {
+            ((int4 *) dst)[i] = ((const int4 *) src)[i];
+        }
+    }
+}
+
 constexpr int d_v_per_warp = 4;
 constexpr int num_warps    = 4;
 constexpr int block_dv     = num_warps * d_v_per_warp;  // 16
@@ -75,7 +96,7 @@ __global__ void __launch_bounds__(ggml_cuda_get_physical_warp_size() * num_warps
         if constexpr (S_v < warp_size) {
             reg[0] = (lane < active_lanes) ? base[lane] : 0.0f;
         } else {
-            ggml_cuda_memcpy_1<d_qk_per_lane * sizeof(float)>(reg, base + dqk_base);
+            gdn_load_coherent<d_qk_per_lane * sizeof(float)>(reg, base + dqk_base);
         }
     };
     auto store_qk_lane = [&] __device__(const float(&reg)[d_qk_per_lane], float * base) {
