@@ -24,8 +24,10 @@ Everything is pushed; all six tips verified == GitHub 2026-08-16.
   head) via start-long-38.sh / start-max-38.sh. (b) TRIAL:
   JonathanColetti/Qwen3.8-27B-Uncensored Q6_K (same arch, with-MTP variant,
   models/qwen38-uncensored/) via start-long-38u.sh — quality UNGATED (no
-  KLD/battery run on it), user-requested serving choice. CURRENTLY SERVING:
-  the uncensored trial. Which weights answer = which launcher ran; check
+  KLD/battery run on it), user-requested serving choice. CURRENTLY SERVING: ORIGINAL weights
+  (default restored 2026-08-17 eve, user's call — uncensored gates deferred;
+  community uncensored-variant roster = future testing arc, gate each with
+  battery+NIAH before trust). Which weights answer = which launcher ran; check
   status.sh/log, never the API label. Vision via ORIGINAL mmproj **on CPU**
   (~21-60 s/image encode, once per image; text speed unaffected) — all three
   launchers use the gate-validated original mmproj.
