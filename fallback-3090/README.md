@@ -56,6 +56,15 @@ stable GPU). It is calibration-matched but unproven; acceptable for a fallback.
 - `proxy.py`, `start-3090.sh`, `stop-3090.sh`, `status-3090.sh`, this README
 - NOT included: `api.key` (copy separately, never in git)
 
+## Validation status (honest)
+- Model file, tokenizer/template, alias, and server boot: smoke-tested on the
+  build box (CPU-only config — the turbo4+FA+MTP graph needs CUDA, so the FULL
+  prod-config path is first exercised on the 3090 itself; same source already
+  runs this exact config in prod on the 5090).
+- If the 3090 first boot errors on the KV path, fallback flags that always
+  work: replace the two `-ct*` lines with `-ctk q8_0 -ctv q8_0` and drop the
+  two `--spec-*` args (costs ctx headroom + speed, keeps you serving).
+
 ## VRAM budget (why 96K default)
 Q4_K_M weights ~16.5 GB + KV turbo4 @96K ~1.7 GB + recurrent states/copies
 ~2.5 GB + compute buffers ~1.8 GB ≈ 22.5 GB of 24 GB → ~1.3 GB slack.
