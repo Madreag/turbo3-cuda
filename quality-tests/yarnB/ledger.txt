@@ -1,3 +1,1 @@
-COMPLETE 01:08:54
-DONE quants_built
 DONE quants_built
