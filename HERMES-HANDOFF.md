@@ -365,6 +365,83 @@ AND what it didn't · verify every claim with a command first.
   harnesses go in g1/quality-tests/; nohup'd probes survive the 120s guillotine
   group-kill (pidfile the probe, poll with until-loops).
 
+## 2026-08-17 EVENING/NIGHT ADDENDUM — OC root-cause arc + quant lab + disk law
+## (READ THIS FIRST if resuming after 2026-08-17; supersedes conflicting bits above)
+
+**THE CRASH SAGA, FINAL FORM (5 machine deaths over Aug 16-17):**
+User's GPU ran an Afterburner OC — **+800 mem / +200 core / +100mV / custom
+VF curve, auto-applied every boot** — disclosed only late Aug 17. Every
+"unexplained" death fits marginal-OC signature: non-deterministic, at
+clock/power RAMP phases (model load 17:15; graph warmup 23:21; early decode
+15:00), no kernel in flight (truncated nvcudmp), deterministic replays CLEAN,
+memtest CLEAN (sustained-clock tests miss transition faults). "Never happened
+before 3.8" reconciles: 3.8-era kernels (fused MMA+GDN+MTP) push bandwidth
+far beyond the 3.6 VEC path — the OC was always marginal, our kernels exposed
+it. Aug-16 OOB bug was REAL and separately fixed (that class is closed).
+**OC REMOVED to full stock ~23:5x Aug 17, verified: [Startup] zeros + stock
+max clocks (14001MHz mem).** Amplifier env (CUDA_ENABLE_COREDUMP_ON_EXCEPTION)
+removed from all launchers (BANNED — froze WDDM GPU during dump = machine
+death); TdrDelay/TdrDdiDelay=60 applied+armed. Discriminating test = TONIGHT'S
+SOAK: yarn A'+B' battery (dual purpose: rope-verdict science + heaviest
+sustained workload). If stock survives what killed the OC'd box 3x/day →
+convicted. If deaths continue at stock → deeper hw/driver track (user leaves
+on VACATION in 2-3 days — reliability is THE priority; ~2 days to react).
+Forensics: g1/crash-forensics/ (tdr-0x116-*, gpulost3-*), repo CLAUDE.md 3.5/3.6.
+
+**QUANT LAB (R1 arc) — g1/quality-tests/quant-lab/ (ledger README there):**
+v1 (Q6+ffn-gate/up=nvfp4+imatrix): REJECTED 0.0561/91.1%. v2 (Q5_K_M+imatrix):
+REJECTED 0.0197/88.5%. Decomposition insight: attn precision drives top-1,
+FFN quant drives mean-KLD → **v3 designed = Q6_K base + ffn gate/up/down=q5_k
++ imatrix (~20GB), NOT YET RUN.** Community NVFP4 rejected earlier (0.0693/
+82.8%). Bar: ≤~0.012 / ≥95% (prod Q6_K baseline 0.0060/96.2%). Honest note:
+v3 may still miss → verdict would be "Q6_K stays" (valid close). Workflow +
+gate_server.sh in quant-lab/; BF16 source: D:\spill\qwen38-bf16-src (52G);
+imatrix_v1.dat kept (349K-token local corpus).
+**CORPUS v2 (next quant step): user delivered agent-session harvest at
+D:\spill\sessions\FULL** (64 jsonl, 4 harnesses, MANIFEST.csv + README with
+formats; hermes/qwen-local = on-distribution gold; weight hermes>claude-
+subagents>codex>droid; cap per-file so 31MB monster doesn't dominate).
+**LAW: use FULL (redacted) ONLY — unredacted exists but keys add zero imatrix
+value and must never near the repo. Corpus + raw sessions NEVER committed.**
+Plan: format-aware extractor (schemas sampled: hermes role/content/tool_calls/
+reasoning_content lines; claude message.content blocks; codex response_item
+payloads; droid message blocks) → calib_v2 ~4-6MB → imatrix v2 → v3 gate.
+
+**DISK LAW arc (C: nearly filled, OS at risk — full law in repo CLAUDE.md):**
+WSL writes grow ext4.vhdx on C: 1:1, NEVER auto-shrink. I churned ~144GB in a
+day inside WSL staging quant artifacts = C: fell to 37GB → user fury,
+justified. Now: WSL contents ~130-186GB, vhdx 396GB (= reusable envelope:
+writes inside it don't grow C:; ceiling law = vhdx must NOT exceed 396GB —
+check via powershell Get-Item before big writes). **PENDING USER STEP:
+compaction** (wsl --shutdown + Optimize-VHD, commands in transcript; kills
+serving+session ~10min; sparse-mode recommended same moment) → C: recovers
+~150-200GB. D:\spill = staging home (129GB free): bf16 source, uncensored
+model (22G, serve-from-D for trials), sessions. Don't hoard re-downloadables
+(2Gbps line). User deleted Qwen3.6 + minis + many personal dirs same night.
+
+**OTHER STANDING FACTS:** serving = ORIGINAL weights (uncensored deferred,
+future roster-testing arc, gate each before trust). Slot-vision picks
+(#27278/#27274) SHIPPED+gated, rollback .pre-slotvision. n4 REJECTED (keep
+n3). Optimization board g1/OPTIMIZATION-BLAST-2026-08-17.md (R2 DRY anti-
+spiral, R3 failover tier on 3090s, R4 aux mesh, watchlist P/D-disagg #21266).
+Ops lessons memory'd: pgrep 7th strike (waiter self-match = eternal invisible
+shells), arc-end task audit, disk law, interrupted-prompt ≠ instruction.
+
+**WHAT WE WILL DO (priority order):**
+1. TONIGHT: yarn A'+B' battery = SOAK (launch after corpus-v2 build; spec in
+   AUTO-TIER-DESIGN.md + yarntax/; --parallel 1; A' stations then B' arms).
+   Watch for ANY gpu event → forensics per CLAUDE.md checklist.
+2. Corpus v2 extractor + imatrix v2 + quant v3 gate (~1h GPU) — before or
+   after battery per GPU availability.
+3. VACATION MODE (build tomorrow, user pre-disposed): crash-relauncher
+   (pid-dead AND no stop-sentinel → relaunch last profile + notify; does NOT
+   violate no-boot-autostart), Discord/Moltbot alerts (health, VmSwap>0,
+   decode-collapse, VRAM), weekly idle mtest cron. Stability sign-off before
+   user leaves.
+4. User-run compaction at a natural stop (after battery).
+5. Then the standing queue: rope verdict → auto-tier; board tiers; upstream
+   PR (USER opens); uncensored roster gates.
+
 ## OPEN ARCS
 
 - **GPU-lost / vision-on-hybrid: CLOSED+SHIPPED 2026-08-16** (fix trio gated
