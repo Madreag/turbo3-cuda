@@ -2817,12 +2817,6 @@ static int ggml_cuda_try_gdn_cache_fusion(
 
     fused_state_cpy.data        = (float *) dst->data; // rollback group 0 (newest)
     fused_state_cpy.slot_stride = K > 1 ? (int64_t) (dst->nb[2] / sizeof(float)) : 0;
-    {
-        // bounds guard: dst is a view into the recurrent cache — the legal write
-        // span runs from dst->data to the end of the ROOT buffer, not the view.
-        const ggml_tensor * root = dst->view_src ? dst->view_src : dst;
-        fused_state_cpy.extent   = (int64_t) ((ggml_nbytes(root) - (size_t) ((const char *) dst->data - (const char *) root->data)) / sizeof(float));
-    }
     return skip;
 }
 

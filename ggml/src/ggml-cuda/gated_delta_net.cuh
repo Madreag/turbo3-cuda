@@ -5,7 +5,6 @@
 struct ggml_cuda_gated_delta_net_fused_cache {
     float * data;        // rollback slot 0
     int64_t slot_stride; // between rollback slots (0 when K==1)
-    int64_t extent;      // addressable floats from `data` to the end of the view's ROOT buffer (bounds guard)
 };
 
 void ggml_cuda_op_gated_delta_net(ggml_backend_cuda_context & ctx, ggml_tensor * dst);
