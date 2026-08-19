@@ -377,3 +377,25 @@ NEXT: SOAK 2 launched 18:47 on NEW VACATION PROFILE start-long-38-vac.sh:
 Frees ~2.2GB KV => ~3GB VRAM free => out of the paging regime. Survives where
 320K died in 60s => trigger isolated + vacation-safe 5090 config exists.
 Dies => Gen3 rung, and vacation serving goes to the 3090 package.
+
+## PHYSICAL CULPRIT FOUND (21:00-21:20): CHARRED 12VHPWR ADAPTER — REPLACED
+
+- SOAK 3 (graphs-off arm: GGML_CUDA_DISABLE_GRAPHS=1 + LLAMA_GRAPH_REUSE_DISABLE=1
+  + CKPT=0, 196K vac profile): serving up 18:56:51 @28.5GB (4GB free), DEAD by
+  18:57:21 — 30s, at 29.6W. THIRD identical ramp death; graphs/checkpoint theory
+  REFUTED (as were near-cap and all software theories before it).
+- USER OPENED THE CASE: 12VHPWR 16-pin ADAPTER-END connector CHARRED (yellow->
+  orange discoloration, likely brittle); GPU-side socket looks OK (minimal char
+  inside, pins good); GPU also slightly loose on bracket screws despite brace.
+  Adapter REPLACED with new MSI spare. Old adapter KEPT (photograph for RMA).
+- WHY IT FITS EVERYTHING NOTHING ELSE DID: degraded contacts fail on LOAD
+  TRANSIENTS, not steady draw — all deaths were <2min after a cold load ramp at
+  ~30W; the steady-draw 600W gate passed while oscillating 360W serving died 3x.
+  Progressive char = the mid-Aug cliff. The +800/+100mV OC period = the cooker.
+  TWO-FAULT PICTURE: loose slot seating -> PCIe link margin (Gen4 genuinely
+  helped: load/compute class fixed) + charred adapter -> transient deaths
+  (serving class). Insider-flight theory checked: box IS Insider Dev 26300.8085
+  but build installed MAR 15 — spans both eras, not the change-point.
+- SOAK 4 launched 21:25 on NEW ADAPTER, standard vac profile (graphs restored),
+  6h. Prior 3 runs died in 30-60s => minutes of survival = adapter confirmed;
+  6h = vacation gate. GPU-Z 16-pin voltage watch recommended (healthy ~12.0V).
