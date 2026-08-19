@@ -391,20 +391,21 @@ board: ASRock X870E Taichi BIOS 3.20 (2025-02, pre-dates 5090 Gen5 link fixes).
 Our prodrome: nvlddmkm Event-14 CMDre bursts ~5 min before death (watchdog hook).
 POWER LIMIT is the WRONG KNOB — deaths at 30W/27C.
 
-**FIX LADDER:** (1) BIOS: PCIe x16 slot Gen5->Gen4 + disable ASPM/L1 substates
--> rerun the era-perplexity killer (g1/build/bin/llama-perplexity + models/
-Qwen3.6-27B-Q6_K.gguf + quant-lab/calib_v2.txt -ngl 99 -c 4096; dies <60s if
-unfixed; full 385-chunk pass = verdict) -> then LATEST-stack serving soak.
-(2) NVIDIA clean-install 610.74+ (absorbs old DDU step; twin thread hints 610.74
-helps). (3) BIOS/AGESA update = the proper Gen5 fix, post-vacation. (4) If Gen4
-still dies: RMA track — dossier = g1/crash-forensics/ (incl. 0818-qwen36-death/)
-+ Minidump 081826-27359-01.dmp + MEMORY.DMP + OVERNIGHT-REPORT tables.
-WSL 2.6.3 -> 2.7.0+ upgrade = hygiene afterward (Blackwell dxgkrnl fixes).
-
-**STANDING RULES:** GPU load on the 5090 only for ladder-step verdicts until a
-full soak passes. Serving DOWN pending verdict. All Aug-17/18 hardening KEEPS
-(innocent but correct); deferred science queue (yarn B', v3 imatrix A/B, DRY,
-chunked validation, prefetch A/B) runs once a soak-stable GPU exists.
+**FIX EXECUTED + GATE-CONFIRMED (18:25-18:35): BIOS PCIe Gen4 = THE FIX.**
+User set PCIE1/2 Gen5->Gen4 (only change; BIOS ASPM untouched, Windows ASPM
+off). pcie.link.gen.max now 4. The era-perplexity killer (died <60s at 30W
+pre-fix) ran 385/385 chunks ~10 min at up to 600W/71C/stock, rc=0, GPU healthy
+after. Idle link-speed cycling (Gen1.1/2/4 in GPU-Z) = normal dynamic downshift,
+pins 4 under load. 6h LATEST-STACK SOAK launched 18:36 (soak-latest.sh: SPEED
+profile + chat load + deep prefills + slot save/restore PCIe stress + Event-14
+prodrome auto-stop; logs at D:\spill\qwen36-test\soak-*).
+SOAK PASS => 5090 vacation-eligible; serving stays UP after completion.
+If soak EVER fails: next rungs remain driver clean-install 610.88 (staged
+D:\spill\driver-610.88.exe; expectation: hygiene, no targeted fix in it) ->
+Gen3 -> RMA (dossier g1/crash-forensics/ + Minidumps). POST-TRIP proper fixes:
+BIOS/AGESA update, card+power-cable reseat, optional Gen5 retrial after those,
+WSL 2.6.3->2.7.0+ hygiene. Deferred science queue (yarn B', v3 imatrix A/B,
+DRY, chunked validation, prefetch A/B) unblocks after a stable soak record.
 
 **VACATION PLAN (user leaves ~Aug 19-20): 3090 FALLBACK SERVING — PACKAGE
 COMPLETE (2026-08-18 ~14:45), staged at D:\spill\fallback-3090\ (17GB):**

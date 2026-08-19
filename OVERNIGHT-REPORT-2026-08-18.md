@@ -340,3 +340,18 @@ of downtime-until-return. Decision menu in morning analysis.
   (later AGESA) as the proper Gen5 fix — bigger intervention, post-vacation. (4) If Gen4 fails:
   hardware/RMA with dossier (crash-forensics/ + Minidump + this log). WSL 2.6.3->2.7.0+ upgrade
   = hygiene item afterward. Vacation: 3090 fallback remains the safety plan regardless.
+
+## GEN4 VERDICT GATE: PASS (2026-08-18 18:25-18:35)
+
+User set BIOS PCIE1/PCIE2 Gen5->Gen4 (only change; ASPM left as-was in BIOS,
+Windows-side already off). Driver now reports pcie.link.gen.max = 4.
+GATE: era-perplexity + Qwen3.6 + calib_v2 — the exact workload that died <60s
+at 30W pre-fix — ran ALL 385 chunks (~10 min) at up to 600W / 71C / stock
+clocks / Gen4 pinned, rc=0, GPU exited healthy (41C P8). PPL 9.80 (chat corpus,
+recorded not gated). GPU-Z idle link-speed cycling (1.1/2/4) = normal dynamic
+downshift, pins to 4 under load.
+=> PCIe Gen5 link-margin theory CONFIRMED BY THE FIX GATE. Both historic death
+phases (bulk H2D load; sustained compute+D2H) passed at full power.
+NEXT: 6h latest-stack soak launched 18:36 (SPEED profile + mixed load incl.
+deep prefill + slot save/restore PCIe stress + Event-14 prodrome auto-stop).
+Soak PASS => 5090 vacation-eligible per handoff rules.
