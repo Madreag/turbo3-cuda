@@ -399,3 +399,15 @@ Dies => Gen3 rung, and vacation serving goes to the 3090 package.
 - SOAK 4 launched 21:25 on NEW ADAPTER, standard vac profile (graphs restored),
   6h. Prior 3 runs died in 30-60s => minutes of survival = adapter confirmed;
   6h = vacation gate. GPU-Z 16-pin voltage watch recommended (healthy ~12.0V).
+
+## SOAK PASS (2026-08-19 03:44): 320K SPEED PROFILE, 6H, NEW ADAPTER — 5090 CLEARED
+
+21:44:33 -> 03:44:35, 3,583 cycles: ~350 deep prefills (24K tok), ~255 slot
+save/restore bulk-PCIe cycles, 530-600W sustained, VRAM static 31.83->31.91GB,
+Gen4 pinned, ZERO GPU/driver events, zero Event-14 prodromes. 13 gen-fail blips
+(0.36%) all proxy-side upstream-health misclassification around slot swaps
+(post-trip proxy fix noted). VERDICT: the charred 12VHPWR adapter was the
+serving killer; replacement + Gen4 = stable box. The 5090 is vacation-eligible
+on this profile pending morning user decisions (watchdog arming, profile pick).
+NIGHTQUEUE now running: native-262 vs yarn-1.25 speed+battery, v3 KLD gates,
+chunked op-tests -> serving restore + MORNING-SUMMARY.
