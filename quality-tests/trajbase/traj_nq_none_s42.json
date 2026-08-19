@@ -1,0 +1,125 @@
+{
+ "label": "nq_none_s42",
+ "seed": 42,
+ "temp": 1.0,
+ "depths": [
+  64000,
+  128000
+ ],
+ "pass": 11,
+ "total": 12,
+ "results": [
+  {
+   "depth": 64000,
+   "test": "hops-2",
+   "pass": true,
+   "want": "Quill Harbor",
+   "got": "Quill Harbor"
+  },
+  {
+   "depth": 64000,
+   "test": "hops-3",
+   "pass": true,
+   "want": "487",
+   "got": "487"
+  },
+  {
+   "depth": 64000,
+   "test": "hops-4",
+   "pass": true,
+   "want": "52-M856",
+   "got": "52-M856"
+  },
+  {
+   "depth": 64000,
+   "test": "ledger",
+   "pass": true,
+   "score": "8/8",
+   "want": {
+    "R1": "-6",
+    "R2": "38",
+    "R3": "2",
+    "R4": "45",
+    "R5": "-29",
+    "R6": "19",
+    "R7": "26",
+    "R8": "-9"
+   },
+   "got": {
+    "R1": "-6",
+    "R2": "38",
+    "R3": "2",
+    "R4": "45",
+    "R5": "-29",
+    "R6": "19",
+    "R7": "26",
+    "R8": "-9"
+   }
+  },
+  {
+   "depth": 64000,
+   "test": "correction",
+   "pass": true,
+   "want": "6516",
+   "got": "6516"
+  },
+  {
+   "depth": 64000,
+   "test": "code-traj",
+   "pass": true,
+   "err": null
+  },
+  {
+   "depth": 128000,
+   "test": "hops-2",
+   "pass": true,
+   "want": "Fort Casker",
+   "got": "Fort Casker"
+  },
+  {
+   "depth": 128000,
+   "test": "hops-3",
+   "pass": true,
+   "want": "720",
+   "got": "720"
+  },
+  {
+   "depth": 128000,
+   "test": "hops-4",
+   "pass": true,
+   "want": "86-P476",
+   "got": "86-P476"
+  },
+  {
+   "depth": 128000,
+   "test": "ledger",
+   "pass": false,
+   "score": "0/8",
+   "want": {
+    "R1": "1",
+    "R2": "39",
+    "R3": "-37",
+    "R4": "-60",
+    "R5": "21",
+    "R6": "2",
+    "R7": "33",
+    "R8": "16"
+   },
+   "got": {}
+  },
+  {
+   "depth": 128000,
+   "test": "correction",
+   "pass": true,
+   "want": "6717",
+   "got": "6717"
+  },
+  {
+   "depth": 128000,
+   "test": "code-traj",
+   "pass": true,
+   "err": null
+  }
+ ],
+ "ts": "2026-08-19 03:59"
+}

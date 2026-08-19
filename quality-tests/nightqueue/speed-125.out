@@ -1,0 +1,9 @@
+[nq-125] shallow code  seed42 depth=  2465 decode= 124.1 t/s accept=0.775
+[nq-125] shallow code  seed43 depth=  2465 decode= 135.5 t/s accept=0.872
+[nq-125] shallow prose seed42 depth=  2647 decode=  91.9 t/s accept=0.482
+[nq-125] shallow prose seed43 depth=  2647 decode=  93.3 t/s accept=0.492
+[nq-125] 38K     code  seed42 depth= 38563 decode= 123.4 t/s accept=0.933
+[nq-125] 38K     code  seed43 depth= 38563 decode= 112.1 t/s accept=0.817
+[nq-125] 38K     prose seed42 depth= 49775 decode=  78.7 t/s accept=0.508
+[nq-125] 38K     prose seed43 depth= 49775 decode=  81.9 t/s accept=0.537
+[nq-125] DONE 8 cells

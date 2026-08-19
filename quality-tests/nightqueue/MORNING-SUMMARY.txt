@@ -1,0 +1,55 @@
+=== MORNING SUMMARY 2026-08-19 ===
+--- milestones:
+23:26:08 NIGHTQUEUE armed — waiting for soak verdict
+03:45:24 soak verdict: COMPLETE (PASS)
+03:47:38 speed probe none
+03:49:14 speed probe none rc=0
+03:49:14 battery nq_none_s42 start
+03:59:08 battery nq_none_s42 end rc=0
+03:59:40 speed probe 125
+04:01:13 speed probe 125 rc=0
+04:01:13 battery nq_125_s42 start
+04:14:41 battery nq_125_s42 end rc=0
+04:14:52 battery nq_none_s43 start
+04:28:18 battery nq_none_s43 end rc=0
+04:28:30 battery nq_125_s43 start
+04:38:36 battery nq_125_s43 end rc=0
+04:40:46 gate v3imx2: KLD 157-prompt
+04:44:04 gate v3imx2 RESULT: mean=0.014648035390515889 top1=?
+04:45:50 gate v3imx1: KLD 157-prompt
+04:49:07 gate v3imx1 RESULT: mean=0.01690202338496908 top1=?
+04:49:13 chunked op-tests start
+04:49:19 chunked op-tests rc=0 : 55 result lines, 0 FAIL
+04:49:24 restoring 320K SPEED serving
+04:51:36 SERVING RESTORED (320K SPEED)
+--- battery tails:
+== nq_125_s42.out
+  code-traj@128000: PASS
+
+TOTAL: 11/12 → /home/erol/ai/turboquant/turboquant-g1/quality-tests/trajbase/traj_nq_125_s42.json
+== nq_125_s43.out
+  code-traj@128000: PASS
+
+TOTAL: 11/12 → /home/erol/ai/turboquant/turboquant-g1/quality-tests/trajbase/traj_nq_125_s43.json
+== nq_none_s42.out
+  code-traj@128000: PASS
+
+TOTAL: 11/12 → /home/erol/ai/turboquant/turboquant-g1/quality-tests/trajbase/traj_nq_none_s42.json
+== nq_none_s43.out
+  code-traj@128000: PASS
+
+TOTAL: 11/12 → /home/erol/ai/turboquant/turboquant-g1/quality-tests/trajbase/traj_nq_none_s43.json
+--- speed lines:
+== speed-125.out
+[nq-125] 38K     code  seed42 depth= 38563 decode= 123.4 t/s accept=0.933
+[nq-125] 38K     code  seed43 depth= 38563 decode= 112.1 t/s accept=0.817
+[nq-125] 38K     prose seed42 depth= 49775 decode=  78.7 t/s accept=0.508
+[nq-125] 38K     prose seed43 depth= 49775 decode=  81.9 t/s accept=0.537
+== speed-none.out
+[nq-none] 38K     code  seed42 depth= 38563 decode= 115.4 t/s accept=0.857
+[nq-none] 38K     code  seed43 depth= 38563 decode= 120.4 t/s accept=0.906
+[nq-none] 38K     prose seed42 depth= 49775 decode=  78.8 t/s accept=0.507
+[nq-none] 38K     prose seed43 depth= 49775 decode=  83.8 t/s accept=0.564
+--- KLD gates:
+04:44:04 gate v3imx2 RESULT: mean=0.014648035390515889 top1=?
+04:49:07 gate v3imx1 RESULT: mean=0.01690202338496908 top1=?

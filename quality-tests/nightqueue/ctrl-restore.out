@@ -1,0 +1,3 @@
+0.06.309.387 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 327680, kv_unified = 'false'
+LONG-38 profile: llama-server PID 131027 at ctx=327680 yarn=1.25 (Qwen3.8-27B, MTP on)
+proxy PID:       131098 (0.0.0.0:8130, health OK)

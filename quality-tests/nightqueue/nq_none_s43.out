@@ -1,0 +1,18 @@
+== depth 64000 ==
+  hops-2@64000: PASS (want 'Sarn Break' got 'Sarn Break')
+  hops-3@64000: PASS (want '576' got '576')
+  hops-4@64000: PASS (want '69-L535' got '69-L535')
+  ledger@64000: 8/8
+  correction@64000: PASS
+  [depth 64000 wall 260s]
+  code-traj@64000: PASS
+== depth 128000 ==
+  hops-2@128000: PASS (want 'Osier Point' got 'Osier Point')
+  hops-3@128000: PASS (want '300' got '300')
+  hops-4@128000: PASS (want '56-N409' got '56-N409')
+  ledger@128000: 1/8
+  correction@128000: PASS
+  [depth 128000 wall 414s]
+  code-traj@128000: PASS
+
+TOTAL: 11/12 → /home/erol/ai/turboquant/turboquant-g1/quality-tests/trajbase/traj_nq_none_s43.json

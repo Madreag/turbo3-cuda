@@ -411,3 +411,25 @@ serving killer; replacement + Gen4 = stable box. The 5090 is vacation-eligible
 on this profile pending morning user decisions (watchdog arming, profile pick).
 NIGHTQUEUE now running: native-262 vs yarn-1.25 speed+battery, v3 KLD gates,
 chunked op-tests -> serving restore + MORNING-SUMMARY.
+
+## NIGHTQUEUE RESULTS (2026-08-19 03:45-05:00) — THE MORNING MENU
+
+- B' 2x2 (native vs yarn1.25 x seeds 42/43, 64K+128K): ALL arms 11/12,
+  quality-IDENTICAL. Speed @38K code: native 120.4 t/s (accept 0.906) vs yarn
+  112.1 (accept 0.817) = +7.4% native via MTP acceptance; prose = wash.
+  => native-262K = same quality, faster code, zero interpolation; yarn-320K =
+  +65K window. Both vacation-viable; user picks.
+- ledger@128K scare RESOLVED by controls: all 4 keyless-server arms scored
+  0-1/8 vs history 8/8 -> CTRL-A (same restrictfix binary + --ctx-checkpoints 2)
+  = 8/8. BINARY EXONERATED; artifact of harness servers lacking checkpoints.
+  LAW: battery/test servers MUST carry --ctx-checkpoints 2 for prod parity
+  (fix omega/nightqueue launch templates).
+- v3 imatrix gates: v3imx2 mean 0.0146 / top1 91.7%; v3imx1 0.0169 / 91.1%
+  (bar 0.012 / 95%; prod Q6_K 0.0060/96.2%). BOTH REJECTED — but calibration
+  thesis VALIDATED (+13.6% KLD from imatrix v2 on identical recipe) and the
+  recipe trend line holds (0.0561 -> 0.0197 -> 0.0146). v4 = raise FFN precision.
+- chunked GDN prefill: 55/55 GPU op-tests PASS (correctness gate green;
+  perf A/B = post-trip).
+- 04:59:37 serving restored + verified (server+proxy 200, 31.8GB, Gen4).
+  FULL NIGHT: soak PASS + 4 battery arms + 2 speed probes + 2 KLD gates +
+  op-tests + 2 controls, zero GPU events across ~9h of continuous load.

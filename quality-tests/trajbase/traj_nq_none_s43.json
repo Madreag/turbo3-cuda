@@ -1,0 +1,127 @@
+{
+ "label": "nq_none_s43",
+ "seed": 43,
+ "temp": 1.0,
+ "depths": [
+  64000,
+  128000
+ ],
+ "pass": 11,
+ "total": 12,
+ "results": [
+  {
+   "depth": 64000,
+   "test": "hops-2",
+   "pass": true,
+   "want": "Sarn Break",
+   "got": "Sarn Break"
+  },
+  {
+   "depth": 64000,
+   "test": "hops-3",
+   "pass": true,
+   "want": "576",
+   "got": "576"
+  },
+  {
+   "depth": 64000,
+   "test": "hops-4",
+   "pass": true,
+   "want": "69-L535",
+   "got": "69-L535"
+  },
+  {
+   "depth": 64000,
+   "test": "ledger",
+   "pass": true,
+   "score": "8/8",
+   "want": {
+    "R1": "0",
+    "R2": "34",
+    "R3": "-10",
+    "R4": "34",
+    "R5": "60",
+    "R6": "4",
+    "R7": "23",
+    "R8": "0"
+   },
+   "got": {
+    "R1": "0",
+    "R2": "34",
+    "R3": "-10",
+    "R4": "34",
+    "R5": "60",
+    "R6": "4",
+    "R7": "23",
+    "R8": "0"
+   }
+  },
+  {
+   "depth": 64000,
+   "test": "correction",
+   "pass": true,
+   "want": "3932",
+   "got": "3932"
+  },
+  {
+   "depth": 64000,
+   "test": "code-traj",
+   "pass": true,
+   "err": null
+  },
+  {
+   "depth": 128000,
+   "test": "hops-2",
+   "pass": true,
+   "want": "Osier Point",
+   "got": "Osier Point"
+  },
+  {
+   "depth": 128000,
+   "test": "hops-3",
+   "pass": true,
+   "want": "300",
+   "got": "300"
+  },
+  {
+   "depth": 128000,
+   "test": "hops-4",
+   "pass": true,
+   "want": "56-N409",
+   "got": "56-N409"
+  },
+  {
+   "depth": 128000,
+   "test": "ledger",
+   "pass": false,
+   "score": "1/8",
+   "want": {
+    "R1": "-27",
+    "R2": "28",
+    "R3": "2",
+    "R4": "30",
+    "R5": "66",
+    "R6": "1",
+    "R7": "-65",
+    "R8": "0"
+   },
+   "got": {
+    "R8": "0"
+   }
+  },
+  {
+   "depth": 128000,
+   "test": "correction",
+   "pass": true,
+   "want": "6520",
+   "got": "6520"
+  },
+  {
+   "depth": 128000,
+   "test": "code-traj",
+   "pass": true,
+   "err": null
+  }
+ ],
+ "ts": "2026-08-19 04:28"
+}

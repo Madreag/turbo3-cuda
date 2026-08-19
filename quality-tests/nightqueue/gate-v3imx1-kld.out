@@ -1,0 +1,28 @@
+Server: http://localhost:8131
+Type: v3imx1
+Wiki: /home/erol/ai/turboquant/wikitext-103-raw-v1/wiki.test.raw
+Loaded 157 prompts (~2048 tokens each)
+
+Collecting logprobs for 157 prompts...
+  20/157
+  40/157
+  60/157
+  80/157
+  100/157
+  120/157
+  140/157
+
+Saved 157 logprob sets to kldnvfp4/kld_logprobs_v3imx1.json
+
+Computing KL divergence vs f16...
+
+==================================================
+KL Divergence: v3imx1 vs f16
+==================================================
+  KLD (mean):     0.016902
+  KLD p50/p90:    0.005579 / 0.041737
+  KLD p99/max:    0.168723 / 0.199851
+  Top-1 agree:    91.1%
+  Delta-p RMS:    0.080419
+  N prompts:      157
+  Summary: kldnvfp4/kld_summary_v3imx1.json

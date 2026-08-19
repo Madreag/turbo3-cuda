@@ -1,0 +1,10 @@
+== depth 128000 ==
+  hops-2@128000: PASS (want 'Osier Point' got 'Osier Point')
+  hops-3@128000: PASS (want '300' got '300')
+  hops-4@128000: PASS (want '56-N409' got '56-N409')
+  ledger@128000: 8/8
+  correction@128000: PASS
+  [depth 128000 wall 313s]
+  code-traj@128000: PASS
+
+TOTAL: 6/6 → /home/erol/ai/turboquant/turboquant-g1/quality-tests/trajbase/traj_ctrl_ckpt_s43.json
