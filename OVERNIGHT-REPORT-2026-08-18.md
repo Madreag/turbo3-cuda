@@ -355,3 +355,25 @@ phases (bulk H2D load; sustained compute+D2H) passed at full power.
 NEXT: 6h latest-stack soak launched 18:36 (SPEED profile + mixed load incl.
 deep prefill + slot save/restore PCIe stress + Event-14 prodrome auto-stop).
 Soak PASS => 5090 vacation-eligible per handoff rules.
+
+## SOAK 1 (320K profile) DIED — GEN4 NECESSARY BUT NOT SUFFICIENT; NEAR-CAP IS
+## THE RESIDUAL TRIGGER (user's day-one hypothesis vindicated)
+
+18:38:02 serving up (320K SPEED profile, VRAM 31,767->31,853 MiB = ~750MB free).
+Chat gens c3-c7 all HTTP 200. Dead by 18:39:02 (NVML gone), bugcheck, reboot
+18:43. Light load (360W, 51C) — nothing like the gate's 600W.
+THE A/B THAT MATTERS: gate at 22.4GB used / 9GB free = 10 min flawless at 600W;
+serving at 31.85GB used / 750MB free = dead in ~60s at 360W. Post-Gen4 the
+failure requires NEAR-CAP VRAM: WDDM eviction/paging traffic over the degraded
+link (continuous small-transfer DMA — different regime than bulk load, which
+Gen4 fixed). Consistent with history: prod served 16h stretches at this exact
+config pre-degradation; crashes began when 320K-static-VRAM shipped Aug 16-17
+AND the link margin collapsed — two factors, both real, user called the VRAM
+one on day one. LESSON (2nd strike): a gate must cover the FULL operating
+envelope — ours never entered the near-cap regime. Never say fixed off one
+regime's pass.
+NEXT: SOAK 2 launched 18:47 on NEW VACATION PROFILE start-long-38-vac.sh:
+196,608 ctx, native rope (no YaRN), slots-vac/, same MTP n3/sampling/alias.
+Frees ~2.2GB KV => ~3GB VRAM free => out of the paging regime. Survives where
+320K died in 60s => trigger isolated + vacation-safe 5090 config exists.
+Dies => Gen3 rung, and vacation serving goes to the 3090 package.

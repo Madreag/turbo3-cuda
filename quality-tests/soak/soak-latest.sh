@@ -17,7 +17,7 @@ echo $$ > $D/soak.pid
 log(){ echo "$(date +%H:%M:%S) $*" >> $D/soak-milestones.log; }
 
 log "SOAK START (latest stack, ${HOURS}h target)"
-bash $CONF/start-long-38.sh > $D/soak-launch.log 2>&1 || { log "LAUNCH FAILED"; exit 1; }
+bash $CONF/${LAUNCHER:-start-long-38.sh} > $D/soak-launch.log 2>&1 || { log "LAUNCH FAILED"; exit 1; }
 log "serving up (SPEED profile)"
 
 ( while true; do echo "$(date +%H:%M:%S),$(nvidia-smi --query-gpu=temperature.gpu,power.draw,clocks.sm,clocks.mem,memory.used,pcie.link.gen.current --format=csv,noheader,nounits 2>/dev/null | tr -d ' ')" >> $D/soak-telemetry.csv; sleep 30; done ) &
