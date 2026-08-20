@@ -552,3 +552,11 @@ Before EVER raising --parallel>1: run the distinct-answers gate (N identical
 greedy prompts concurrently must return identical answers — hybrid
 graph-reuse state-crossover class, ik#2260) and confirm MTP isn't silently
 dropped; today's parallel-1 + proxy serialization is a validated design.
+
+## REMOTE-ACCESS LEVER (2026-08-19): ParsecUp scheduled task
+Parsec runs in SERVICE mode (pservice, Automatic) — hosting survives reboots и
+works at the login screen. For a wedged in-session app: scheduled task
+`ParsecUp` (user context) relaunches parsecd on the desktop — trigger from WSL:
+`powershell.exe Start-ScheduledTask -TaskName ParsecUp` (verified live 08-19,
+exit 0, parsecd in session 1). Unwedge = Stop-Process -Name parsecd first
+(drops an active Parsec connection for seconds — warn user if they're remote).
