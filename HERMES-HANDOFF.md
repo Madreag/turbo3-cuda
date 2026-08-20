@@ -554,7 +554,7 @@ graph-reuse state-crossover class, ik#2260) and confirm MTP isn't silently
 dropped; today's parallel-1 + proxy serialization is a validated design.
 
 ## REMOTE-ACCESS LEVER (2026-08-19): ParsecUp scheduled task
-Parsec runs in SERVICE mode (pservice, Automatic) — hosting survives reboots и
+Parsec runs in SERVICE mode (pservice, Automatic) — hosting survives reboots and
 works at the login screen. For a wedged in-session app: scheduled task
 `ParsecUp` (user context) relaunches parsecd on the desktop — trigger from WSL:
 `powershell.exe Start-ScheduledTask -TaskName ParsecUp` (verified live 08-19,
