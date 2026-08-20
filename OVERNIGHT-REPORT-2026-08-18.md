@@ -433,3 +433,24 @@ chunked op-tests -> serving restore + MORNING-SUMMARY.
 - 04:59:37 serving restored + verified (server+proxy 200, 31.8GB, Gen4).
   FULL NIGHT: soak PASS + 4 battery arms + 2 speed probes + 2 KLD gates +
   op-tests + 2 controls, zero GPU events across ~9h of continuous load.
+
+## PRE-TRIP EVENING (08-19): OBLITERATED CERTIFIED + v5-UP GATE + LINEAGE FINDING
+
+- OBLITERATED Q6_K: downloaded (sha256 verified vs HF), installed to WSL,
+  launcher start-long-38o.sh. Shakedown 5/5 (multi-turn, TOOL CALLS, thinking,
+  vision via original mmproj, speed). Author params applied (temp 0, rep-pen
+  1.15, thinking off): functional but decode drops to ~20-47 t/s (acceptance
+  0.36-0.81 content-dependent — penalty x MTP interaction) vs ~88 on our
+  params. Author discloses MMLU -6pp vs stock; V2 promised. Tier: functionally
+  certified, quality UNGATED.
+- v5-UP (Q6_K + attn/output q8_0, imatrix-v2, 6.96 BPW, 23.8GB): fits 262K at
+  31.0GB/1.5GB free. GATE: mean 0.00815 / top-1 94.9% — WORSE than prod Q6_K
+  (0.0060/96.2) despite strictly more precision => impossible unless the BF16
+  SOURCE mismatches the reference lineage. NOT PROMOTED (gate is final). File
+  KEPT pending forensics.
+- SYSTEMIC FINDING: a hidden ~0.006-KLD lineage floor plausibly taxed ALL
+  tqmix quants (v1-v5). POST-TRIP CONTROL (decisive, ~50min): plain Q6_K from
+  our bf16-src, no overrides, gated — scores ~0.008 => floor proven
+  source-side; fix = rebuild from unsloth BF16 GGUF split. bf16-src on D: is
+  KEPT for this. (v3imx1-vs-imx2 calibration finding survives regardless —
+  same-source controlled.)
