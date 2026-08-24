@@ -72,3 +72,36 @@ Also worth: bakeoff V3 vs fine-tune (reasoning/code/gray/pagoda) like the 08-20 
 - Aligned: `models/qwen38/Qwen3.8-27B-Q6_K.gguf` via `start-long-38.sh` / `start-max-38.sh`
 - Self-quant option: OBLITERATUS ships full BF16 (55.6GB, 29 shards) — we could
   imatrix+up-quant the abliterated weights for a better escalation quant (post-trip).
+
+
+## CORRECTION (2026-08-24, verified from HF cards + search-agent research)
+**JonathanColetti/Qwen3.8-27B-Uncensored is a HERETIC ABLITERATION, not an SFT
+fine-tune** (card: "Refusal directions removed with Heretic, no fine-tuning, no
+additional training data"). This INVALIDATES the earlier "fine-tune is more
+robust to system prompts than V3" reasoning above — ALL our uncensored options
+(Coletti, Huihui, OrcaRouter, OBLITERATED) are abliterations = a "hole a system
+prompt can refill." Only an SFT firms the hole; NO 3.8 SFT with published KLD
+exists yet (closest = DavidAU 3.6 Heretic2 SFT, KLD 0.0469).
+
+**Measured field (third-party: returnity/r/LocalLLaMA + cards — NOT our gate):**
+- Coletti (our daily): KLD-vs-stock 0.1191, refusals 12/100 — HIGH-KL end.
+- huihui-ai/Huihui-Qwen3.8-27B-abliterated: KLD 0.0078 (lowest), 1.5% refuse,
+  MTP intact (ablates layers 18-51 only). GGUF exists — easy to test.
+- orcarouter/Qwen3.8-27B-Uncensored: MMLU +0.4 vs stock, 0-6% refuse, vision+MTP
+  preserved. SAFETENSORS-ONLY (no GGUF) — needs convert+quant on our pipeline.
+- OBLITERATUS V3 (escalation): MMLU -2.1pp, 0% hard+soft refuse (manual audit).
+
+**REVISED PLAN:** Don't blind-swap on Reddit numbers (our law: no folklore w/o
+on-stack A/B). Our OWN bakeoff had Coletti STRONG (4/4 reasoning, elaborate
+pagoda, complied) — tension with the 0.119/12% third-party numbers = different
+metrics. POST-TRIP BAKE-OFF: Coletti vs Huihui vs OrcaRouter vs V3 on OUR Q6_K,
+measuring KLD + refusal rate WITH vs WITHOUT a system prompt (the Hermes
+question). The real fix for the system-prompt-refill is stripping Hermes's system
+prompt on the uncensored slot (proxy), not a better abliteration.
+
+**DFlash2 verdict (search-agent, same-binary 5090 A/B):** MTP n-max 3 = 35.5 t/s
+vs DFlash2 = 33.2 t/s — DFlash2 SLOWER same-binary; earlier "+28%" was a
+cross-build confound. +1.3GB cost, vision HTTP 500, PR #27342 unmerged, CUDA
+greedy not bit-identical (#27407). STAY MTP n-max 3. Nobody has published
+DFlash2 + turbo4/TCQ (Anbeeld: draft KV must stay standard cache, not TCQ).
+Steal: FR-Spec MTP vocab-trim (Pernici gist, lossless 0/14042 MMLU mismatch).
