@@ -146,3 +146,20 @@ still off (empty <think></think>), liberation intact (gray complies). Template
 file staged in ~/.config/llama-tcq/. NOTE: if serving any future model with a
 stripped/custom template, check `grep -c tool_call <template>` — 0 = will leak;
 override with the stock tool template.
+
+## LIVE HERMES TEST (2026-08-24) — V3 agentic behavior
+- TOOL-CALLING: fixed (see tool-template fix above); verified parsing in Hermes.
+- SUBAGENT ORCHESTRATION: **FAILS** — V3 spun on repeated skill-reads (~8 tiny
+  <200-tok tasks/7s, GPU ~50% duty), no meaningful work. Cause: temp-0 stuck-loop
+  (author warned "pure greedy can stall in agents") + abliteration weakening
+  multi-agent coordination. Killing the subagent FIXED it.
+- SINGLE-AGENT (subagent killed): **WORKS** — GPU 600W/95%, varied substantive
+  tasks, no tiny-loop relapse. Task rate/power vary naturally with tool-processing.
+- VERDICT: V3 usable for DIRECT/single-agent Hermes tasks; NOT for subagent
+  orchestration. Reinforces V3 = uncensored-query/escalation model, NOT a general
+  agent-driver daily. If ever used agentically, set OBL_TEMP=0.2 (anti-loop) and
+  avoid subagent delegation.
+- GPU-UTIL NOTE: single long gen = sustained ~97%/600W; agentic/subagent traffic =
+  bursty ~50% avg (many short calls + orchestration gaps) — duty cycle, not
+  inefficiency. SM~97% while mem-util~45% during gen = our fused-MMA+MTP+DeltaNet
+  keeps compute busy (not memory-stalled like vanilla dense decode).
