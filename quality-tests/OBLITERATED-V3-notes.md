@@ -131,3 +131,18 @@ OrcaRouter(needs quant) · OBLITERATUS-V3 · Blackfrost-Abliterated — all as O
 Q6_K+imatrix on turbo4 KV, 450-prompt refusal set, measure KLD + refusal WITH vs
 WITHOUT system prompt, + a run with each vendor's baked template. Settles which-weights
 + does-proxy-prompt-fix-work + is-baked-approach-worth-it in one matrix.
+
+## TOOL-CALLING FIX (2026-08-24) — V3 template regression
+SYMPTOM: tool calls printed as text in Hermes chat (not parsed). ROOT CAUSE:
+V3's author REBUILT the chat template and stripped tool-calling — V3's baked
+template is 506 B, text-only, NO `tools`/`tool_calls` handling (V1's template
+HAD tools, which is why V1 worked). With `--jinja` on the stripped template,
+llama.cpp can't parse the model's Qwen tool-call syntax → leaks to chat.
+FIX (V3 launcher ONLY, other models untouched): added
+`--chat-template-file ~/.config/llama-tcq/qwen38-tool-template.jinja` (the
+canonical STOCK Qwen3.8 template, 8952 B, full tool support + enable_thinking)
+to start-long-38o.sh. VERIFIED: tool_call parses (get_weather ✓), thinking
+still off (empty <think></think>), liberation intact (gray complies). Template
+file staged in ~/.config/llama-tcq/. NOTE: if serving any future model with a
+stripped/custom template, check `grep -c tool_call <template>` — 0 = will leak;
+override with the stock tool template.
