@@ -105,3 +105,29 @@ cross-build confound. +1.3GB cost, vision HTTP 500, PR #27342 unmerged, CUDA
 greedy not bit-identical (#27407). STAY MTP n-max 3. Nobody has published
 DFlash2 + turbo4/TCQ (Anbeeld: draft KV must stay standard cache, not TCQ).
 Steal: FR-Spec MTP vocab-trim (Pernici gist, lossless 0/14042 MMLU mismatch).
+
+## FIELD MAP UPDATE 2 (2026-08-24, search-agent + verified repos)
+Blackfrost/RedPillReader store adds 2 SKUs (both verified exist):
+- **Blackfrost-AI/Qwen3.8-27B-ABLITERATED** (GGUF Q6_K 22.4GB drop-in, NO imatrix):
+  weight abliteration + **BAKED liberation prompt in the Jinja ("Snapback")** —
+  OPPOSITE of OBLITERATUS "naked". Refusal 11/450=2.4% but measured WITH their
+  template + on NVFP4 derivative; no KLD/MMLU published.
+- **Blackfrost-Research/M.O.G.-SEC-27B** (NVFP4): first 3.8 **SFT** (cyber-specialized),
+  MMLU-Pro val 92.9% n=70, 4/300 refuse. KILLERS for us: NVFP4 (we gate-rejected
+  0.069/82.8%), **native MTP DEAD after the FT** (default→DFlash2), cyber-skewed,
+  1M YaRN always-on, dual-GPU serve. = proof a 3.8 SFT exists, wrong impl for us.
+
+**KEY INSIGHT (most valuable from both research turns): the system-prompt problem
+is UNIVERSAL across design philosophies.** OBLITERATUS-naked: harness prompt REFILLS
+the hole. Blackfrost-baked: harness prompt REPLACES the liberation prompt. BOTH die
+under Hermes's arbitrary system prompt. => FIX IS ARCHITECTURAL: **inject a liberation
+preamble at the PROXY on the uncensored slot** (in front of whatever Hermes sends), so
+liberation survives regardless of client + regardless of which abliteration. This is
+the real answer, model-agnostic. (A general 3.8 SFT would also solve it — none exists;
+MOG-SEC is cyber+NVFP4+MTP-dead. Watch for a general one.)
+
+**DEFINITIVE POST-TRIP BAKE-OFF (field now fully mapped):** stock · Coletti · Huihui ·
+OrcaRouter(needs quant) · OBLITERATUS-V3 · Blackfrost-Abliterated — all as OUR
+Q6_K+imatrix on turbo4 KV, 450-prompt refusal set, measure KLD + refusal WITH vs
+WITHOUT system prompt, + a run with each vendor's baked template. Settles which-weights
++ does-proxy-prompt-fix-work + is-baked-approach-worth-it in one matrix.
