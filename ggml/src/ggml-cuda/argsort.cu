@@ -2,6 +2,10 @@
 
 #ifdef GGML_CUDA_USE_CUB
 #    include <cub/cub.cuh>
+// CCCL 3.4 (CUDA 13.x) no longer pulls the cuda:: iterator factories in
+// transitively via <cub/cub.cuh>; include them explicitly so the CUB fast
+// path below stays available instead of silently falling back.
+#    include <cuda/iterator>
 #    if (CCCL_MAJOR_VERSION >= 3 && CCCL_MINOR_VERSION >= 1)
 #        define STRIDED_ITERATOR_AVAILABLE
 #    endif
